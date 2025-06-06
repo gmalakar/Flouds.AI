@@ -1,0 +1,13 @@
+fastapi[standard]
+uvicorn
+optimum[onnxruntime]
+transformers
+torch
+redis
+types-redis
+numpy
+onnxruntime
+onnx
+pydantic
+typing-extensions
+python-dotenv

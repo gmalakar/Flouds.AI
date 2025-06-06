@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+*.env
+*.log
+logs/
+venv/
+.venv/
+.envrc
+.idea/
+.vscode/
+lib/
+scripts/
+app/onnx/
+pyvenv.cfg
