@@ -5,6 +5,7 @@ class BaseResponse(BaseModel):
     """
     Base response model for API responses.
     """
+
     success: bool = Field(
         True, description="Indicates whether the operation was successful."
     )

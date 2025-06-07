@@ -14,12 +14,13 @@ import numpy as np
 import onnxruntime as ort
 from optimum.onnxruntime import ORTModelForSeq2SeqLM
 from transformers import AutoTokenizer, GenerationConfig
+
 from app.config.config_loader import ConfigLoader
 from app.config.onnx_config import OnnxConfig
 from app.logger import get_logger
-from app.modules.concurrent_dict import ConcurrentDict
 from app.models.summarization_response import SummarizationResponse, SummaryResults
-from app.setup import APP_SETTINGS  
+from app.modules.concurrent_dict import ConcurrentDict
+from app.setup import APP_SETTINGS
 
 logger = get_logger("summarizer_service")
 
@@ -62,7 +63,7 @@ class TextSummarizer:
         """
         Preprocesses input text for summarization.
         """
-        return f"{prepend_text}{text}" if prepend_text else text 
+        return f"{prepend_text}{text}" if prepend_text else text
 
     @classmethod
     def _get_tokenizer(cls, tokenizer_path: str) -> Any:
@@ -78,12 +79,14 @@ class TextSummarizer:
         """
         Returns a cached ONNX encoder session.
         """
-        provider = APP_SETTINGS.server.model_session_provider or 'CPUExecutionProvider'
-        logger.debug(f"Getting ONNX encoder session for path: {encoder_model_path} with provider: {provider}")
+        provider = APP_SETTINGS.server.model_session_provider or "CPUExecutionProvider"
+        logger.debug(
+            f"Getting ONNX encoder session for path: {encoder_model_path} with provider: {provider}"
+        )
         providers = [provider]
         return cls._encoder_sessions.get_or_add(
             (encoder_model_path, provider),
-            lambda: ort.InferenceSession(encoder_model_path, providers=providers)
+            lambda: ort.InferenceSession(encoder_model_path, providers=providers),
         )
 
     @classmethod
@@ -134,13 +137,13 @@ class TextSummarizer:
             success=True,
             message="Summarization generated successfully",
             model=model_to_use,
-            results=SummaryResults(summary="")
+            results=SummaryResults(summary=""),
         )
         start_time = time.time()
 
         try:
             model_config = ConfigLoader.get_onnx_config(model_to_use)
-            logger.info(
+            logger.debug(
                 f"Summarizing text using model: {model_to_use} and task: {model_config.summarization_task}..."
             )
             model_to_use_path = os.path.join(
@@ -169,18 +172,13 @@ class TextSummarizer:
 
             summary = None
             if model_config.use_seq2seqlm:
-                logger.info(f"Using Seq2SeqLM model: {model_to_use_path}")
+                logger.debug(f"Using Seq2SeqLM model: {model_to_use_path}")
                 model = cls.get_model(model_to_use_path)
                 summary = cls._summarizeSeq2SeqLm(
-                    model,
-                    tokenizer,
-                    model_config,
-                    text,
-                    max_length,
-                    model_to_use_path
+                    model, tokenizer, model_config, text, max_length, model_to_use_path
                 )
             else:
-                logger.info(f"Using encoder/decoder model: {model_to_use_path}")
+                logger.debug(f"Using encoder/decoder model: {model_to_use_path}")
                 encoder_session = cls._get_encoder_session(encoder_model_path)
                 decoder_session = cls._get_decoder_session(decoder_model_path)
                 summary = cls._summarizeOther(
@@ -200,7 +198,7 @@ class TextSummarizer:
             return response
         finally:
             elapsed = time.time() - start_time
-            logger.info(f"Summarization completed in {elapsed:.2f} seconds.")
+            logger.debug(f"Summarization completed in {elapsed:.2f} seconds.")
             response.time_taken = elapsed
             return response
 
@@ -235,12 +233,13 @@ class TextSummarizer:
         Summarize using a HuggingFace Seq2SeqLM model.
         """
         try:
- 
+
             num_beams = model_config.num_beams
             early_stopping = model_config.early_stopping
             use_generation_config = model_config.use_generation_config
             inputs = tokenizer(
-                TextSummarizer._preprocess_text(text, model_config.prepend_text), return_tensors="pt"
+                TextSummarizer._preprocess_text(text, model_config.prepend_text),
+                return_tensors="pt",
             )
             generate_kwargs = {
                 "max_length": max_length,
@@ -254,17 +253,15 @@ class TextSummarizer:
                 model.generation_config = generation_config
                 forced_bos_token_id = (
                     getattr(generation_config, "forced_bos_token_id", None)
-                    if use_generation_config else None
+                    if use_generation_config
+                    else None
                 )
                 if forced_bos_token_id is None:
                     forced_bos_token_id = getattr(tokenizer, "bos_token_id", None)
                 if forced_bos_token_id is not None:
                     generate_kwargs["forced_bos_token_id"] = forced_bos_token_id
 
-            summary_ids = model.generate(
-                **inputs,
-                **generate_kwargs
-            )
+            summary_ids = model.generate(**inputs, **generate_kwargs)
             summary_text = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
             if not summary_text.strip():
                 logger.warning("Empty summary generated.")
@@ -288,13 +285,15 @@ class TextSummarizer:
         Summarize using ONNX encoder/decoder sessions.
         """
         try:
-            input_text = TextSummarizer._preprocess_text(text, model_config.prepend_text)
+            input_text = TextSummarizer._preprocess_text(
+                text, model_config.prepend_text
+            )
             padid = model_config.padid
             input_names = model_config.inputnames
             output_names = model_config.outputnames
             decoder_input_names = model_config.decoder_inputnames
 
-            logger.info(
+            logger.debug(
                 f"Input names: {input_names}, Output names: {output_names}, Decoder input names: {decoder_input_names}"
             )
 
@@ -381,13 +380,13 @@ class TextSummarizer:
             else:
                 # Single pass, output is token ids
                 decoder_inputs = {
-                        getattr(
-                            decoder_input_names,
-                            "encoder_output",
-                            "encoder_hidden_states",
-                        ): encoder_outputs[0],
-                        decoder_input_name: decoder_input_ids,
-                    }
+                    getattr(
+                        decoder_input_names,
+                        "encoder_output",
+                        "encoder_hidden_states",
+                    ): encoder_outputs[0],
+                    decoder_input_name: decoder_input_ids,
+                }
                 if (
                     hasattr(input_names, "mask")
                     and getattr(input_names, "mask", None)
@@ -399,7 +398,7 @@ class TextSummarizer:
                 decoder_inputs = {
                     k: v for k, v in decoder_inputs.items() if v is not None
                 }
-                logger.info(
+                logger.debug(
                     f"Decoder inputs: {decoder_inputs.keys()}, shapes: {[v.shape for v in decoder_inputs.values()]}"
                 )
                 try:

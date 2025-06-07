@@ -38,6 +38,7 @@ class OnnxConfig(BaseModel):
     decoder_inputnames: DecoderInputNames = Field(default_factory=DecoderInputNames)
     use_generation_config: bool = Field(default=False)
     padid: int = 0
+    pooling_strategy: str = Field(default="mean")
     projected_dimension: int = Field(default=256)
     encoder_onnx_model: str = Field(default="encoder_model.onnx")
     decoder_onnx_model: str = Field(default="decoder_model.onnx")

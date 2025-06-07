@@ -49,7 +49,7 @@ class ConfigLoader:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         base_path = os.path.join(base_dir, config_file_name)
 
-        logger.info(f"Loading config from {base_path}")
+        logger.debug(f"Loading config from {base_path}")
 
         def deep_update(d, u):
             for k, v in u.items():

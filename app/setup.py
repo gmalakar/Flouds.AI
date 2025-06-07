@@ -1,15 +1,16 @@
 import importlib
 import os
 import subprocess
+
 import nltk
 
 from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
 
-logger = get_logger("setup")
-
 # Load settings using AppSettingsLoader
 APP_SETTINGS = ConfigLoader.get_app_settings()
+
+logger = get_logger("setup")
 
 logger.info(f"Environment: {os.getenv('FASTAPI_ENV', 'Production')}")
 
@@ -43,4 +44,4 @@ try:
     logger.info("NLTK stopwords corpus already downloaded.")
 except LookupError:
     nltk.download("stopwords")
-    logger.info("NLTK stopwords corpus downloaded successfully.")   
+    logger.info("NLTK stopwords corpus downloaded successfully.")

@@ -50,7 +50,7 @@
             "use_decoder_input": true
         },
         "outputnames": {
-            "output": "sentence_embedding"
+            "output": "last_hidden_state"
         },
         "encoder_onnx_model": "model.onnx"
     },

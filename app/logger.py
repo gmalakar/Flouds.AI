@@ -12,7 +12,10 @@ def get_logger(
     log_path = os.path.join(log_dir, log_file)
 
     logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
+    level = (
+        logging.DEBUG if os.getenv("FASTAPI_DEBUG_MODE", "0") == "1" else logging.INFO
+    )
+    logger.setLevel(level)
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     # Console handler
