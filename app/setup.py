@@ -1,6 +1,7 @@
 import importlib
 import os
 import subprocess
+import nltk
 
 from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
@@ -35,3 +36,11 @@ def dynamic_import(module_name):
 
 install_server(APP_SETTINGS.server.type.lower())
 SERVER_MODULE = dynamic_import(APP_SETTINGS.server.type.lower())
+
+#
+try:
+    nltk.data.find("corpora/stopwords")
+    logger.info("NLTK stopwords corpus already downloaded.")
+except LookupError:
+    nltk.download("stopwords")
+    logger.info("NLTK stopwords corpus downloaded successfully.")   

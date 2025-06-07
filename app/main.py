@@ -2,13 +2,13 @@ import asyncio
 import logging
 
 from app import app
-from app.routers import summarizer
+from app.routers import summarizer, embedder
 from app.setup import APP_SETTINGS, SERVER_MODULE
 
 logger = logging.getLogger("main")
 
 app.include_router(summarizer.router)
-
+app.include_router(embedder.router)
 
 @app.get("/")
 def root() -> dict:

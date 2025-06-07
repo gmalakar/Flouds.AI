@@ -1,5 +1,9 @@
-python onnx_loaders/export_model.py --model_name "sentence-transformers/all-MiniLM-L6-v2" --model_folder "all-MiniLM-L6-v2" --optimize
-python onnx_loaders/export_model.py --model_name "t5-small" --model_folder "t5-small" --task "seq2seq-lm"
-python onnx_loaders/export_model.py --model_name "t5-small" --model_folder "t5-small" --optimize
-python onnx_loaders/export_model.py --model_name "PleIAs/Pleias-Pico" --model_folder "Pleias-Pico" --optimize
-python onnx_loaders/export_model.py --model_name "PleIAs/Pleias-Pico" --model_folder "Pleias-Pico" --optimize --task "seq2seq-lm"
+python onnx_loaders/export_model.py --model_name "sentence-transformers/all-MiniLM-L6-v2" --optimize
+python onnx_loaders/export_model.py --model_name "t5-small" --task "seq2seq-lm"
+python onnx_loaders/export_model.py --model_name "t5-small" --optimize
+python onnx_loaders/export_model.py --model_name "PleIAs/Pleias-Pico" --optimize
+python onnx_loaders/export_model.py --model_name "PleIAs/Pleias-Pico" --optimize --task "seq2seq-lm"
+python onnx_loaders/export_model.py --model_name "sentence-transformers/sentence-t5-base" --optimize --use_t5_encoder
+python onnx_loaders/export_model.py --model_name "sentence-transformers/paraphrase-MiniLM-L6-v2" --optimize
+python onnx_loaders/export_model.py --model_name "facebook/bart-large-cnn" --task "seq2seq-lm"
+python onnx_loaders/export_model.py --model_name "google/pegasus-cnn_dailymail" --task "seq2seq-lm"

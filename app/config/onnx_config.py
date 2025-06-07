@@ -9,6 +9,8 @@ class InputNames(BaseModel):
     eos_token_id: int = Field(default=1)
     position: Optional[str] = None
     tokentype: Optional[str] = None
+    use_decoder_input: bool = Field(default=False)
+    decoder_input_name: str = Field(default="decoder_input_ids")
 
 
 class OutputNames(BaseModel):
@@ -30,16 +32,17 @@ class OnnxConfig(BaseModel):
     inputnames: InputNames = Field(default_factory=InputNames)
     max_length: int = 256
     normalize: bool = True
-    summarization_task: str = Field(default="feature-extraction")
+    summarization_task: str = Field(default="seq2seq-lm")
+    embedder_task: str = Field(default="feature-extraction")
     outputnames: OutputNames = Field(default_factory=OutputNames)
     decoder_inputnames: DecoderInputNames = Field(default_factory=DecoderInputNames)
+    use_generation_config: bool = Field(default=False)
     padid: int = 0
-    pooling: bool = True
-    pooling_strategy: str = Field(default="mean")
     projected_dimension: int = Field(default=256)
     encoder_onnx_model: str = Field(default="encoder_model.onnx")
     decoder_onnx_model: str = Field(default="decoder_model.onnx")
     special_tokens_map_path: str = Field(default="special_tokens_map.json")
-    num_beams: int = 4
+    num_beams: int = 0
     early_stopping: bool = True
     use_seq2seqlm: bool = Field(default=False)
+    prepend_text: str = Field(default="summarize: ")

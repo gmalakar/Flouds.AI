@@ -11,3 +11,5 @@ onnx
 pydantic
 typing-extensions
 python-dotenv
+onnxruntime
+nltk

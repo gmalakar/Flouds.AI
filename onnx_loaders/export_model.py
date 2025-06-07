@@ -8,9 +8,6 @@ if __name__ == "__main__":
         "--model_name", required=True, help="HuggingFace model name or path"
     )
     parser.add_argument(
-        "--model_folder", required=True, help="Folder name for saving the ONNX model"
-    )
-    parser.add_argument(
         "--optimize", action="store_true", help="Whether to optimize the ONNX model"
     )
     parser.add_argument(
@@ -28,13 +25,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_cache", action="store_true", help="Whether to use cached model"
     )
+    parser.add_argument(
+        "--use_t5_encoder", action="store_true", help="Whether to use T5 encoder"
+    )
     args = parser.parse_args()
 
     export_and_optimize_onnx(
         model_name=args.model_name,
-        model_folder=args.model_folder,
         optimize=args.optimize,
         optimization_level=args.optimization_level,
         task=args.task,
+        use_t5_encoder=args.use_t5_encoder,
         use_cache=args.use_cache,
     )

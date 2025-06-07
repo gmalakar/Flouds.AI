@@ -1,55 +1,63 @@
 {
-    "allminilml6v2": {
+    "all-MiniLM-L6-v2": {
         "dimension": 368,
         "max_length": 256,
-        "padid": 0,
-        "pooling_strategy": "mean",
+        "embedder_task": "feature-extraction",
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask",
             "tokentype": "token_type_ids"
         },
         "outputnames": {
-            "output": "last_hidden_state",
-            "outputnext": "sentence_embedding"
-        }
+            "output": "last_hidden_state"
+        },
+        "encoder_onnx_model": "model.onnx"
+    },
+    "paraphrase-MiniLM-L6-v2": {
+        "dimension": 368,
+        "max_length": 256,
+        "embedder_task": "feature-extraction",
+        "inputnames": {
+            "input": "input_ids",
+            "mask": "attention_mask",
+            "tokentype": "token_type_ids"
+        },
+        "outputnames": {
+            "output": "last_hidden_state"
+        },
+        "encoder_onnx_model": "model.onnx"
     },
     "pleiaspico": {
         "dimension": 512,
         "max_length": 2048,
-        "padid": 3,
-        "pooling_strategy": "mean",
         "inputnames": {
             "input": "input_ids",
             "position": "position_ids",
             "mask": "attention_mask"
         },
         "outputnames": {
-            "output": "last_hidden_state",
-            "outputnext": "sentence_embedding"
+            "output": "last_hidden_state"
         }
     },
-    "sentencet5base": {
+    "sentence-t5-base": {
         "dimension": 768,
         "max_length": 512,
-        "padid": 0,
-        "pooling": false,
-        "pooling_strategy": "mean",
+        "embedder_task": "feature-extraction",
         "inputnames": {
             "input": "input_ids",
-            "mask": "attention_mask"
+            "mask": "attention_mask",
+            "decoder_input_names": "decoder_input_ids",
+            "use_decoder_input": true
         },
         "outputnames": {
-            "output": "sentence_embedding",
-            "outputnext": "token_embedding"
-        }
+            "output": "sentence_embedding"
+        },
+        "encoder_onnx_model": "model.onnx"
     },
     "t5-small": {
         "dimension": 512,
         "max_length": 512,
         "padid": 0,
-        "pooling": false,
-        "pooling_strategy": "mean",
         "summarization_task": "seq2seq-lm",
         "inputnames": {
             "input": "input_ids",
@@ -72,6 +80,36 @@
         "special_tokens_map_path": "special_tokens_map.json",
         "num_beams": 4,
         "early_stopping": true,
-        "use_seq2seqlm": false
+        "use_seq2seqlm": true
+    },
+    "bart-large-cnn": {
+        "dimension": 512,
+        "max_length": 512,
+        "padid": 1,
+        "summarization_task": "seq2seq-lm",
+        "inputnames": {
+            "input": "input_ids",
+            "mask": "attention_mask",
+            "eos_token_id": 1
+        },
+        "outputnames": {
+            "output": "last_hidden_state",
+            "logits": true,
+            "eos_token_id": 1
+        },
+        "decoder_inputnames": {
+            "encoder_output": "encoder_hidden_states",
+            "input": "input_ids",
+            "mask": "encoder_attention_mask",
+            "input_ids": 0
+        },
+        "decoder_onnx_model": "decoder_model.onnx",
+        "encoder_onnx_model": "encoder_model.onnx",
+        "special_tokens_map_path": "special_tokens_map.json",
+        "num_beams": 4,
+        "early_stopping": false,
+        "use_seq2seqlm": false,
+        "use_generation_config": true,
+        "prepend_text": ""
     }
 }

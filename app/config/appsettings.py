@@ -13,6 +13,7 @@ class ServerConfig(BaseModel):
     port: int = Field(default=5001)
     reload: bool = Field(default=True)
     workers: int = Field(default=4)
+    model_session_provider: str = Field(default="CPUExecutionProvider")
 
 
 class OnnxConfigSection(BaseModel):
