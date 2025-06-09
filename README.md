@@ -236,23 +236,84 @@ from app.services.summarizer_service import TextSummarizer
 req = SummarizationRequest(
     model="your-model-name",
     input="Your text to summarize.",
-    use_optimized_model=False
+    temperature=0.7,  # Optional: controls randomness, between 0.0 and 2.0
 )
 response = TextSummarizer.summarize(req)
 print(response.results.summary)
 ```
 
+- **model**: Name of the model to use (e.g., `"t5-small"`).
+- **input**: The text to be summarized.
+- **temperature**: (Optional) Sampling temperature for generation (float, 0.0–2.0, default: 0.0).
+
+#### Batch Summarization
+
+```python
+from app.models.summarization_request import SummarizationBatchRequest
+from app.services.summarizer_service import TextSummarizer
+
+batch_req = SummarizationBatchRequest(
+    model="your-model-name",
+    inputs=["Text 1 to summarize.", "Text 2 to summarize."],
+    temperature=0.5,  # Optional
+)
+responses = TextSummarizer.summarize_batch(batch_req)
+for resp in responses:
+    print(resp.results.summary)
+```
+
+---
+
 ### Example: Embedding
 
 ```python
+from app.models.embedding_request import EmbeddingRequest
 from app.services.embedder_service import SentenceTransformer
 
-embedding = SentenceTransformer.embed_text(
-    "Your text to embed.",
-    model_name="your-model-name"
+req = EmbeddingRequest(
+    model="your-model-name",
+    input="Your text to embed.",
+    projected_dimension=128,  # Optional, default: 128
 )
-print(embedding)
+response = SentenceTransformer.embed_text(
+    text=req.input,
+    model_to_use=req.model,
+    projected_dimension=req.projected_dimension,
+)
+print(response.results)
 ```
+
+- **model**: Name of the embedding model.
+- **input**: The text to embed.
+- **projected_dimension**: (Optional) Output embedding dimension (default: 128).
+
+#### Batch Embedding
+
+```python
+from app.models.embedding_request import EmbeddingBatchRequest
+from app.services.embedder_service import SentenceTransformer
+
+batch_req = EmbeddingBatchRequest(
+    model="your-model-name",
+    inputs=["Text 1 to embed.", "Text 2 to embed."],
+    projected_dimension=128,
+)
+response = SentenceTransformer.embed_batch_async(batch_req)
+```
+
+---
+
+### FastAPI Routers
+
+- **Summarizer endpoints** (see [`app/routers/summarizer.py`](app/routers/summarizer.py)):
+  - `POST /summarize` — accepts a `SummarizationRequest`, returns a `SummarizationResponse`
+  - `POST /summarize_batch` — accepts a `SummarizationBatchRequest`, returns a list of `SummarizationResponse`
+
+- **Embedder endpoints** (see [`app/routers/embedder.py`](app/routers/embedder.py)):
+  - `POST /embed` — accepts an `EmbeddingRequest`, returns an `EmbeddingResponse`
+  - `POST /embed_batch` — accepts an `EmbeddingBatchRequest`, returns an `EmbeddingBatchResponse`
+
+See the routers for full request/response models and details.
 
 ---
 

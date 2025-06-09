@@ -1,14 +1,14 @@
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.models.base_request import BaseRequest
 
 
-class SummarizationBaseRequest(BaseModel):
-    model: str = Field(
-        "t5-small",
-        description="The model name to use for summarization. Defaults to 't5-small'.",
-    )
-    use_optimized_model: bool = Field(
-        False,
-        description="Whether to use an optimized ONNX model for summarization. Defaults to False.",
+class SummarizationBaseRequest(BaseRequest):
+    temperature: float = Field(
+        0.0,
+        ge=0.0,
+        le=2.0,
+        description="The temperature to use for sampling. Must be between 0.0 and 2.0. Defaults to 0.0.",
     )
 
 

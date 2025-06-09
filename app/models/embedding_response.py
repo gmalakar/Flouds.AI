@@ -12,5 +12,15 @@ class EmbeddingResponse(BaseResponse):
     """
 
     results: List[EmbededChunk] = Field(
-        ..., description="A list of embedding chunks for the input text."
+        ..., description="A list of embedding chunks for the input texts."
+    )
+
+
+class EmbeddingBatchResponse(BaseResponse):
+    """
+    Response model for batch text embedding.
+    """
+
+    results: List[EmbeddingResponse] = Field(
+        ..., description="A list of embedding responses for the input texts."
     )

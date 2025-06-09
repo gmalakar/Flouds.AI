@@ -15,6 +15,7 @@ import numpy as np
 import onnxruntime as ort
 from optimum.onnxruntime import ORTModelForSeq2SeqLM
 from transformers import AutoConfig, GenerationConfig
+from scipy.special import softmax
 
 from app.config.config_loader import ConfigLoader
 from app.config.onnx_config import OnnxConfig
@@ -123,9 +124,7 @@ class TextSummarizer(BaseNLPService):
         """
         return TextSummarizer._raw_generation_configs.get_or_add(
             model_to_use_path,
-            lambda: TextSummarizer._load_raw_generation_config_dict(
-                model_to_use_path
-            ),
+            lambda: TextSummarizer._load_raw_generation_config_dict(model_to_use_path),
         )
 
     @staticmethod
@@ -150,8 +149,6 @@ class TextSummarizer(BaseNLPService):
         Returns the summary string, or None if summarization fails.
         """
         model_to_use = request.model or "t5-small"
-        text = request.input
-        use_optimized = request.use_optimized_model
 
         response = SummarizationResponse(
             success=True,
@@ -188,7 +185,7 @@ class TextSummarizer(BaseNLPService):
                 model_config.generation_config_path or "generation_config.json",
             )
 
-            tokenizer = cls._get_tokenizer(model_to_use_path)
+            tokenizer = cls._get_tokenizer_threadsafe(model_to_use_path)
             special_tokens = cls._get_special_tokens(special_tokens_path)
 
             # Allow override of config parameters
@@ -198,7 +195,7 @@ class TextSummarizer(BaseNLPService):
                 logger.debug(f"Using Seq2SeqLM model: {model_to_use_path}")
                 model = cls.get_model(model_to_use_path)
                 response = cls._summarizeSeq2SeqLm(
-                    response, model, tokenizer, model_config, text, model_to_use_path
+                    response, model, tokenizer, model_config, request, model_to_use_path
                 )
             else:
                 logger.debug(f"Using encoder/decoder model: {model_to_use_path}")
@@ -211,7 +208,7 @@ class TextSummarizer(BaseNLPService):
                     tokenizer,
                     special_tokens,
                     model_config,
-                    text,
+                    request,
                     model_to_use_path,
                 )
         except Exception as e:
@@ -239,7 +236,6 @@ class TextSummarizer(BaseNLPService):
                 SummarizationRequest(
                     model=request.model,
                     input=text,
-                    use_optimized_model=request.use_optimized_model,
                 ),
             )
             for text in request.inputs
@@ -258,8 +254,7 @@ class TextSummarizer(BaseNLPService):
             request = SummarizationRequest(
                 model=request.model,
                 input=text,
-                use_optimized_model=request.use_optimized_model,
-            )
+             )
             response = cls.summarize(request)
             responses.append(response)
         return responses
@@ -338,7 +333,7 @@ class TextSummarizer(BaseNLPService):
         model: ORTModelForSeq2SeqLM,
         tokenizer: Any,
         model_config: OnnxConfig,
-        text: str,
+        request: SummarizationRequest,
         tokenizer_path: str,
     ) -> SummarizationResponse:
         """
@@ -385,7 +380,7 @@ class TextSummarizer(BaseNLPService):
                 )
                 or False
             )
- 
+
             max_length = (
                 TextSummarizer._get_key_value_from_generation_dict(
                     "max_length", model_config, tokenizer_path, True
@@ -396,7 +391,7 @@ class TextSummarizer(BaseNLPService):
             use_generation_config = getattr(
                 model_config, "use_generation_config", False
             )
-            
+
             generate_kwargs = TextSummarizer._generate_kwargs.get_or_add(
                 tokenizer_path,
                 lambda: {},
@@ -441,9 +436,19 @@ class TextSummarizer(BaseNLPService):
                         generate_kwargs["forced_bos_token_id"] = forced_bos_token_id
 
             inputs = tokenizer(
-                TextSummarizer._preprocess_text(text, model_config.prepend_text),
+                TextSummarizer._preprocess_text(request.input, model_config.prepend_text),
                 return_tensors="pt",
             )
+            temperature = 0.0
+            if request.temperature is not None and request.temperature > 0.0:
+                temperature = request.temperature
+            else:
+                temperature = getattr(model_config, "temperature", 0.0)
+
+            if temperature is not None and temperature > 0.0:
+                logger.debug(f"Using temperature: {temperature} for summarization")
+                generate_kwargs["temperature"] = temperature
+            
             summary_ids = model.generate(**inputs, **generate_kwargs)
             summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True).strip()
             if not summary:
@@ -466,7 +471,7 @@ class TextSummarizer(BaseNLPService):
         tokenizer: Any,
         special_tokens: Set[str],
         model_config: OnnxConfig,
-        text: str,
+        request: SummarizationRequest,
         tokenizer_path: str,
     ) -> SummarizationResponse:
         """
@@ -481,16 +486,16 @@ class TextSummarizer(BaseNLPService):
                 f"Summarizing text using ONNX encoder/decoder inside _summarizeOther model: {tokenizer_path}"
             )
             pad_token_id = TextSummarizer._get_key_value_from_generation_dict(
-                "pad_token_id", model_config, tokenizer_path
+                "pad_token_id", model_config, tokenizer_path, True
             )
             eos_token_id = TextSummarizer._get_key_value_from_generation_dict(
-                "eos_token_id", model_config, tokenizer_path
+                "eos_token_id", model_config, tokenizer_path, True
             )
             max_length = TextSummarizer._get_key_value_from_generation_dict(
-                "max_length", model_config, tokenizer_path
+                "max_length", model_config, tokenizer_path, True
             )
             decoder_start_token_id = TextSummarizer._get_key_value_from_generation_dict(
-                "decoder_start_token_id", model_config, tokenizer_path
+                "decoder_start_token_id", model_config, tokenizer_path, True
             )
             gen_config_dict = TextSummarizer._get_generation_config(tokenizer_path)
 
@@ -516,6 +521,7 @@ class TextSummarizer(BaseNLPService):
                     decoder_start_token_id = pad_token_id
                 else:
                     decoder_start_token_id = pad_token_id
+
                 gen_config_dict["decoder_start_token_id"] = decoder_start_token_id
 
             decoder_start_token_id = gen_config_dict["decoder_start_token_id"]
@@ -532,7 +538,7 @@ class TextSummarizer(BaseNLPService):
             )
 
             input_text = TextSummarizer._preprocess_text(
-                text, model_config.prepend_text
+                request.input, model_config.prepend_text
             )
 
             # Tokenize input
@@ -585,6 +591,12 @@ class TextSummarizer(BaseNLPService):
             logger.debug(
                 f"Decoder inputs: {decoder_inputs.keys()}, values: {[v.shape if hasattr(v, 'shape') else type(v) for v in decoder_inputs.values()]}"
             )
+            temperature = 0.0
+            if request.temperature is not None and request.temperature > 0.0:
+                temperature = request.temperature
+            else:
+                temperature = getattr(model_config, "temperature", 0.0)
+
             # Greedy decoding loop (if logits output)
             is_logits = TextSummarizer._is_logits_output(
                 encoder_outputs, decoder_session
@@ -604,8 +616,15 @@ class TextSummarizer(BaseNLPService):
                         logger.exception("Decoder ONNX inference error")
                         break
                     logits_arr = decoder_outputs[0]  # shape: (1, cur_len, vocab_size)
+                    logits = logits_arr[:, -1, :][0] # shape: (1, cur_len, vocab_size)
                     # Take the last token's logits and argmax over vocab
-                    next_token_id = int(np.argmax(logits_arr[:, -1, :], axis=-1)[0])
+                    if temperature > 0.0:
+                        probs = softmax(logits / temperature)
+                        next_token_id = int(np.random.choice(len(probs), p=probs))
+                    else:
+                        # Greedy decoding
+                        next_token_id = int(np.argmax(logits))
+
                     logger.debug(
                         f"Step: {_}, next_token_id: {next_token_id}, eos_token_id: {eos_token_id}"
                     )
@@ -630,8 +649,10 @@ class TextSummarizer(BaseNLPService):
 
             output_ids = np.squeeze(output_ids)
             if np.any(output_ids < 0):
-                logger.error(f"Negative token IDs found: {output_ids}")
+                negatives = output_ids[output_ids < 0]
+                logger.error(f"Negative token IDs found: {negatives}")
             else:
+                logger.debug(f"About to call tokenizer.decode")
                 summary = tokenizer.decode(output_ids, skip_special_tokens=True)
                 summary = TextSummarizer._remove_special_tokens(summary, special_tokens)
                 if not summary:
@@ -649,15 +670,16 @@ class TextSummarizer(BaseNLPService):
 
 
 # HINTS:
-# - Use `use_generation_config` in your config to control whether to apply generation_config at inference.
+# - Use `use_generation_config` in your config to control if generation_config is applied at inference.
 # - Always initialize `summary = ""` at the start of summarization methods to avoid reference errors.
 # - Set `response_output.results` only once in the `finally` block for consistency.
 # - For ONNX models, only pass numpy arrays/tensors as ONNX session inputs (not config values like bool/int/str).
-# - For ONNX models, check for negative token IDs and log a warning if found.
+# - Check for negative token IDs in ONNX outputs and log a warning if found.
 # - Use `forced_bos_token_id` (not `rced_bos_token_id`) for logging and config.
 # - Remove special tokens after decoding to clean up the summary.
 # - Use try/except/finally to ensure robust error handling and logging.
-# - For batch summarization, use `summarize_batch` which calls `summarize` for each input.
+# - For batch summarization, use `summarize_batch`, which calls `summarize` for each input.
 # - When using generation_config, if a key is missing as an attribute, load the raw JSON as a dict for fallback.
 # - Use `auto_config` as a fallback for token IDs and model type if not found in configs.
 # - Only include tensor inputs in ONNX input dicts; use generation config values for controlling logic, not as ONNX inputs.
+# - Clear thread-local tokenizer cache in tests to ensure patching works as expected.

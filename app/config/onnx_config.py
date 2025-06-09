@@ -44,7 +44,8 @@ class OnnxConfig(BaseModel):
     decoder_onnx_model: str = Field(default="decoder_model.onnx")
     special_tokens_map_path: str = Field(default="special_tokens_map.json")
     generation_config_path: str = Field(default="generation_config.json")
-    num_beams: int = 0
+    num_beams: int = 0,
+    temperature: float = 0.0
     early_stopping: bool = True
     use_seq2seqlm: bool = Field(default=False)
     prepend_text: str = Field(default="summarize: ")

@@ -13,3 +13,5 @@ typing-extensions
 python-dotenv
 onnxruntime
 nltk
+scipy
+pytest-asyncio

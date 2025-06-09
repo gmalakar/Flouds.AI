@@ -4,8 +4,8 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.logger import get_logger
-from app.models.embedding_request import EmbeddingRequest
-from app.models.embedding_response import EmbeddingResponse
+from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
+from app.models.embedding_response import EmbeddingBatchResponse, EmbeddingResponse
 from app.services.embedder_service import SentenceTransformer
 
 router = APIRouter()
@@ -26,13 +26,11 @@ async def embed(request: EmbeddingRequest) -> EmbeddingResponse:
 @router.post(
     "/embed_batch",
     tags=["embedder"],
-    response_model=List[EmbeddingResponse],
+    response_model=EmbeddingBatchResponse,
 )
-async def embed_batch(
-    requests: List[EmbeddingRequest],
-) -> List[EmbeddingResponse]:
-    logger.debug(f"Embedding batch request, count: {len(requests)}")
-    responses: List[EmbeddingResponse] = await SentenceTransformer.embed_batch_async(
+async def embed_batch(requests: EmbeddingBatchRequest) -> EmbeddingBatchResponse:
+    logger.debug(f"Embedding batch request, count: {len(requests.inputs)}")
+    responses: EmbeddingBatchResponse = await SentenceTransformer.embed_batch_async(
         requests
     )
     return responses

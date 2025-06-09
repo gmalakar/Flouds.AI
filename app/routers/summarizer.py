@@ -1,4 +1,7 @@
+from typing import List
+
 from fastapi import APIRouter
+
 from app.logger import get_logger
 from app.models.summarization_request import (
     SummarizationBatchRequest,
@@ -6,7 +9,6 @@ from app.models.summarization_request import (
 )
 from app.models.summarization_response import SummarizationResponse
 from app.services.summarizer_service import TextSummarizer
-from typing import List
 
 router = APIRouter()
 logger = get_logger("router")

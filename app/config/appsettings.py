@@ -18,7 +18,7 @@ class ServerConfig(BaseModel):
 
 
 class OnnxConfigSection(BaseModel):
-    config_check_interval: int = Field(default=10)
+    rootpath: str = Field(default="./app/onnx")
 
 
 class LoggingConfig(BaseModel):

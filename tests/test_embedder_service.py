@@ -3,6 +3,8 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from app.models.embedding_request import EmbeddingBatchRequest
+from app.models.embedding_response import EmbeddingResponse, EmbededChunk
 from app.services.embedder_service import STOP_WORDS, SentenceTransformer
 
 
@@ -51,6 +53,7 @@ def dummy_model_config():
                 "logits": False,
             },
         )()
+
     return DummyConfig()
 
 
@@ -83,7 +86,7 @@ def test_split_text_into_chunks():
 
 @patch("app.services.embedder_service.SentenceTransformer._get_model_config")
 @patch(
-    "app.services.embedder_service.SentenceTransformer._get_tokenizer",
+    "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
 )
 @patch(
@@ -141,7 +144,9 @@ def test_embed_text_handles_exception(monkeypatch, dummy_model_config):
         SentenceTransformer, "_get_model_config", lambda *a, **k: dummy_model_config
     )
     monkeypatch.setattr(
-        SentenceTransformer, "_get_tokenizer", lambda *a, **k: DummyTokenizer()
+        SentenceTransformer,
+        "_get_tokenizer_threadsafe",
+        lambda *a, **k: DummyTokenizer(),
     )
     monkeypatch.setattr(
         SentenceTransformer, "_get_encoder_session", lambda *a, **k: DummySession()
@@ -152,3 +157,30 @@ def test_embed_text_handles_exception(monkeypatch, dummy_model_config):
     )
     assert response.success is False
     assert "Error generating embedding" in response.message
+
+
+@patch("app.services.embedder_service.SentenceTransformer._get_model_config")
+@patch(
+    "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
+    return_value=DummyTokenizer(),
+)
+@patch(
+    "app.services.embedder_service.SentenceTransformer._get_encoder_session",
+    return_value=DummySession(),
+)
+@pytest.mark.asyncio
+async def test_embed_batch_async(
+    mock_session, mock_tokenizer, mock_config, dummy_model_config
+):
+    mock_config.return_value = dummy_model_config
+    requests = EmbeddingBatchRequest(
+        model="dummy-model",
+        projected_dimension=8,
+        inputs=["First text.", "Second text."],
+    )
+    response = await SentenceTransformer.embed_batch_async(requests)
+    assert response.success
+    assert response.model == "dummy-model"
+    assert len(response.results) == 2
+    for chunk in response.results:
+        assert isinstance(chunk, EmbeddingResponse) or isinstance(chunk, EmbededChunk)

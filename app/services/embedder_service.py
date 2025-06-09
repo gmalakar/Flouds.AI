@@ -1,7 +1,7 @@
+import asyncio
 import os
 import re
 import time
-import asyncio
 from typing import Any, List, Optional
 
 import nltk
@@ -9,12 +9,13 @@ import numpy as np
 import onnxruntime as ort
 from nltk.corpus import stopwords
 from transformers import AutoTokenizer
+from scipy.special import softmax
 
 from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
 from app.models.embedded_chunk import EmbededChunk
-from app.models.embedding_request import EmbeddingRequest
-from app.models.embedding_response import EmbeddingResponse
+from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
+from app.models.embedding_response import EmbeddingBatchResponse, EmbeddingResponse
 from app.modules.concurrent_dict import ConcurrentDict
 from app.services.base_nlp_service import BaseNLPService
 
@@ -33,6 +34,7 @@ STOP_WORDS = set(stopwords.words("english"))
 # - Use debug logs for tracing.
 # - This class is thread-safe and caches tokenizers and ONNX sessions for efficiency.
 # - embed_batch_async uses run_in_executor to parallelize embedding for each request.
+
 
 class SentenceTransformer(BaseNLPService):
     """
@@ -173,7 +175,7 @@ class SentenceTransformer(BaseNLPService):
             logits = getattr(output_names, "logits", False)
             if logits or SentenceTransformer._is_logits_output(outputs, session):
                 logger.debug("Output is logits, applying softmax.")
-                embedding = SentenceTransformer._softmax(outputs[0])
+                embedding = softmax(outputs[0], axis=-1)
             else:
                 embedding = outputs[0]
             logger.debug(
@@ -252,22 +254,42 @@ class SentenceTransformer(BaseNLPService):
         return chunks
 
     @staticmethod
-    async def embed_batch_async(requests: List[EmbeddingRequest]) -> List[EmbeddingResponse]:
+    async def embed_batch_async(
+        requests: EmbeddingBatchRequest,
+    ) -> EmbeddingBatchResponse:
         """
         Asynchronously embed a batch of texts using run_in_executor for concurrency.
         """
-        loop = asyncio.get_event_loop()
-        tasks = [
-            loop.run_in_executor(
-                None,
-                SentenceTransformer.embed_text,
-                req.input,
-                req.model,
-                req.projected_dimension,
-            )
-            for req in requests
-        ]
-        return await asyncio.gather(*tasks)
+        start_time = time.time()
+        response = EmbeddingBatchResponse(
+            success=True,
+            message="Batch embedding generated successfully",
+            model=requests.model,
+            results=[],
+            time_taken=0.0,
+        )
+        try:
+            loop = asyncio.get_event_loop()
+            tasks = [
+                loop.run_in_executor(
+                    None,
+                    SentenceTransformer.embed_text,
+                    req,
+                    requests.model,
+                    requests.projected_dimension,
+                )
+                for req in requests.inputs
+            ]
+            response.results = await asyncio.gather(*tasks)
+        except Exception as e:
+            response.success = False
+            response.message = f"Error generating embedding: {str(e)}"
+            logger.exception("Unexpected error during embedding")
+        finally:
+            elapsed = time.time() - start_time
+            logger.debug(f"Embedding completed in {elapsed:.2f} seconds.")
+            response.time_taken = elapsed
+            return response
 
     @staticmethod
     def embed_text(
@@ -297,7 +319,7 @@ class SentenceTransformer(BaseNLPService):
                 model_to_use,
             )
             logger.debug(f"Using model path: {model_to_use_path}")
-            tokenizer = SentenceTransformer._get_tokenizer(model_to_use_path)
+            tokenizer = SentenceTransformer._get_tokenizer_threadsafe(model_to_use_path)
 
             model_path = os.path.join(
                 model_to_use_path,

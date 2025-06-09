@@ -79,8 +79,9 @@
         "special_tokens_map_path": "special_tokens_map.json",
         "num_beams": 4,
         "early_stopping": true,
-        "use_seq2seqlm": false
-    },
+        "use_seq2seqlm": false,
+        "temperature": 0.5
+     },
     "falconsai_text_summarization": {
         "dimension": 512,
         "max_length": 512,
@@ -105,7 +106,8 @@
         "special_tokens_map_path": "special_tokens_map.json",
         "num_beams": 4,
         "early_stopping": true,
-        "use_seq2seqlm": true
+        "use_seq2seqlm": true,
+        "temperature": 0.5
     },
     "bart-large-cnn": {
         "dimension": 512,

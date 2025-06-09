@@ -1,17 +1,26 @@
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.models.base_request import BaseRequest
 
 
-class EmbeddingRequest(BaseModel):
-    """
-    Request model for text summarization.
-    """
-
-    input: str = Field(..., description="The input text to be summarized.")
-    model: str = Field(
-        "sentence-t5-base",
-        description="The model name to use for summarization. Defaults to 'sentence-t5-base'.",
-    )
+class EmbeddingBaseRequest(BaseRequest):
     projected_dimension: int = Field(
-        256,
-        description="The dimension to which the embedding will be projected. Defaults to 256.",
+        128,
+        description="The dimension to which the embedding will be projected. Defaults to 128.",
     )
+
+
+class EmbeddingRequest(EmbeddingBaseRequest):
+    """
+    Request model for text embedding.
+    """
+
+    input: str = Field(..., description="The input text to be embedded.")
+
+
+class EmbeddingBatchRequest(EmbeddingBaseRequest):
+    """
+    Request model for batch text embedding.
+    """
+
+    inputs: list[str] = Field(..., description="The input texts to be embedded.")
