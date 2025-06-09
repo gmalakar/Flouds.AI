@@ -49,6 +49,7 @@
             "decoder_input_names": "decoder_input_ids",
             "use_decoder_input": true
         },
+        "logits": false,
         "outputnames": {
             "output": "last_hidden_state"
         },

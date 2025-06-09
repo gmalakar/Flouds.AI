@@ -22,6 +22,7 @@
 app/
   config/
     appsettings.json        # Main application configuration
+    onnx_config.json        # ONNX model configuration (see below)
   models/                   # Pydantic models for requests and responses
   modules/                  # Utility modules (e.g., concurrent dict)
   services/
@@ -72,6 +73,97 @@ Example:
 
 ---
 
+### onnx_config.json
+
+The `onnx_config.json` file (located in `app/config/onnx_config.json`) is used to configure all ONNX models that you want to use in your application.  
+Each entry in this file corresponds to a model you have downloaded and placed in your ONNX model folder.
+
+- **Key**: The model name (e.g., `"t5-small"`, `"sentence-t5-base"`)
+- **Value**: A dictionary describing the model's configuration, including:
+  - `dimension`, `max_length`, `embedder_task` or `summarization_task`
+  - `inputnames`, `outputnames`, `decoder_inputnames`
+  - ONNX model file paths (`encoder_onnx_model`, `decoder_onnx_model`)
+  - Special tokens, generation config, and other options
+
+**Example snippet:**
+```json
+"t5-small": {
+    "dimension": 512,
+    "max_length": 512,
+    "pad_token_id": 0,
+    "eos_token_id": 1,
+    "logits": false,
+    "summarization_task": "s2s",
+    "inputnames": {
+        "input": "input_ids",
+        "mask": "attention_mask"
+    },
+    "outputnames": {
+        "output": "last_hidden_state"
+    },
+    "decoder_inputnames": {
+        "encoder_output": "encoder_hidden_states",
+        "input": "input_ids",
+        "mask": "encoder_attention_mask"
+    },
+    "decoder_onnx_model": "decoder_model.onnx",
+    "encoder_onnx_model": "encoder_model.onnx",
+    "special_tokens_map_path": "special_tokens_map.json",
+    "num_beams": 4,
+    "early_stopping": true,
+    "use_seq2seqlm": false
+}
+```
+
+**How it works:**
+- You must add an entry for each ONNX model you want to use.
+- The paths and configuration options are defined according to the `embedder_task` (for embedding models) or `summarization_task` (for summarization models).
+- The structure of your ONNX model folder should match the configuration in this file.
+
+#### ONNX Model Folder Structure
+
+Model paths are organized by task name. For example, for summarization models with `summarization_task: "s2s"`, the path will be:
+
+```
+app/onnx/models/s2s/t5-small/
+    encoder_model.onnx
+    decoder_model.onnx
+    special_tokens_map.json
+```
+
+Here, `s2s` is the task name for summarization, and `t5-small` is the model name.  
+For embedding models, the folder will use the `embedder_task` value.
+
+**Note:**  
+The `summarization_task` or `embedder_task` values are typically set to the same value as the `--model_for` argument used when exporting models to ONNX (see `onnx_loaders/load_scripts.txt`).  
+However, you are free to use any folder name for your task (e.g., `s2s`, `fe`, or a custom name) and organize your ONNX models and configurations accordingly.  
+Just make sure the path you specify in `summarization_task` or `embedder_task` matches the folder structure where your ONNX models and config files are stored.
+
+If you want to use the same ONNX model for both summarization and embedding tasks, you can specify the same path for both `summarization_task` and `embedder_task` in your configuration.
+
+#### `use_seq2seqlm` Option
+
+There are two ways to perform summarization with ONNX models:
+
+- **`use_seq2seqlm: true`**  
+  If you set `use_seq2seqlm` to `true`, the service will use `ORTModelForSeq2SeqLM` and its `.generate()` method for summarization, which closely mimics HuggingFace's generate pipeline and is typically easier to use for supported models.
+
+- **`use_seq2seqlm: false`** (default)  
+  If you set `use_seq2seqlm` to `false` (or omit it), the service will use the lower-level `ort.InferenceSession` for both encoding and decoding, giving you more control and compatibility with custom ONNX models.
+
+Choose the option that matches your exported ONNX model and desired inference flow.
+
+#### Embedder Model Notes
+
+- For embedding models, if your ONNX model file is named `model.onnx`, you do **not** need to specify the model name in the config (`encoder_onnx_model` is optional).
+- If your model file has a different name, set `encoder_onnx_model` to the correct filename (see the `sentence-t5-base` example).
+- The `logits` flag:  
+  - If you know the encoder output is logits, set `"logits": true` in your config.
+  - If not set (default is `false`), the process will try to detect if the output is logits and process accordingly.
+- For embedders, ONNX `InferenceSession` will always be used.
+
+---
+
 ## Development & Environment
 
 - **FastAPI** is used as the main web framework for serving APIs.
@@ -110,13 +202,18 @@ python onnx_loaders/export_model.py --model_for "s2s" --model_name "PleIAs/Pleia
 python onnx_loaders/export_model.py --model_for "fe" --model_name "sentence-transformers/sentence-t5-base" --optimize --use_t5_encoder
 python onnx_loaders/export_model.py --model_for "s2s" --model_name "google/pegasus-cnn_dailymail" --task "seq2seq-lm"
 python onnx_loaders/export_model.py --model_for "s2s" --model_name "Falconsai/text_summarization" --task "seq2seq-lm" --model_folder "falconsai_text_summarization"
-python onnx_loaders/export_model.py --model_for "s2s" --model_name "facebook/bart-large-cnn" --task "text2text-generation" --use_cache
 ```
 
 - `"fe"` = feature extraction (embedding)
 - `"s2s"` = sequence-to-sequence (summarization)
 - `--optimize` enables ONNX graph optimizations
 - `--task` specifies the HuggingFace task type
+
+**Note:**  
+The `summarization_task` or `embedder_task` in your `onnx_config.json` are typically set to the same value as the `--model_for` argument used when exporting models to ONNX.  
+However, you can use any name for your task folder and keep your ONNX models and configurations organized as you prefer.  
+Just ensure the path you specify in `summarization_task` or `embedder_task` matches your folder structure.  
+If you want to use the same ONNX model for both tasks, you can specify the same path for both.
 
 See `onnx_loaders/load_scripts.txt` for more examples.
 
