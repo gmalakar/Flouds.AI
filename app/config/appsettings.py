@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class AppConfig(BaseModel):
     name: str = Field(default="Flouds PY")
+    debug: bool = Field(default=False)
 
 
 class ServerConfig(BaseModel):

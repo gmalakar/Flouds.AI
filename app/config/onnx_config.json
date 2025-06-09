@@ -2,7 +2,7 @@
     "all-MiniLM-L6-v2": {
         "dimension": 368,
         "max_length": 256,
-        "embedder_task": "feature-extraction",
+        "embedder_task": "fe",
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask",
@@ -16,7 +16,7 @@
     "paraphrase-MiniLM-L6-v2": {
         "dimension": 368,
         "max_length": 256,
-        "embedder_task": "feature-extraction",
+        "embedder_task": "fe",
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask",
@@ -42,7 +42,7 @@
     "sentence-t5-base": {
         "dimension": 768,
         "max_length": 512,
-        "embedder_task": "feature-extraction",
+        "embedder_task": "fe",
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask",
@@ -57,23 +57,47 @@
     "t5-small": {
         "dimension": 512,
         "max_length": 512,
-        "padid": 0,
-        "summarization_task": "seq2seq-lm",
+        "pad_token_id": 0,
+        "eos_token_id": 1,
+        "logits": false,
+        "summarization_task": "s2s",
         "inputnames": {
             "input": "input_ids",
-            "mask": "attention_mask",
-            "eos_token_id": 1
+            "mask": "attention_mask"
         },
         "outputnames": {
-            "output": "last_hidden_state",
-            "logits": true,
-            "eos_token_id": 1
+            "output": "last_hidden_state"
         },
         "decoder_inputnames": {
             "encoder_output": "encoder_hidden_states",
             "input": "input_ids",
-            "mask": "encoder_attention_mask",
-            "input_ids": 0
+            "mask": "encoder_attention_mask"
+        },
+        "decoder_onnx_model": "decoder_model.onnx",
+        "encoder_onnx_model": "encoder_model.onnx",
+        "special_tokens_map_path": "special_tokens_map.json",
+        "num_beams": 4,
+        "early_stopping": true,
+        "use_seq2seqlm": false
+    },
+    "falconsai_text_summarization": {
+        "dimension": 512,
+        "max_length": 512,
+        "pad_token_id": 0,
+        "eos_token_id": 1,
+        "logits": false,
+        "summarization_task": "s2s",
+        "inputnames": {
+            "input": "input_ids",
+            "mask": "attention_mask"
+        },
+        "outputnames": {
+            "output": "output_0"
+        },
+        "decoder_inputnames": {
+            "encoder_output": "encoder_hidden_states",
+            "input": "input_ids",
+            "mask": "encoder_attention_mask"
         },
         "decoder_onnx_model": "decoder_model.onnx",
         "encoder_onnx_model": "encoder_model.onnx",
@@ -85,31 +109,31 @@
     "bart-large-cnn": {
         "dimension": 512,
         "max_length": 512,
-        "padid": 1,
-        "summarization_task": "seq2seq-lm",
+        "min_length": 0,
+        "pad_token_id": 1,
+        "eos_token_id": 1,
+        "logits": false,
+        "summarization_task": "s2s",
         "inputnames": {
             "input": "input_ids",
-            "mask": "attention_mask",
-            "eos_token_id": 1
+            "mask": "attention_mask"
         },
         "outputnames": {
-            "output": "last_hidden_state",
-            "logits": true,
-            "eos_token_id": 1
+            "output": "last_hidden_state"
         },
         "decoder_inputnames": {
             "encoder_output": "encoder_hidden_states",
             "input": "input_ids",
-            "mask": "encoder_attention_mask",
-            "input_ids": 0
+            "mask": "encoder_attention_mask"
         },
         "decoder_onnx_model": "decoder_model.onnx",
         "encoder_onnx_model": "encoder_model.onnx",
         "special_tokens_map_path": "special_tokens_map.json",
+        "generation_config_path": "generation_config.json",
         "num_beams": 4,
-        "early_stopping": false,
-        "use_seq2seqlm": false,
-        "use_generation_config": true,
+        "early_stopping": true,
+        "use_seq2seqlm": true,
+        "use_generation_config": false,
         "prepend_text": ""
     }
 }

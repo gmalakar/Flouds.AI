@@ -8,9 +8,24 @@ class ConcurrentDict:
     Provides atomic get, set, remove, and get_or_add operations.
     """
 
-    def __init__(self):
+    def __init__(self, created_for: Any = None):
         self._lock = threading.Lock()
         self._dict = {}
+        self._created_for = created_for
+
+    @property
+    def created_for(self) -> Any:
+        """
+        Property to get the 'created_for' attribute.
+        """
+        return self._created_for
+
+    @created_for.setter
+    def created_for(self, value: Any) -> None:
+        """
+        Property to set the 'created_for' attribute.
+        """
+        self._created_for = value
 
     def get(self, key: Any, default: Optional[Any] = None) -> Any:
         """
@@ -44,3 +59,32 @@ class ConcurrentDict:
             value = factory()
             self._dict[key] = value
             return value
+
+    def is_empty(self) -> bool:
+        """
+        Thread-safe check if the dictionary is empty.
+        """
+        with self._lock:
+            return len(self._dict) == 0
+
+    @staticmethod
+    def add_missing_from_other(
+        target: "ConcurrentDict", source: "ConcurrentDict"
+    ) -> "ConcurrentDict":
+        """
+        Thread-safe: Adds only missing key-value pairs from source to target ConcurrentDict.
+        If target is None, creates a new ConcurrentDict and copies all items from source.
+        Existing keys in target are not overwritten.
+        Returns the updated target ConcurrentDict.
+        """
+        if not isinstance(target, ConcurrentDict) and target is not None:
+            raise TypeError("target must be a ConcurrentDict or None")
+        if not isinstance(source, ConcurrentDict):
+            raise TypeError("source must be a ConcurrentDict")
+        if target is None:
+            target = ConcurrentDict()
+        with target._lock, source._lock:
+            for key, value in source._dict.items():
+                if key not in target._dict:
+                    target._dict[key] = value
+        return target

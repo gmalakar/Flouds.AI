@@ -27,9 +27,10 @@ class DummySession:
 @pytest.fixture
 def dummy_model_config():
     class DummyConfig:
-        embedder_task = "feature-extraction"
+        embedder_task = "fe"
         encoder_onnx_model = "model.onnx"
         normalize = True
+        pooling_strategy = "mean"
         inputnames = type(
             "inputnames",
             (),
@@ -40,9 +41,16 @@ def dummy_model_config():
                 "tokentype": None,
                 "position": None,
                 "use_decoder_input": False,
+                "decoder_input_name": None,
             },
         )()
-
+        outputnames = type(
+            "outputnames",
+            (),
+            {
+                "logits": False,
+            },
+        )()
     return DummyConfig()
 
 

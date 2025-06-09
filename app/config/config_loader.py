@@ -18,7 +18,9 @@ class ConfigLoader:
         Performs a deep merge for nested config sections.
         """
         data = ConfigLoader._load_config_data("appsettings.json", True)
-        return AppSettings(**data)
+        appsettings = AppSettings(**data)
+        appsettings.app.debug = os.getenv("FASTAPI_DEBUG_MODE", "0") == "1"
+        return appsettings
 
     @staticmethod
     def get_onnx_config(key: str) -> OnnxConfig:

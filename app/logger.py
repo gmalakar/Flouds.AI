@@ -1,9 +1,14 @@
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 
 
 def get_logger(
-    name: str = "flouds", log_file: str = "app.log", log_dir: str = "logs"
+    name: str = "flouds",
+    log_file: str = "app.log",
+    log_dir: str = "logs",
+    max_bytes: int = 5 * 1024 * 1024,
+    backup_count: int = 3,  # 5 MB, 3 backups
 ) -> logging.Logger:
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
@@ -24,13 +29,15 @@ def get_logger(
         ch.setFormatter(formatter)
         logger.addHandler(ch)
 
-    # File handler
+    # Rotating file handler (auto-purge after max_bytes)
     if not any(
-        isinstance(h, logging.FileHandler)
+        isinstance(h, RotatingFileHandler)
         and h.baseFilename == os.path.abspath(log_path)
         for h in logger.handlers
     ):
-        fh = logging.FileHandler(log_path, encoding="utf-8")
+        fh = RotatingFileHandler(
+            log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+        )
         fh.setFormatter(formatter)
         logger.addHandler(fh)
 
