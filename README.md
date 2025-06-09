@@ -1,3 +1,7 @@
+> **Note:**  
+> This project is under active development and we are looking for more collaborators to help improve and extend Flouds.Py!  
+> If you're interested in contributing, please reach out or open a pull request.
+
 # Flouds.Py
 
 **Flouds.Py** is a Python-based NLP service framework for text summarization and embedding, supporting both HuggingFace Transformers and ONNX runtime models. It is designed for extensibility, robust error handling, and easy integration into larger applications or microservices.
