@@ -51,7 +51,11 @@ tests/
 All main configuration is handled via `app/config/appsettings.json`.  
 You can set server type, host, port, logging, ONNX options, and more.
 
-Example:
+**New:**  
+You can now set a custom ONNX model root path using the `rootpath` field in the `onnx` section.  
+If `rootpath` is not set, the default path (`./app/onnx`) will be used.
+
+**Example:**
 ```json
 {
     "app": {
@@ -66,7 +70,7 @@ Example:
         "model_session_provider": "CPUExecutionProvider"
     },
     "onnx": {
-        "config_check_interval": 10
+        "rootpath": "./app/onnx"
     },
     "logging": {
         "folder": "logs",
