@@ -7,3 +7,15 @@ repos:
     rev: 24.4.2
     hooks:
       - id: black
+  - repo: local
+    hooks:
+      - id: add-header
+        name: Add copyright header
+        entry: python add_header.py
+        language: system
+        files: \.py$
+      #- id: run-tests
+      #  name: Run pytest before commit
+      #  entry: python -m pytest
+      #  language: system
+      #  pass_filenames: false

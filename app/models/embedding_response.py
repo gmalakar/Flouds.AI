@@ -1,3 +1,9 @@
+# =============================================================================
+# File: embedding_response.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 from typing import List
 
 from pydantic import Field

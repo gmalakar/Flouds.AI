@@ -1,3 +1,9 @@
+# =============================================================================
+# File: config_loader.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import json
 import os
 
@@ -19,7 +25,20 @@ class ConfigLoader:
         """
         data = ConfigLoader._load_config_data("appsettings.json", True)
         appsettings = AppSettings(**data)
-        appsettings.app.debug = os.getenv("FASTAPI_DEBUG_MODE", "0") == "1"
+        # set ONNX_ROOT
+        appsettings.onnx.rootpath = os.getenv(
+            "FLOUDS_ONNX_ROOT", appsettings.onnx.rootpath
+        )
+        appsettings.server.port = int(os.getenv("FLOUDS_PORT", appsettings.server.port))
+        appsettings.server.host = os.getenv("FLOUDS_HOST", appsettings.server.host)
+        appsettings.server.type = os.getenv(
+            "FLOUDS_SERVER_TYPE", appsettings.server.type
+        )
+        appsettings.server.model_session_provider = os.getenv(
+            "FLOUDS_MODEL_SESSION_PROVIDER",
+            appsettings.server.model_session_provider,
+        )
+        appsettings.app.debug = os.getenv("FLOUDS_DEBUG_MODE", "0") == "1"
         return appsettings
 
     @staticmethod
@@ -68,7 +87,7 @@ class ConfigLoader:
 
         # Merge environment-specific config if requested and it exists (deep merge)
         if check_env_file:
-            env = os.getenv("FASTAPI_ENV", "Production")
+            env = os.getenv("FLOUDS_API_ENV", "Production")
             name, ext = os.path.splitext(config_file_name)
             env_path = os.path.join(base_dir, f"{name}.{env.lower()}{ext}")
             if os.path.exists(env_path):

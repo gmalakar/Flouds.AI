@@ -2,16 +2,14 @@ fastapi[standard]
 uvicorn
 optimum[onnxruntime]
 transformers
-torch
-redis
-types-redis
 numpy
 onnxruntime
 onnx
 pydantic
 typing-extensions
-python-dotenv
-onnxruntime
 nltk
 scipy
-pytest-asyncio
+# Optional, only if used:
+# torch
+# redis
+# python-dotenv

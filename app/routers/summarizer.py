@@ -1,3 +1,9 @@
+# =============================================================================
+# File: summarizer.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 from typing import List
 
 from fastapi import APIRouter
@@ -28,13 +34,11 @@ async def summarize(request: SummarizationRequest) -> SummarizationResponse:
 
 
 @router.post(
-    "/summarize_batch", tags=["summarize"], response_model=List[SummarizationResponse]
+    "/summarize_batch", tags=["summarize"], response_model=SummarizationResponse
 )
 async def summarize_batch(
     request: SummarizationBatchRequest,
-) -> List[SummarizationResponse]:
+) -> SummarizationResponse:
     logger.debug(f"Summarization batch request by model: {request.model}")
-    summary: List[SummarizationResponse] = await TextSummarizer.summarize_batch_async(
-        request
-    )
+    summary: SummarizationResponse = await TextSummarizer.summarize_batch_async(request)
     return summary

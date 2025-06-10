@@ -1,3 +1,9 @@
+# =============================================================================
+# File: summarizer_service.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 """
 summarizer_service.py
 
@@ -14,8 +20,9 @@ from typing import Any, Callable, Dict, List, Optional, Set
 import numpy as np
 import onnxruntime as ort
 from optimum.onnxruntime import ORTModelForSeq2SeqLM
-from transformers import AutoConfig, GenerationConfig
+from pydantic import BaseModel, Field
 from scipy.special import softmax
+from transformers import AutoConfig, GenerationConfig
 
 from app.config.config_loader import ConfigLoader
 from app.config.onnx_config import OnnxConfig
@@ -24,13 +31,19 @@ from app.models.summarization_request import (
     SummarizationBatchRequest,
     SummarizationRequest,
 )
-from app.models.summarization_response import SummarizationResponse, SummaryResults
+from app.models.summarization_response import SummarizationResponse
 from app.modules.concurrent_dict import ConcurrentDict
 from app.modules.utilities import Utilities
 from app.services.base_nlp_service import BaseNLPService
 from app.setup import APP_SETTINGS
 
 logger = get_logger("summarizer_service")
+
+
+class SummaryResults(BaseModel):
+    summary: str
+    message: str
+    success: bool = Field(default=True)
 
 
 class TextSummarizer(BaseNLPService):
@@ -154,9 +167,41 @@ class TextSummarizer(BaseNLPService):
             success=True,
             message="Summarization generated successfully",
             model=model_to_use,
-            results=SummaryResults(summary=""),
+            results=[],
         )
         start_time = time.time()
+
+        try:
+            summaryResults = TextSummarizer._summarize_local(request)
+            if summaryResults.success:
+                response.results.append(summaryResults.summary)
+                response.message = summaryResults.message
+            else:
+                response.success = False
+                response.message = summaryResults.message
+        except Exception as e:
+            response.success = False
+            response.message = f"Error generating summarization: {str(e)}"
+            logger.exception("Unexpected error during summarization")
+        finally:
+            elapsed = time.time() - start_time
+            logger.debug(f"Summarization completed in {elapsed:.2f} seconds.")
+            response.time_taken = elapsed
+            return response
+
+    @staticmethod
+    def _summarize_local(
+        request: SummarizationRequest,
+    ) -> SummaryResults:
+        """
+        Summarize the input text using the specified model.
+        Returns the summary string, or None if summarization fails.
+        """
+        model_to_use = request.model or "t5-small"
+
+        summaryResults: SummaryResults = SummaryResults(
+            summary="", message="", success=True
+        )
 
         try:
             model_config = TextSummarizer._get_model_config(model_to_use)
@@ -164,7 +209,7 @@ class TextSummarizer(BaseNLPService):
                 f"Summarizing text using model: {model_to_use} and task: {model_config.summarization_task}..."
             )
             model_to_use_path = os.path.join(
-                cls._root_path,
+                TextSummarizer._root_path,
                 "models",
                 model_config.summarization_task or "s2s",
                 model_to_use,
@@ -180,29 +225,27 @@ class TextSummarizer(BaseNLPService):
                 model_config.special_tokens_map_path or "special_tokens_map.json",
             )
 
-            generation_config_path = os.path.join(
-                model_to_use_path,
-                model_config.generation_config_path or "generation_config.json",
-            )
-
-            tokenizer = cls._get_tokenizer_threadsafe(model_to_use_path)
-            special_tokens = cls._get_special_tokens(special_tokens_path)
+            tokenizer = TextSummarizer._get_tokenizer_threadsafe(model_to_use_path)
+            special_tokens = TextSummarizer._get_special_tokens(special_tokens_path)
 
             # Allow override of config parameters
             max_length = getattr(model_config, "max_length", 128) or 128
 
             if model_config.use_seq2seqlm:
                 logger.debug(f"Using Seq2SeqLM model: {model_to_use_path}")
-                model = cls.get_model(model_to_use_path)
-                response = cls._summarizeSeq2SeqLm(
-                    response, model, tokenizer, model_config, request, model_to_use_path
+                model = TextSummarizer.get_model(model_to_use_path)
+                summaryResults = TextSummarizer._summarizeSeq2SeqLm(
+                    model, tokenizer, model_config, request, model_to_use_path
                 )
             else:
                 logger.debug(f"Using encoder/decoder model: {model_to_use_path}")
-                encoder_session = cls._get_encoder_session(encoder_model_path)
-                decoder_session = cls._get_decoder_session(decoder_model_path)
-                response = cls._summarizeOther(
-                    response,
+                encoder_session = TextSummarizer._get_encoder_session(
+                    encoder_model_path
+                )
+                decoder_session = TextSummarizer._get_decoder_session(
+                    decoder_model_path
+                )
+                summaryResults = TextSummarizer._summarizeOther(
                     encoder_session,
                     decoder_session,
                     tokenizer,
@@ -212,52 +255,95 @@ class TextSummarizer(BaseNLPService):
                     model_to_use_path,
                 )
         except Exception as e:
-            response.success = False
-            response.message = f"Error generating summarization: {str(e)}"
+            summaryResults.success = False
+            summaryResults.message = f"Error generating summarization: {str(e)}"
             logger.exception("Unexpected error during summarization")
         finally:
-            elapsed = time.time() - start_time
-            logger.debug(f"Summarization completed in {elapsed:.2f} seconds.")
-            response.time_taken = elapsed
-            return response
+            logger.debug(f"Summarization completed successfully.")
+            return summaryResults
 
     @classmethod
     async def summarize_batch_async(
         cls, request: SummarizationBatchRequest
-    ) -> List[SummarizationResponse]:
+    ) -> SummarizationResponse:
         """
         Asynchronously summarize a batch of texts using run_in_executor for concurrency.
+        If any summarization fails, stop and return the error.
         """
-        loop = asyncio.get_event_loop()
-        tasks = [
-            loop.run_in_executor(
-                None,
-                cls.summarize,
-                SummarizationRequest(
-                    model=request.model,
-                    input=text,
-                ),
-            )
-            for text in request.inputs
-        ]
-        return await asyncio.gather(*tasks)
+        start_time = time.time()
+        responses = SummarizationResponse(
+            success=True,
+            message="Batch summarization generated successfully",
+            model=request.model,
+            results=[],
+        )
+        try:
+            loop = asyncio.get_event_loop()
+            tasks = [
+                loop.run_in_executor(
+                    None,
+                    TextSummarizer._summarize_local,
+                    SummarizationRequest(
+                        model=request.model,
+                        input=text,
+                    ),
+                )
+                for text in request.inputs
+            ]
+            results = await asyncio.gather(*tasks)
+            for result in results:
+                if result.success:
+                    responses.results.append(result.summary)
+                else:
+                    responses.success = False
+                    responses.message = result.message
+                    break  # Stop adding further results if any failed
+        except Exception as e:
+            responses.success = False
+            responses.message = f"Error generating summarization: {str(e)}"
+            logger.exception("Unexpected error during summarization")
+        finally:
+            elapsed = time.time() - start_time
+            logger.debug(f"Summarization completed in {elapsed:.2f} seconds.")
+            responses.time_taken = elapsed
+            return responses
 
     @classmethod
     def summarize_batch(
         cls, request: SummarizationBatchRequest
-    ) -> List[SummarizationResponse]:
+    ) -> SummarizationResponse:
         """
         Summarize a batch of texts.
         """
-        responses = []
-        for text in request.inputs:
-            request = SummarizationRequest(
-                model=request.model,
-                input=text,
-             )
-            response = cls.summarize(request)
-            responses.append(response)
-        return responses
+        start_time = time.time()
+        responses = SummarizationResponse(
+            success=True,
+            message="Batch summarization generated successfully",
+            model=request.model,
+            results=[],
+        )
+        try:
+            for text in request.inputs:
+                req = SummarizationRequest(
+                    model=request.model,
+                    input=text,
+                )
+                response = TextSummarizer._summarize_local(req)
+                if response.success:
+                    responses.results.append(response.summary)
+                else:
+                    responses.success = False
+                    responses.message = response.message
+                    break  # <-- This breaks the loop on failure
+        except Exception as e:
+            responses.success = False
+            responses.message = f"Error generating summarization: {str(e)}"
+            logger.exception("Unexpected error during summarization")
+        finally:
+            elapsed = time.time() - start_time
+            logger.debug(f"Summarization completed in {elapsed:.2f} seconds.")
+            responses.time_taken = elapsed
+            return responses
 
     @staticmethod
     def _remove_special_tokens(text: str, special_tokens: Set[str]) -> str:
@@ -329,20 +415,18 @@ class TextSummarizer(BaseNLPService):
 
     @staticmethod
     def _summarizeSeq2SeqLm(
-        response_output: SummarizationResponse,
         model: ORTModelForSeq2SeqLM,
         tokenizer: Any,
         model_config: OnnxConfig,
         request: SummarizationRequest,
         tokenizer_path: str,
-    ) -> SummarizationResponse:
+    ) -> SummaryResults:
         """
         Summarize using a HuggingFace Seq2SeqLM model.
         """
-        summary: str = ""
-        if response_output is None:
-            logger.error("Model response output is None, cannot summarize.")
-            raise Exception("Model response output is None, invalid parameters.")
+        summaryResults: SummaryResults = SummaryResults(
+            summary="", message="", success=True
+        )
         try:
             generation_config = TextSummarizer._get_generation_config(tokenizer_path)
             # Only merge if not already merged
@@ -436,7 +520,9 @@ class TextSummarizer(BaseNLPService):
                         generate_kwargs["forced_bos_token_id"] = forced_bos_token_id
 
             inputs = tokenizer(
-                TextSummarizer._preprocess_text(request.input, model_config.prepend_text),
+                TextSummarizer._preprocess_text(
+                    request.input, model_config.prepend_text
+                ),
                 return_tensors="pt",
             )
             temperature = 0.0
@@ -448,24 +534,24 @@ class TextSummarizer(BaseNLPService):
             if temperature is not None and temperature > 0.0:
                 logger.debug(f"Using temperature: {temperature} for summarization")
                 generate_kwargs["temperature"] = temperature
-            
+
             summary_ids = model.generate(**inputs, **generate_kwargs)
             summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True).strip()
             if not summary:
                 logger.warning("Empty summary generated.")
             else:
                 logger.debug("Seq2SeqLM summarization completed successfully")
+            summaryResults.summary = summary.strip()
         except Exception as e:
             logger.exception("Seq2SeqLM summarization failed")
-            response_output.success = False
-            response_output.message = f"Error generating summarization: {str(e)}"
+            summaryResults.success = False
+            summaryResults.message = f"Error generating summarization: {str(e)}"
         finally:
-            response_output.results = SummaryResults(summary=summary)
-            return response_output
+            logger.debug(f"Seq2SeqLM summarization completed successfully")
+            return summaryResults
 
     @staticmethod
     def _summarizeOther(
-        response_output: SummarizationResponse,
         encoder_session: ort.InferenceSession,
         decoder_session: ort.InferenceSession,
         tokenizer: Any,
@@ -473,14 +559,14 @@ class TextSummarizer(BaseNLPService):
         model_config: OnnxConfig,
         request: SummarizationRequest,
         tokenizer_path: str,
-    ) -> SummarizationResponse:
+    ) -> SummaryResults:
         """
         Summarize using ONNX encoder/decoder sessions.
         """
-        summary: str = ""
-        if response_output is None:
-            logger.error("Model response output is None, cannot summarize.")
-            raise Exception("Model response output is None, invalid parameters.")
+        summaryResults: SummaryResults = SummaryResults(
+            summary="", message="", success=True
+        )
+
         try:
             logger.debug(
                 f"Summarizing text using ONNX encoder/decoder inside _summarizeOther model: {tokenizer_path}"
@@ -616,7 +702,7 @@ class TextSummarizer(BaseNLPService):
                         logger.exception("Decoder ONNX inference error")
                         break
                     logits_arr = decoder_outputs[0]  # shape: (1, cur_len, vocab_size)
-                    logits = logits_arr[:, -1, :][0] # shape: (1, cur_len, vocab_size)
+                    logits = logits_arr[:, -1, :][0]  # shape: (1, cur_len, vocab_size)
                     # Take the last token's logits and argmax over vocab
                     if temperature > 0.0:
                         probs = softmax(logits / temperature)
@@ -657,16 +743,14 @@ class TextSummarizer(BaseNLPService):
                 summary = TextSummarizer._remove_special_tokens(summary, special_tokens)
                 if not summary:
                     logger.warning("Empty summary generated.")
-                else:
-                    logger.debug(f"Generated summary: {summary}")
+                summaryResults.summary = summary.strip()
         except Exception as e:
             logger.exception("ONNX summarization failed")
-            response_output.success = False
-            response_output.message = f"Error generating summarization: {str(e)}"
+            summaryResults.success = False
+            summaryResults.message = f"Error generating summarization: {str(e)}"
         finally:
-            response_output.results = SummaryResults(summary=summary)
             logger.debug(f"ONNX summarization completed successfully")
-            return response_output
+            return summaryResults
 
 
 # HINTS:

@@ -1,5 +1,12 @@
+# =============================================================================
+# File: export_model_to_onnx.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import gc
 import glob
+import logging
 import os
 import pathlib
 
@@ -13,6 +20,8 @@ from optimum.onnxruntime import (
 )
 from optimum.onnxruntime.configuration import OptimizationConfig
 from transformers import AutoTokenizer, T5EncoderModel, pipeline
+
+logger = logging.getLogger(__name__)
 
 
 def export_and_optimize_onnx(
@@ -58,15 +67,15 @@ def export_and_optimize_onnx(
             return "feature-extraction"
 
     def _verify_model(model_path: str):
-        print(f"Verifying model at {model_path}...")
+        logger.info(f"Verifying model at {model_path}...")
         onnx_model = onnx.load(model_path)
         try:
             onnx.checker.check_model(onnx_model)
         except MemoryError:
             print("Warning: Skipping onnx.checker.check_model due to MemoryError.")
         session2 = ort.InferenceSession(model_path)
-        print("Inputs:", session2.get_inputs())
-        print("Outputs:", session2.get_outputs())
+        logger.info("Inputs: %s", session2.get_inputs())
+        logger.info("Outputs: %s", session2.get_outputs())
         del onnx_model
         del session2
         gc.collect()
@@ -83,14 +92,14 @@ def export_and_optimize_onnx(
         os.remove(f)
 
     if use_t5_encoder:
-        print(f"Exporting T5 encoder-only for {model_name} ...")
+        logger.info(f"Exporting T5 encoder-only for {model_name} ...")
         encoder = T5EncoderModel.from_pretrained(model_name)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         encoder.save_pretrained(_output_dir)
         tokenizer.save_pretrained(_output_dir)
         model = ORTModelForFeatureExtraction.from_pretrained(_output_dir, export=True)
         model.save_pretrained(_output_dir)
-        print(f"Encoder ONNX model exported to {_output_dir} successfully.")
+        logger.info(f"Encoder ONNX model exported to {_output_dir} successfully.")
         del model, tokenizer, encoder
         gc.collect()
         _model_path = os.path.join(_output_dir, "model.onnx")
@@ -103,21 +112,21 @@ def export_and_optimize_onnx(
         }
         _onnx_name = "encoder_model.onnx"
         _decoder_onnx_name = "decoder_model.onnx"
-        print(
+        logger.info(
             f"Exporting seq2seq model {model_name} for task_type {_model_task_type} and use_cache {use_cache}..."
         )
         model = ORTModelForSeq2SeqLM.from_pretrained(model_name, **_export_args)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model.save_pretrained(_output_dir)
         tokenizer.save_pretrained(_output_dir)
-        print(f"Model exported to ONNX format in {_output_dir}")
+        logger.info(f"Model exported to ONNX format in {_output_dir}")
         for fname in [
             "encoder_model.onnx",
             "decoder_model.onnx",
             "decoder_with_past_model.onnx",
         ]:
             fpath = os.path.join(_output_dir, fname)
-            print(f"{fpath} exists: {os.path.exists(fpath)}")
+            logger.info(f"{fpath} exists: {os.path.exists(fpath)}")
         _has_decoder = True
         _model_path = os.path.join(_output_dir, _onnx_name)
     elif _model_for in ["sc", "sequence-classification"]:
@@ -126,7 +135,7 @@ def export_and_optimize_onnx(
             "task": _model_task_type,
             "use_cache": use_cache,
         }
-        print(
+        logger.info(
             f"Exporting sequence classification model {model_name} for task_type {_model_task_type} and use_cache {use_cache}..."
         )
         model = ORTModelForSequenceClassification.from_pretrained(
@@ -135,23 +144,23 @@ def export_and_optimize_onnx(
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model.save_pretrained(_output_dir)
         tokenizer.save_pretrained(_output_dir)
-        print(f"Model exported to ONNX format in {_output_dir}")
+        logger.info(f"Model exported to ONNX format in {_output_dir}")
         _has_decoder = False
         _model_path = os.path.join(_output_dir, "model.onnx")
     else:
         _export_args = {"export": True, "task": _model_task_type}
-        print(
+        logger.info(
             f"Exporting feature extraction model {model_name} for task_type {_model_task_type}..."
         )
         model = ORTModelForFeatureExtraction.from_pretrained(model_name, **_export_args)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model.save_pretrained(_output_dir)
         tokenizer.save_pretrained(_output_dir)
-        print(f"Model exported to ONNX format in {_output_dir}")
+        logger.info(f"Model exported to ONNX format in {_output_dir}")
         _has_decoder = False
         _model_path = os.path.join(_output_dir, "model.onnx")
 
-    print(f"Model path: {_model_path}")
+    logger.info(f"Model path: {_model_path}")
 
     # Verify model
     _verify_model(_model_path)
@@ -180,14 +189,14 @@ def export_and_optimize_onnx(
                 save_dir=pathlib.Path(_model_path).parent,
                 optimization_config=optimization_config,
             )
-            print(f"Optimized model saved as: {_model_path}")
+            logger.info(f"Optimized model saved as: {_model_path}")
             del model
             gc.collect()
 
             # Optimize decoder if present
             if _has_decoder:
                 decoder_model_path = os.path.join(_output_dir, _decoder_onnx_name)
-                print(
+                logger.info(
                     f"{decoder_model_path} exists: {pathlib.Path(decoder_model_path).exists()}"
                 )
                 _verify_model(decoder_model_path)
@@ -200,12 +209,12 @@ def export_and_optimize_onnx(
                         save_dir=pathlib.Path(decoder_model_path).parent,
                         optimization_config=optimization_config,
                     )
-                    print(
+                    logger.info(
                         f"Decoder model optimized and saved as: {optimized_decoder_model.name}"
                     )
                     del decoder_model, decoder_optimizer, optimized_decoder_model
                 except Exception as e:
-                    print(f"Decoder optimization failed: {e}")
+                    logger.error(f"Decoder optimization failed: {e}")
                 gc.collect()
 
     _optimize_model()

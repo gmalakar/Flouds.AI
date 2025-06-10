@@ -1,3 +1,9 @@
+# =============================================================================
+# File: appsettings.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 from typing import Optional
 
 from pydantic import BaseModel, Field

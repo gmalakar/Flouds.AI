@@ -1,3 +1,9 @@
+# =============================================================================
+# File: export_model.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 # HINTS:
 # - For summarization (BART, T5, Pegasus, etc.), use --task seq2seq-lm and --use_cache.
 # - For sequence classification (BERT, RoBERTa, etc.), use --task sequence-classification.

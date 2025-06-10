@@ -1,3 +1,9 @@
+# =============================================================================
+# File: embedder.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 from typing import List
 
 from fastapi import APIRouter
@@ -15,11 +21,7 @@ logger = get_logger("router")
 @router.post("/embed", tags=["embedder"], response_model=EmbeddingResponse)
 async def embed(request: EmbeddingRequest) -> EmbeddingResponse:
     logger.debug(f"Embedding request by model: {request.model}")
-    response: EmbeddingResponse = SentenceTransformer.embed_text(
-        text=request.input,
-        model_to_use=request.model,
-        projected_dimension=request.projected_dimension,
-    )
+    response: EmbeddingResponse = SentenceTransformer.embed_text(request)
     return response
 
 

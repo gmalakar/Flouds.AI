@@ -1,3 +1,9 @@
+# =============================================================================
+# File: base_nlp_service.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import os
 import threading
 from typing import Any, Dict, Optional
@@ -20,8 +26,7 @@ class BaseNLPService:
     _root_path: str = os.path.abspath(
         APP_SETTINGS.onnx.rootpath
         if APP_SETTINGS.onnx.rootpath
-        else
-        os.path.join(os.path.dirname(__file__), "..", "onnx")
+        else os.path.join(os.path.dirname(__file__), "..", "onnx")
     )
     _encoder_sessions: ConcurrentDict = ConcurrentDict("_encoder_sessions")
 

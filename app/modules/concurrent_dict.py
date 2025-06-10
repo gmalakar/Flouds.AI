@@ -1,3 +1,9 @@
+# =============================================================================
+# File: concurrent_dict.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import threading
 from typing import Any, Callable, Optional
 

@@ -1,0 +1,4 @@
+*.pyc
+__pycache__/
+app/onnx/
+app/config/appsettings.development.*

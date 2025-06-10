@@ -1,3 +1,9 @@
+# =============================================================================
+# File: setup.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import importlib
 import os
 import subprocess
@@ -12,33 +18,27 @@ APP_SETTINGS = ConfigLoader.get_app_settings()
 
 logger = get_logger("setup")
 
-logger.info(f"Environment: {os.getenv('FASTAPI_ENV', 'Production')}")
+logger.info(f"Environment: {os.getenv('FLOUDS_API_ENV', 'Production')}")
 
 
-# Install the required server dynamically
-def install_server(server_name):
-    """Install the required ASGI server dynamically."""
+def ensure_server_installed_and_imported(server_name):
+    """Ensure the required ASGI server is installed and import it."""
     try:
-        subprocess.run(["pip", "install", server_name], check=True)
-        logger.info(f"{server_name} installed successfully.")
-    except subprocess.CalledProcessError:
-        logger.error(f"Failed to install {server_name}.")
-
-
-# Dynamically import the ASGI server
-def dynamic_import(module_name):
-    """Dynamically import a module using a variable."""
-    try:
-        return importlib.import_module(module_name)
+        return importlib.import_module(server_name)
     except ImportError:
-        logger.error(f"Module {module_name} not found.")
-        return None
+        logger.warning(f"{server_name} not found. Installing...")
+        try:
+            subprocess.run(["pip", "install", server_name], check=True)
+            logger.info(f"{server_name} installed successfully.")
+            return importlib.import_module(server_name)
+        except Exception as e:
+            logger.error(f"Failed to install or import {server_name}: {e}")
+            return None
 
 
-install_server(APP_SETTINGS.server.type.lower())
-SERVER_MODULE = dynamic_import(APP_SETTINGS.server.type.lower())
+SERVER_MODULE = ensure_server_installed_and_imported(APP_SETTINGS.server.type.lower())
 
-#
+# NLTK setup
 try:
     nltk.data.find("corpora/stopwords")
     logger.info("NLTK stopwords corpus already downloaded.")

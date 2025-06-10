@@ -1,3 +1,9 @@
+# =============================================================================
+# File: logger.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import logging
 import os
 from logging.handlers import RotatingFileHandler

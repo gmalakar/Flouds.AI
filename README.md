@@ -177,21 +177,21 @@ Choose the option that matches your exported ONNX model and desired inference fl
 - **FastAPI** is used as the main web framework for serving APIs.
 - The server type (e.g., `uvicorn`) is set in `appsettings.json` and loaded dynamically.
 - To run in development mode, set the following environment variables:
-    - `FASTAPI_ENV=Development`
-    - `FASTAPI_DEBUG_MODE=1`
+    - `FLOUDS_API_ENV=Development`
+    - `FLOUDS_DEBUG_MODE=1`
 - These variables control logging and debug behavior in the app.
 
 Example (Windows CMD):
 ```cmd
-set FASTAPI_ENV=Development
-set FASTAPI_DEBUG_MODE=1
+set FLOUDS_API_ENV=Development
+set FLOUDS_DEBUG_MODE=1
 python -m app.main
 ```
 
 Example (Linux/macOS):
 ```sh
-export FASTAPI_ENV=Development
-export FASTAPI_DEBUG_MODE=1
+export FLOUDS_API_ENV=Development
+export FLOUDS_DEBUG_MODE=1
 python -m app.main
 ```
 
@@ -307,7 +307,81 @@ response = SentenceTransformer.embed_batch_async(batch_req)
 
 ---
 
-### FastAPI Routers
+## Docker Usage
+
+You can run Flouds.Py as a Docker container for easy deployment.
+
+### 1. Build the Docker image
+
+```sh
+docker build -t flouds-py .
+```
+
+### 2. Run the container
+
+```sh
+docker run -p 5001:5001 \
+  -e FLOUDS_API_ENV=Production \
+  -e FLOUDS_DEBUG_MODE=0 \
+  -e FLOUDS_ONNX_ROOT=/app/onnx \
+  flouds-py
+```
+
+- The default port is `5001` (see `appsettings.json`).
+- The ONNX model root path is set via the `FLOUDS_ONNX_ROOT` environment variable (default: `/app/onnx`).
+- You can override any config value using environment variables (see below).
+
+### 3. Mount your ONNX models (optional)
+
+If you want to use your own ONNX models from outside the container:
+
+```sh
+docker run -p 5001:5001 \
+  -v /path/to/your/onnx:/app/onnx \
+  -e FLOUDS_ONNX_ROOT=/app/onnx \
+  flouds-py
+```
+
+---
+
+## Environment Variables
+
+You can control the application behavior using the following environment variables:
+
+- `FLOUDS_API_ENV` — Set to `Development` or `Production` (default: `Production`)
+- `FLOUDS_DEBUG_MODE` — Set to `1` for debug logging, `0` for normal (default: `0`)
+- `FLOUDS_ONNX_ROOT` — Path to the ONNX model root directory (default: as in `appsettings.json`)
+- `FLOUDS_PORT` — Override the server port (default: `5001`)
+- `FLOUDS_HOST` — Override the server host (default: `0.0.0.0`)
+- `FLOUDS_SERVER_TYPE` — Server type, e.g., `uvicorn` or `hypercorn` (default: `uvicorn`)
+- `FLOUDS_MODEL_SESSION_PROVIDER` — ONNX session provider (default: `CPUExecutionProvider`)
+
+Example for development mode:
+
+```sh
+docker run -p 5001:5001 \
+  -e FLOUDS_API_ENV=Development \
+  -e FLOUDS_DEBUG_MODE=1 \
+  flouds-py
+```
+
+---
+
+## ONNX Root Path
+
+The ONNX model root directory is set in [`app/config/appsettings.json`](app/config/appsettings.json):
+
+```json
+"onnx": {
+    "rootpath": "./app/onnx"
+}
+```
+
+You can override this with the `FLOUDS_ONNX_ROOT` environment variable.
+
+---
+
+## FastAPI Routers
 
 - **Summarizer endpoints** (see [`app/routers/summarizer.py`](app/routers/summarizer.py)):
   - `POST /summarize` — accepts a `SummarizationRequest`, returns a `SummarizationResponse`
@@ -316,8 +390,6 @@ response = SentenceTransformer.embed_batch_async(batch_req)
 - **Embedder endpoints** (see [`app/routers/embedder.py`](app/routers/embedder.py)):
   - `POST /embed` — accepts an `EmbeddingRequest`, returns an `EmbeddingResponse`
   - `POST /embed_batch` — accepts an `EmbeddingBatchRequest`, returns an `EmbeddingBatchResponse`
-
-See the routers for full request/response models and details.
 
 ---
 

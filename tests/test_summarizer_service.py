@@ -1,3 +1,9 @@
+# =============================================================================
+# File: test_summarizer_service.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import traceback
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -13,8 +19,8 @@ def _isolate_tests(monkeypatch):
     pass
 
 
-from app.models.summarization_response import SummarizationResponse, SummaryResults
-from app.services.summarizer_service import TextSummarizer
+from app.models.summarization_response import SummarizationResponse
+from app.services.summarizer_service import SummaryResults, TextSummarizer
 
 
 # Dummy classes for mocking
@@ -35,8 +41,6 @@ class DummyTokenizer:
         return {"input_ids": [[1, 2, 3]], "attention_mask": [[1, 1, 1]]}
 
     def decode(self, ids, skip_special_tokens=True):
-        print("DummyTokenizer.decode called")
-        traceback.print_stack()
         if hasattr(ids, "tolist"):
             ids = ids.tolist()
         if isinstance(ids, list) and ids and isinstance(ids[0], list):
@@ -51,9 +55,6 @@ class DummyTokenizer:
 
 class DummyTokenizerEmpty(DummyTokenizer):
     def decode(self, ids, skip_special_tokens=True):
-        print("DummyTokenizerEmpty.decode called")
-        traceback.print_stack()
-        print("DummyTokenizerEmpty.decode called 2")
         return ""
 
 
@@ -170,11 +171,9 @@ def test_summarize_empty_summary(
     mock_get_config.return_value = dummy_model_config
     from app.models.summarization_request import SummarizationRequest
 
-    req = SummarizationRequest(
-        model="dummy-model", input="This is a test."
-    )
+    req = SummarizationRequest(model="dummy-model", input="This is a test.")
     response = TextSummarizer.summarize(req)
-    assert response.results.summary == ""
+    assert response.results[0] == ""
     assert response.success
 
 
@@ -227,7 +226,7 @@ def test_summarize_empty_summary_with_config(
         model="dummy-model", input="This is a test.", temperature=0.5
     )
     response = TextSummarizer.summarize(req)
-    assert response.results.summary == ""
+    assert response.results[0] == ""
     assert response.success
 
 
@@ -333,11 +332,9 @@ def test_summarize_batch_seq2seqlm(
         inputs=["Text 1", "Text 2"],
     )
     responses = TextSummarizer.summarize_batch(req)
-    for idx, r in enumerate(responses):
-        print(f"Response {idx}: {r.results.summary!r}")
-    assert all(isinstance(r, SummarizationResponse) for r in responses)
-    assert all(isinstance(r.results, SummaryResults) for r in responses)
-    assert all(r.results.summary == "summary text" for r in responses)
+    assert isinstance(responses, SummarizationResponse)
+    assert isinstance(responses.results, list)
+    assert all(r == "summary text" for r in responses.results)
 
 
 # ---- ONNX/Other summarization ----
@@ -411,18 +408,14 @@ def test_summarize_other(
     mock_get_decoder_session.return_value = DummySession()
     from app.models.summarization_request import SummarizationRequest
 
-    req = SummarizationRequest(
-        model="dummy-model", input="This is a test."
-    )
+    req = SummarizationRequest(model="dummy-model", input="This is a test.")
     response = TextSummarizer.summarize(req)
-    print(f"Response in test_summarize_other: {response.results.summary!r}")
 
     assert isinstance(response, SummarizationResponse)
-    assert isinstance(response.results, SummaryResults)
-    assert response.results.summary == "summary text"  # <-- fix here
+    assert isinstance(response.results, list)
+    assert response.results[0] == "summary text"
+    assert all(r == "summary text" for r in response.results)
     assert response.success
 
     with pytest.raises(ValidationError):
-        SummarizationRequest(
-            model="dummy-model", input={"foo": "bar"}, temperature=0.5
-        )
+        SummarizationRequest(model="dummy-model", input={"foo": "bar"}, temperature=0.5)

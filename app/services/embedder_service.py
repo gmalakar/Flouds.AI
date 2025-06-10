@@ -1,4 +1,11 @@
+# =============================================================================
+# File: embedder_service.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import asyncio
+import functools
 import os
 import re
 import time
@@ -8,8 +15,9 @@ import nltk
 import numpy as np
 import onnxruntime as ort
 from nltk.corpus import stopwords
-from transformers import AutoTokenizer
+from pydantic import BaseModel, Field
 from scipy.special import softmax
+from transformers import AutoTokenizer
 
 from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
@@ -21,8 +29,22 @@ from app.services.base_nlp_service import BaseNLPService
 
 logger = get_logger("sentence_transformer_wrapper")
 
+
+class _SingleEmbeddingResults(BaseModel):
+    EmbeddingResults: list[str] = Field(default_factory=list)
+    message: str
+    success: bool = Field(default=True)
+
+
+class _EmbeddingResults(BaseModel):
+    EmbeddingResults: list[EmbededChunk]
+    message: str
+    success: bool = Field(default=True)
+
+
 # Example stop words set; expand as needed
-STOP_WORDS = set(stopwords.words("english"))
+_STOP_WORDS = set(stopwords.words("english"))
+_NO_TEXT_FOR_LARGE_TEXT = ""
 
 # HINTS:
 # - All static methods use type hints for clarity and editor support.
@@ -42,11 +64,35 @@ class SentenceTransformer(BaseNLPService):
     """
 
     @staticmethod
+    def _merge_vectors(chunks: list[EmbededChunk], method: str = "mean") -> list[float]:
+        """
+        Merge embedding vectors from a list of EmbededChunk using mean or max pooling.
+
+        Args:
+            chunks: List of EmbededChunk objects (each with a .vector attribute).
+            method: "mean" (default) or "max" pooling.
+
+        Returns:
+            A single merged embedding vector as a list of floats.
+        """
+        vectors = [
+            np.array(chunk.vector) for chunk in chunks if hasattr(chunk, "vector")
+        ]
+        if not vectors:
+            return []
+        stacked = np.stack(vectors)
+        if method == "max":
+            merged = np.max(stacked, axis=0)
+        else:
+            merged = np.mean(stacked, axis=0)
+        return merged.tolist()
+
+    @staticmethod
     def _preprocess_text(text: str) -> str:
         logger.debug("Preprocessing text for embedding.")
         text = text.lower()
         text = re.sub(r"[^\w\s.]", "", text)
-        tokens = [word for word in text.split() if word not in STOP_WORDS]
+        tokens = [word for word in text.split() if word not in _STOP_WORDS]
         return " ".join(tokens)
 
     @staticmethod
@@ -111,11 +157,15 @@ class SentenceTransformer(BaseNLPService):
         model_config: Any,
         tokenizer: Any,
         session: Any,
-        projected_dimension: int,
-    ) -> list:
-        """
-        Generates an embedding for a small text chunk and returns it as a Python list.
-        """
+        projected_dimension: int = 128,
+        **kwargs,
+    ):
+        _results = _EmbeddingResults(
+            EmbeddingResults=[],
+            message="Embedding generated successfully",
+            success=True,
+        )
+        embedding = None  # Ensure embedding is always defined
         try:
             input_names = getattr(model_config, "inputnames", {})
             output_names = getattr(model_config, "outputnames", {})
@@ -203,10 +253,18 @@ class SentenceTransformer(BaseNLPService):
                     embedding, projected_dimension
                 )
 
-            return embedding.flatten().tolist()
-        except Exception:
-            logger.exception(f"Error generating embedding")
-            return [0.0] * (projected_dimension if projected_dimension > 0 else 128)
+                _results.EmbeddingResults = embedding.flatten().tolist()
+        except Exception as e:
+            _results.message = f"Error generating embedding: {e}"
+            _results.success = False
+            embedding = np.zeros(projected_dimension)  # fallback embedding
+            _results.EmbeddingResults = embedding.flatten().tolist()
+            logger.error(f"Error generating embedding for small text chunk: {e}")
+        finally:
+            logger.debug(
+                f"Generated embedding for small text chunk: {small_text[:25]}... with shape: {embedding.shape}"
+            )
+            return _results
 
     @staticmethod
     def _project_embedding(
@@ -255,7 +313,7 @@ class SentenceTransformer(BaseNLPService):
 
     @staticmethod
     async def embed_batch_async(
-        requests: EmbeddingBatchRequest,
+        requests: EmbeddingBatchRequest, **kwargs: Any
     ) -> EmbeddingBatchResponse:
         """
         Asynchronously embed a batch of texts using run_in_executor for concurrency.
@@ -273,14 +331,29 @@ class SentenceTransformer(BaseNLPService):
             tasks = [
                 loop.run_in_executor(
                     None,
-                    SentenceTransformer.embed_text,
-                    req,
-                    requests.model,
-                    requests.projected_dimension,
+                    functools.partial(
+                        SentenceTransformer._embed_text_local,
+                        text=input,
+                        model=requests.model,
+                        projected_dimension=requests.projected_dimension,
+                        join_chunks=requests.join_chunks,
+                        join_by_pooling_strategy=requests.join_by_pooling_strategy,
+                        output_large_text_upon_join=requests.output_large_text_upon_join,
+                        **kwargs,
+                    ),
                 )
-                for req in requests.inputs
+                for input in requests.inputs
             ]
-            response.results = await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks)
+            for result in results:
+                if result and result.success:
+                    response.results.append(result.EmbeddingResults)
+                else:
+                    response.success = False
+                    response.message = getattr(
+                        result, "message", "Unknown error during embedding"
+                    )
+                    break  # Stop adding further results if any failed
         except Exception as e:
             response.success = False
             response.message = f"Error generating embedding: {str(e)}"
@@ -292,9 +365,7 @@ class SentenceTransformer(BaseNLPService):
             return response
 
     @staticmethod
-    def embed_text(
-        text: str, model_to_use: str, projected_dimension: int
-    ) -> EmbeddingResponse:
+    def embed_text(req: EmbeddingRequest, **kwargs: Any) -> EmbeddingResponse:
         """
         Splits text into chunks and generates embeddings for each chunk.
         Returns a list of dicts: [{"Embedding": embedding, "TextChunk": chunk}, ...]
@@ -302,21 +373,68 @@ class SentenceTransformer(BaseNLPService):
         response = EmbeddingResponse(
             success=True,
             message="Embedding generated successfully",
-            model=model_to_use,
+            model=req.model,
             results=[],
             time_taken=0.0,
         )
         start_time = time.time()
         try:
-            model_config = SentenceTransformer._get_model_config(model_to_use)
+            result = SentenceTransformer._embed_text_local(
+                text=req.input,
+                model=req.model,
+                projected_dimension=req.projected_dimension,
+                join_chunks=req.join_chunks,
+                join_by_pooling_strategy=req.join_by_pooling_strategy,
+                output_large_text_upon_join=req.output_large_text_upon_join,
+                **kwargs,
+            )
+            if not result.success:
+                response.success = False
+                response.message = result.message
+                logger.error(f"Error generating embedding: {result.message}")
+            else:
+                response.results = result.EmbeddingResults
+                logger.debug(f"Generated {len(response.results)} embeddings.")
+        except Exception as e:
+            response.success = False
+            response.message = f"Error generating embedding: {str(e)}"
+            logger.exception("Unexpected error during embedding")
+        finally:
+            elapsed = time.time() - start_time
+            logger.debug(f"Embedding completed in {elapsed:.2f} seconds.")
+            response.time_taken = elapsed
+            return response
+
+    @staticmethod
+    def _embed_text_local(
+        text: str,
+        model: str,
+        projected_dimension: int,
+        join_chunks: bool = True,
+        join_by_pooling_strategy: str = None,
+        output_large_text_upon_join: bool = False,
+        **kwargs: Any,
+    ) -> _EmbeddingResults:
+        """
+        Splits text into chunks and generates embeddings for each chunk.
+        Returns a list of dicts: [{"Embedding": embedding, "TextChunk": chunk}, ...]
+        """
+        results = _EmbeddingResults(
+            EmbeddingResults=[],
+            message="Embedding generated successfully",
+            success=True,
+        )
+
+        try:
+            model_config = SentenceTransformer._get_model_config(model)
             logger.debug(
-                f"Embedding text using model: {model_to_use}, projected_dimension: {projected_dimension} and task: {getattr(model_config, 'embedder_task', 'fe')}..."
+                f"Embedding text using model: {model}, projected_dimension: {projected_dimension} and task: {getattr(model_config, 'embedder_task', 'fe')}..."
             )
             model_to_use_path = os.path.join(
                 SentenceTransformer._root_path,
                 "models",
                 getattr(model_config, "embedder_task", "fe"),
-                model_to_use,
+                model,
             )
             logger.debug(f"Using model path: {model_to_use_path}")
             tokenizer = SentenceTransformer._get_tokenizer_threadsafe(model_to_use_path)
@@ -329,7 +447,7 @@ class SentenceTransformer(BaseNLPService):
             session = SentenceTransformer._get_encoder_session(model_path)
             if not session:
                 logger.error(
-                    f"Failed to get ONNX session for model: {model_to_use} and path: {model_path}"
+                    f"Failed to get ONNX session for model: {model} and path: {model_path}"
                 )
                 return None
             max_tokens = getattr(
@@ -341,25 +459,65 @@ class SentenceTransformer(BaseNLPService):
                 text, tokenizer, max_tokens
             )
             for chunk in chunks:
-                logger.debug(f"Generating embedding for chunk: {chunk[:50]}...")
+                display_chunk = chunk if len(chunk) <= 50 else chunk[:50]
+                logger.debug(f"Generating embedding for chunk: {display_chunk}...")
                 embedding = SentenceTransformer._small_text_embedding(
                     small_text=chunk,
                     model_config=model_config,
                     tokenizer=tokenizer,
                     session=session,
                     projected_dimension=projected_dimension,
+                    **kwargs,
                 )
-                response.results.append(EmbededChunk(vector=embedding, chunk=chunk))
-            return response
+                if not embedding.success:
+                    results.success = False
+                    error = f"Error generating embedding for chunk: {display_chunk}... {embedding.message}"
+                    results.message = error
+                    logger.error(error)
+                    break
+                else:
+                    results.EmbeddingResults.append(
+                        EmbededChunk(vector=embedding.EmbeddingResults, chunk=chunk)
+                    )
+            if (
+                join_chunks
+                and results.EmbeddingResults
+                and len(results.EmbeddingResults) > 1
+            ):
+                logger.debug("Joining chunks into a single embedding.")
+                if join_by_pooling_strategy is None:
+                    join_by_pooling_strategy = getattr(
+                        model_config, "pooling_strategy", "mean"
+                    )
+                logger.debug(
+                    f"Joining chunks using pooling strategy: {join_by_pooling_strategy}."
+                )
+                if join_by_pooling_strategy not in ["mean", "max"]:
+                    logger.warning(
+                        f"Invalid pooling strategy: {join_by_pooling_strategy}. Defaulting to 'mean'."
+                    )
+                    join_by_pooling_strategy = "mean"
+                merged_vector = SentenceTransformer._merge_vectors(
+                    results.EmbeddingResults, method=join_by_pooling_strategy
+                )
+                results.EmbeddingResults = [
+                    EmbededChunk(
+                        vector=merged_vector,
+                        joined_chunk=True,
+                        only_vector=not output_large_text_upon_join,
+                        chunk=(
+                            _NO_TEXT_FOR_LARGE_TEXT
+                            if not output_large_text_upon_join
+                            else text
+                        ),
+                    )
+                ]
         except Exception as e:
-            response.success = False
-            response.message = f"Error generating embedding: {str(e)}"
+            results.success = False
+            results.message = f"Error generating embedding: {str(e)}"
             logger.exception("Unexpected error during embedding")
         finally:
-            elapsed = time.time() - start_time
-            logger.debug(f"Embedding completed in {elapsed:.2f} seconds.")
-            response.time_taken = elapsed
-            return response
+            return results
 
 
 # HINT:

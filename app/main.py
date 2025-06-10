@@ -1,3 +1,9 @@
+# =============================================================================
+# File: main.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import asyncio
 import logging
 
@@ -14,27 +20,34 @@ app.include_router(embedder.router)
 @app.get("/")
 def root() -> dict:
     """Root endpoint for health check."""
-    return {"message": "Hello World"}
+    return {"message": "Flouds.Py API is running"}
 
 
 if __name__ == "__main__":
     logger.info(
         f"Starting server: {APP_SETTINGS.server.type} on {APP_SETTINGS.server.host}:{APP_SETTINGS.server.port}"
     )
-    if APP_SETTINGS.server.type.lower() == "uvicorn":
+    server_type = APP_SETTINGS.server.type.lower()
+    if server_type == "uvicorn":
         SERVER_MODULE.run(
             app, host=APP_SETTINGS.server.host, port=APP_SETTINGS.server.port
         )
-    elif APP_SETTINGS.server.type.lower() == "hypercorn":
-        import asyncio
-
-        asyncio.run(
-            SERVER_MODULE.asyncio.serve(
-                app,
-                config={
-                    "bind": f"{APP_SETTINGS.server.host}:{APP_SETTINGS.server.port}"
-                },
+    elif server_type == "hypercorn":
+        try:
+            from hypercorn.asyncio import serve
+            from hypercorn.config import Config
+        except ImportError:
+            logger.error(
+                "hypercorn is not installed. Please install it to use this server type."
             )
-        )
+            raise
+
+        config = Config()
+        config.bind = [f"{APP_SETTINGS.server.host}:{APP_SETTINGS.server.port}"]
+
+        asyncio.run(serve(app, config))
     else:
-        raise ValueError(f"Unsupported server type: {APP_SETTINGS.server.type}")
+        # Default to uvicorn if unknown type
+        import uvicorn
+
+        uvicorn.run(app, host=APP_SETTINGS.server.host, port=APP_SETTINGS.server.port)

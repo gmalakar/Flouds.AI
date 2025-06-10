@@ -1,3 +1,10 @@
+# =============================================================================
+# File: utilities.py
+# Date: 2025-06-10
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
+
 class Utilities:
     @staticmethod
     def add_missing_from_other(target: dict, source: dict) -> dict:
