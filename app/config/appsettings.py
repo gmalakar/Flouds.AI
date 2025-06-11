@@ -3,7 +3,7 @@
 # Date: 2025-06-10
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
-
+import os
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 class AppConfig(BaseModel):
     name: str = Field(default="Flouds PY")
     debug: bool = Field(default=False)
+    working_dir: str = Field(default=os.getcwd())
 
 
 class ServerConfig(BaseModel):
@@ -24,7 +25,7 @@ class ServerConfig(BaseModel):
 
 
 class OnnxConfigSection(BaseModel):
-    rootpath: str = Field(default="./app/onnx")
+    rootpath: str = Field(default="onnx")
 
 
 class LoggingConfig(BaseModel):

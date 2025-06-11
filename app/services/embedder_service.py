@@ -9,31 +9,24 @@ import functools
 import os
 import re
 import time
-from typing import Any, List, Optional
+from typing import Any, List
 
-import nltk
 import numpy as np
 import onnxruntime as ort
 from nltk.corpus import stopwords
 from pydantic import BaseModel, Field
-from scipy.special import softmax
-from transformers import AutoTokenizer
 
-from app.config.config_loader import ConfigLoader
+# from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
 from app.models.embedded_chunk import EmbededChunk
 from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
 from app.models.embedding_response import EmbeddingBatchResponse, EmbeddingResponse
-from app.modules.concurrent_dict import ConcurrentDict
 from app.services.base_nlp_service import BaseNLPService
 
-logger = get_logger("sentence_transformer_wrapper")
+# from transformers import AutoTokenizer
 
 
-class _SingleEmbeddingResults(BaseModel):
-    EmbeddingResults: list[str] = Field(default_factory=list)
-    message: str
-    success: bool = Field(default=True)
+logger = get_logger("embedder_service")
 
 
 class _EmbeddingResults(BaseModel):
@@ -114,18 +107,6 @@ class SentenceTransformer(BaseNLPService):
         else:
             axes = tuple(range(embedding.ndim - 1))
             return embedding.mean(axis=axes)
-
-    @staticmethod
-    def _softmax(x: np.ndarray) -> np.ndarray:
-        """
-        Numerically stable softmax for 1D, 2D, or 3D numpy arrays.
-        Softmax is always applied along the last axis.
-        """
-        x = np.asarray(x)
-        x_max = np.max(x, axis=-1, keepdims=True)
-        e_x = np.exp(x - x_max)
-        sum_e_x = np.sum(e_x, axis=-1, keepdims=True)
-        return e_x / sum_e_x
 
     @staticmethod
     def _truncate_text_to_token_limit(
@@ -225,7 +206,7 @@ class SentenceTransformer(BaseNLPService):
             logits = getattr(output_names, "logits", False)
             if logits or SentenceTransformer._is_logits_output(outputs, session):
                 logger.debug("Output is logits, applying softmax.")
-                embedding = softmax(outputs[0], axis=-1)
+                embedding = SentenceTransformer._softmax(outputs[0])
             else:
                 embedding = outputs[0]
             logger.debug(
@@ -347,13 +328,13 @@ class SentenceTransformer(BaseNLPService):
             results = await asyncio.gather(*tasks)
             for result in results:
                 if result and result.success:
-                    response.results.append(result.EmbeddingResults)
+                    response.results.extend(result.EmbeddingResults)
                 else:
                     response.success = False
                     response.message = getattr(
                         result, "message", "Unknown error during embedding"
                     )
-                    break  # Stop adding further results if any failed
+                    break
         except Exception as e:
             response.success = False
             response.message = f"Error generating embedding: {str(e)}"
@@ -393,8 +374,19 @@ class SentenceTransformer(BaseNLPService):
                 response.message = result.message
                 logger.error(f"Error generating embedding: {result.message}")
             else:
-                response.results = result.EmbeddingResults
-                logger.debug(f"Generated {len(response.results)} embeddings.")
+                # Ensure results is a flat list of EmbededChunk
+                if (
+                    isinstance(result.EmbeddingResults, list)
+                    and result.EmbeddingResults
+                    and isinstance(result.EmbeddingResults[0], EmbededChunk)
+                ):
+                    response.results = result.EmbeddingResults
+                else:
+                    logger.warning(
+                        "Unexpected EmbeddingResults format in embed_text or no embeddings generated."
+                    )
+                    response.results = result.EmbeddingResults or []
+                logger.debug(f"Generated length: {len(response.results)} embeddings.")
         except Exception as e:
             response.success = False
             response.message = f"Error generating embedding: {str(e)}"

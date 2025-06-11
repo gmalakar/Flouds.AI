@@ -27,6 +27,6 @@ class EmbeddingBatchResponse(BaseResponse):
     Response model for batch text embedding.
     """
 
-    results: List[EmbeddingResponse] = Field(
+    results: List[EmbededChunk] = Field(
         ..., description="A list of embedding responses for the input texts."
     )

@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from pydantic import BaseModel, Field, condecimal
+from pydantic import BaseModel, Field
 
 
 class BaseRequest(BaseModel):

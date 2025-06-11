@@ -15,16 +15,14 @@ import asyncio
 import json
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Dict, Set
 
 import numpy as np
 import onnxruntime as ort
 from optimum.onnxruntime import ORTModelForSeq2SeqLM
 from pydantic import BaseModel, Field
-from scipy.special import softmax
 from transformers import AutoConfig, GenerationConfig
 
-from app.config.config_loader import ConfigLoader
 from app.config.onnx_config import OnnxConfig
 from app.logger import get_logger
 from app.models.summarization_request import (
@@ -35,7 +33,6 @@ from app.models.summarization_response import SummarizationResponse
 from app.modules.concurrent_dict import ConcurrentDict
 from app.modules.utilities import Utilities
 from app.services.base_nlp_service import BaseNLPService
-from app.setup import APP_SETTINGS
 
 logger = get_logger("summarizer_service")
 
@@ -53,10 +50,8 @@ class TextSummarizer(BaseNLPService):
 
     _MERGED_WITH_RAW_KEY: str = "_merged_with_raw"
     _MISSING_DECODER_START_TOKEN_ID_KEY: str = "_missing_decoder_start_token_id"
+    _GENERATION_CONFIG_FILE_NAME: str = "generation_config.json"
 
-    _root_path: str = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "onnx")
-    )
     _encoder_sessions: ConcurrentDict = ConcurrentDict("_encoder_sessions")
     _decoder_sessions: ConcurrentDict = ConcurrentDict("_decoder_sessions")
     _models: ConcurrentDict = ConcurrentDict("_models")
@@ -85,11 +80,18 @@ class TextSummarizer(BaseNLPService):
         return tokens
 
     @staticmethod
-    def _load_raw_generation_config_dict(model_to_use_path: str) -> Dict[str, Any]:
-        config_path = os.path.join(model_to_use_path, "generation_config.json")
+    def _load_raw_generation_config_dict(
+        model_to_use_path: str, generation_config_file_name: str
+    ) -> Dict[str, Any]:
+        config_path = os.path.join(
+            model_to_use_path,
+            generation_config_file_name or TextSummarizer._GENERATION_CONFIG_FILE_NAME,
+        )
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                config = json.load(f)
+            config.pop("transformers_version", None)  # Remove the key if present
+            return config
         return {}
 
     @staticmethod
@@ -131,13 +133,17 @@ class TextSummarizer(BaseNLPService):
         )
 
     @staticmethod
-    def _get_raw_generation_config(model_to_use_path: str) -> Dict[str, Any]:
+    def _get_raw_generation_config(
+        model_to_use_path: str, generation_config_file_name: str
+    ) -> Dict[str, Any]:
         """
         Returns cached generation config for the given path.
         """
         return TextSummarizer._raw_generation_configs.get_or_add(
             model_to_use_path,
-            lambda: TextSummarizer._load_raw_generation_config_dict(model_to_use_path),
+            lambda: TextSummarizer._load_raw_generation_config_dict(
+                model_to_use_path, generation_config_file_name
+            ),
         )
 
     @staticmethod
@@ -360,7 +366,6 @@ class TextSummarizer(BaseNLPService):
         model_config: OnnxConfig,
         tokenizer_path: str,
         use_model_config_if_available: bool = False,
-        model_type: Optional[str] = None,
     ) -> Any:
         """
         Sets generation config parameters based on the text and special tokens.
@@ -376,7 +381,13 @@ class TextSummarizer(BaseNLPService):
             logger.debug(
                 f"{key} not found in generation config, checking raw generation config"
             )
-            raw_gen_config = TextSummarizer._get_raw_generation_config(tokenizer_path)
+            generation_config_file_name = (
+                model_config.generation_config_path
+                or TextSummarizer._GENERATION_CONFIG_FILE_NAME
+            )
+            raw_gen_config = TextSummarizer._get_raw_generation_config(
+                tokenizer_path, generation_config_file_name
+            )
             logger.debug(f"Using raw generation config: {raw_gen_config}")
             if key in raw_gen_config:
                 logger.debug(
@@ -433,9 +444,16 @@ class TextSummarizer(BaseNLPService):
             if generation_config is not None and not generation_config.get(
                 TextSummarizer._MERGED_WITH_RAW_KEY, False
             ):
+                generation_config_file_name = (
+                    model_config.generation_config_path
+                    or TextSummarizer._GENERATION_CONFIG_FILE_NAME
+                )
+
                 generation_config = Utilities.add_missing_from_other(
                     generation_config,
-                    TextSummarizer._get_raw_generation_config(tokenizer_path),
+                    TextSummarizer._get_raw_generation_config(
+                        tokenizer_path, generation_config_file_name
+                    ),
                 )
                 generation_config[TextSummarizer._MERGED_WITH_RAW_KEY] = (
                     True  # Mark as merged
@@ -534,6 +552,9 @@ class TextSummarizer(BaseNLPService):
             if temperature is not None and temperature > 0.0:
                 logger.debug(f"Using temperature: {temperature} for summarization")
                 generate_kwargs["temperature"] = temperature
+                generate_kwargs["do_sample"] = True
+            elif "temperature" in generate_kwargs:
+                del generate_kwargs["temperature"]
 
             summary_ids = model.generate(**inputs, **generate_kwargs)
             summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True).strip()
@@ -705,7 +726,7 @@ class TextSummarizer(BaseNLPService):
                     logits = logits_arr[:, -1, :][0]  # shape: (1, cur_len, vocab_size)
                     # Take the last token's logits and argmax over vocab
                     if temperature > 0.0:
-                        probs = softmax(logits / temperature)
+                        probs = TextSummarizer._softmax(logits / temperature)
                         next_token_id = int(np.random.choice(len(probs), p=probs))
                     else:
                         # Greedy decoding

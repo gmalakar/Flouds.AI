@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
-from app.models.embedding_response import EmbeddingResponse, EmbededChunk
+from app.models.embedding_response import EmbededChunk
 from app.services.embedder_service import _STOP_WORDS, SentenceTransformer
 
 
@@ -199,5 +199,6 @@ async def test_embed_batch_async(
     assert response.success
     assert response.model == "dummy-model"
     assert len(response.results) == 2
-    for chunk in response.results[0]:
+    print(f"Response results: {response.results}")
+    for chunk in response.results:
         assert isinstance(chunk, EmbededChunk)

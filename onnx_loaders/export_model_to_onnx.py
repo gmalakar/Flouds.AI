@@ -10,7 +10,6 @@ import logging
 import os
 import pathlib
 
-import onnx
 import onnxruntime as ort
 from optimum.onnxruntime import (
     ORTModelForFeatureExtraction,
@@ -20,6 +19,8 @@ from optimum.onnxruntime import (
 )
 from optimum.onnxruntime.configuration import OptimizationConfig
 from transformers import AutoTokenizer, T5EncoderModel, pipeline
+
+import onnx
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def export_and_optimize_onnx(
     """
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     _model_for = model_for.lower()
-    _output_base = "../app/onnx/models/"
+    _output_base = "../onnx/models/"
     _onnx_name = "model.onnx"
     _decoder_onnx_name = "decoder_model.onnx"
     _has_decoder = False

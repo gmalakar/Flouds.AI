@@ -24,7 +24,7 @@ def get_logger(
 
     logger = logging.getLogger(name)
     level = (
-        logging.DEBUG if os.getenv("FASTAPI_DEBUG_MODE", "0") == "1" else logging.INFO
+        logging.DEBUG if os.getenv("FLOUDS_DEBUG_MODE", "0") == "1" else logging.INFO
     )
     logger.setLevel(level)
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")

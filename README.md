@@ -34,6 +34,7 @@ app/
     embedder_service.py     # Embedding service logic
     summarizer_service.py   # Summarization service logic
   setup.py                  # App setup and environment preparation
+onnx/                       # Default ONNX path (relative to working directory)
 onnx_loaders/
   export_model.py           # Script for exporting HuggingFace models to ONNX
   load_scripts.txt          # Example commands for exporting models
@@ -53,7 +54,7 @@ You can set server type, host, port, logging, ONNX options, and more.
 
 **New:**  
 You can now set a custom ONNX model root path using the `rootpath` field in the `onnx` section.  
-If `rootpath` is not set, the default path (`./app/onnx`) will be used.
+If `rootpath` is not set, the default path (`<WORKING-DIRECTORY>/onnx`) will be used.
 
 **Example:**
 ```json
@@ -64,13 +65,13 @@ If `rootpath` is not set, the default path (`./app/onnx`) will be used.
     "server": {
         "type": "uvicorn",
         "host": "0.0.0.0",
-        "port": 5001,
+        "port": 19690,
         "reload": true,
         "workers": 4,
         "model_session_provider": "CPUExecutionProvider"
     },
     "onnx": {
-        "rootpath": "./app/onnx"
+        "rootpath": "onnx"
     },
     "logging": {
         "folder": "logs",
@@ -133,7 +134,7 @@ Each entry in this file corresponds to a model you have downloaded and placed in
 Model paths are organized by task name. For example, for summarization models with `summarization_task: "s2s"`, the path will be:
 
 ```
-app/onnx/models/s2s/t5-small/
+/onnx/models/s2s/t5-small/
     encoder_model.onnx
     decoder_model.onnx
     special_tokens_map.json
@@ -317,30 +318,45 @@ You can run Flouds.Py as a Docker container for easy deployment.
 docker build -t flouds-py .
 ```
 
+- To build with GPU support (requires CUDA drivers on host):
+  ```sh
+  docker build --build-arg GPU=true -t flouds-py-gpu .
+  ```
+
 ### 2. Run the container
 
 ```sh
-docker run -p 5001:5001 \
+docker run -p 19690:19690 \
   -e FLOUDS_API_ENV=Production \
   -e FLOUDS_DEBUG_MODE=0 \
-  -e FLOUDS_ONNX_ROOT=/app/onnx \
+  -e FLOUDS_ONNX_ROOT=/flouds-py/onnx \
+  -e FLOUDS_PORT=19690 \
   flouds-py
 ```
 
-- The default port is `5001` (see `appsettings.json`).
-- The ONNX model root path is set via the `FLOUDS_ONNX_ROOT` environment variable (default: `/app/onnx`).
-- You can override any config value using environment variables (see below).
+- The default port is `19690` (see `appsettings.json` or override with `FLOUDS_PORT`).
+- The ONNX model root path is set via the `FLOUDS_ONNX_ROOT` environment variable (default: `/flouds-py/onnx`).
+- You can override any config value using environment variables.
 
 ### 3. Mount your ONNX models (optional)
 
 If you want to use your own ONNX models from outside the container:
 
 ```sh
-docker run -p 5001:5001 \
-  -v /path/to/your/onnx:/app/onnx \
-  -e FLOUDS_ONNX_ROOT=/app/onnx \
+docker run -p 19690:19690 \
+  -v /path/to/your/onnx:/flouds-py/onnx \
+  -e FLOUDS_ONNX_ROOT=/flouds-py/onnx \
+  -e FLOUDS_PORT=19690 \
   flouds-py
 ```
+
+- This mounts your local ONNX model directory into the container.
+
+---
+
+**Tip:**  
+- For development mode, set `FLOUDS_API_ENV=Development` and `FLOUDS_DEBUG_MODE=1`.
+- For GPU builds, use the `flouds-py-gpu` image and ensure your host has the necessary CUDA libraries.
 
 ---
 
@@ -351,7 +367,7 @@ You can control the application behavior using the following environment variabl
 - `FLOUDS_API_ENV` — Set to `Development` or `Production` (default: `Production`)
 - `FLOUDS_DEBUG_MODE` — Set to `1` for debug logging, `0` for normal (default: `0`)
 - `FLOUDS_ONNX_ROOT` — Path to the ONNX model root directory (default: as in `appsettings.json`)
-- `FLOUDS_PORT` — Override the server port (default: `5001`)
+- `FLOUDS_PORT` — Override the server port (default: `19690`)
 - `FLOUDS_HOST` — Override the server host (default: `0.0.0.0`)
 - `FLOUDS_SERVER_TYPE` — Server type, e.g., `uvicorn` or `hypercorn` (default: `uvicorn`)
 - `FLOUDS_MODEL_SESSION_PROVIDER` — ONNX session provider (default: `CPUExecutionProvider`)
@@ -359,9 +375,11 @@ You can control the application behavior using the following environment variabl
 Example for development mode:
 
 ```sh
-docker run -p 5001:5001 \
+docker run -p 19690:19690 \
   -e FLOUDS_API_ENV=Development \
   -e FLOUDS_DEBUG_MODE=1 \
+  -e FLOUDS_ONNX_ROOT=/flouds-py/onnx \
+  -e FLOUDS_PORT=19690 \
   flouds-py
 ```
 
@@ -373,7 +391,7 @@ The ONNX model root directory is set in [`app/config/appsettings.json`](app/conf
 
 ```json
 "onnx": {
-    "rootpath": "./app/onnx"
+    "rootpath": "onnx"
 }
 ```
 

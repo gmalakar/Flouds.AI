@@ -4,10 +4,10 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-import os
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
+import numpy as np
 import onnxruntime as ort
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
@@ -23,14 +23,22 @@ _tokenizer_local = threading.local()
 
 
 class BaseNLPService:
-    _root_path: str = os.path.abspath(
-        APP_SETTINGS.onnx.rootpath
-        if APP_SETTINGS.onnx.rootpath
-        else os.path.join(os.path.dirname(__file__), "..", "onnx")
-    )
+    _root_path: str = APP_SETTINGS.onnx.rootpath
+
     _encoder_sessions: ConcurrentDict = ConcurrentDict("_encoder_sessions")
 
     logger.debug(f"Base NLP service root path: {_root_path}")
+
+    @staticmethod
+    def _softmax(x: np.ndarray) -> np.ndarray:
+        """
+        Numerically stable softmax for 1D, 2D, or 3D numpy arrays.
+        Softmax is always applied along the last axis.
+        """
+        x = np.asarray(x)
+        x_max = np.max(x, axis=-1, keepdims=True)  # Avoid overflow
+        e_x = np.exp(x - x_max)  # Shift values for stability
+        return e_x / np.sum(e_x, axis=-1, keepdims=True)
 
     @staticmethod
     def _get_model_config(model_to_use: str) -> Any:

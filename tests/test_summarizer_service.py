@@ -158,7 +158,7 @@ class DummyGenConfig(dict):
     "app.services.summarizer_service.TextSummarizer.get_model",
     return_value=DummyModel(),
 )
-@patch("app.services.summarizer_service.ConfigLoader.get_onnx_config")
+@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
 def test_summarize_empty_summary(
     mock_get_config,
     mock_get_model,
@@ -207,7 +207,7 @@ def test_summarize_empty_summary(
     "app.services.summarizer_service.TextSummarizer.get_model",
     return_value=DummyModel(),
 )
-@patch("app.services.summarizer_service.ConfigLoader.get_onnx_config")
+@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
 def test_summarize_empty_summary_with_config(
     mock_get_config,
     mock_get_model,
@@ -250,7 +250,7 @@ def test_summarize_empty_summary_with_config(
     "app.services.summarizer_service.TextSummarizer.get_model",
     return_value=DummyModelException(),
 )
-@patch("app.services.summarizer_service.ConfigLoader.get_onnx_config")
+@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
 def test_summarize_generation_exception(
     mock_get_config,
     mock_get_model,
@@ -308,7 +308,7 @@ def test_remove_special_tokens():
     "app.services.summarizer_service.TextSummarizer.get_model",
     return_value=DummyModel(),
 )
-@patch("app.services.summarizer_service.ConfigLoader.get_onnx_config")
+@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
 def test_summarize_batch_seq2seqlm(
     mock_get_config,
     mock_get_model,
@@ -372,7 +372,7 @@ def test_summarize_batch_seq2seqlm(
     "app.services.summarizer_service.TextSummarizer.get_model",
     return_value=DummyModel(),
 )
-@patch("app.services.summarizer_service.ConfigLoader.get_onnx_config")
+@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
 def test_summarize_other(
     mock_get_config,
     mock_get_model,

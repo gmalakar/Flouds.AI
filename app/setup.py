@@ -15,28 +15,23 @@ from app.logger import get_logger
 
 # Load settings using AppSettingsLoader
 APP_SETTINGS = ConfigLoader.get_app_settings()
-
 logger = get_logger("setup")
 
+# Ensure APP_SETTINGS.app.working_dir is set to an absolute path
+if not getattr(APP_SETTINGS.app, "working_dir", None) or not os.path.isabs(
+    APP_SETTINGS.app.working_dir
+):
+    APP_SETTINGS.app.working_dir = os.getcwd()
+logger.info(f"Appsettings->Working Directory: {APP_SETTINGS.app.working_dir}")
+
+# Ensure ONNX root path is absolute and under the working directory if relative
+if APP_SETTINGS.onnx.rootpath and not os.path.isabs(APP_SETTINGS.onnx.rootpath):
+    # If not absolute, join with current working directory
+    APP_SETTINGS.onnx.rootpath = os.path.join(os.getcwd(), APP_SETTINGS.onnx.rootpath)
+
+logger.info(f"Appsettings-> ONNX root: {APP_SETTINGS.onnx.rootpath}")
+
 logger.info(f"Environment: {os.getenv('FLOUDS_API_ENV', 'Production')}")
-
-
-def ensure_server_installed_and_imported(server_name):
-    """Ensure the required ASGI server is installed and import it."""
-    try:
-        return importlib.import_module(server_name)
-    except ImportError:
-        logger.warning(f"{server_name} not found. Installing...")
-        try:
-            subprocess.run(["pip", "install", server_name], check=True)
-            logger.info(f"{server_name} installed successfully.")
-            return importlib.import_module(server_name)
-        except Exception as e:
-            logger.error(f"Failed to install or import {server_name}: {e}")
-            return None
-
-
-SERVER_MODULE = ensure_server_installed_and_imported(APP_SETTINGS.server.type.lower())
 
 # NLTK setup
 try:

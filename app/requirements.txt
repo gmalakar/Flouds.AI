@@ -1,15 +1,10 @@
 fastapi[standard]
 uvicorn
+hypercorn
 optimum[onnxruntime]
 transformers
 numpy
 onnxruntime
-onnx
 pydantic
 typing-extensions
 nltk
-scipy
-# Optional, only if used:
-# torch
-# redis
-# python-dotenv

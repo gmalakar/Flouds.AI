@@ -1,4 +1,81 @@
-*.pyc
+# Byte-compiled / optimized / DLL files
 __pycache__/
-app/onnx/
-app/config/appsettings.development.*
+*.py[cod]
+*.so
+*.pyd
+
+# Environment files
+.env
+*.env
+
+# Logs and test output
+*.log
+logs/
+.pytest_cache/
+coverage.*
+htmlcov/
+.tox/
+
+# IDE/editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Git and version control
+.git/
+.gitignore
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.whl
+
+# Data, models, and cache
+onnx/
+*.onnx
+*.pb
+*.tflite
+*.mlmodel
+*.hdf5 
+*.ckpt
+*.pth
+*.pt
+*.pkl
+*.pkl.gz
+*.tar.gz
+data/
+*.h5
+*.h5py
+*.model
+*.weights
+*.bin
+*.npz
+
+# Misc
+.DS_Store
+Thumbs.db
+
+# OS-specific
+ehthumbs.db
+Icon?
+desktop.ini
+
+# Jupyter and notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Temporary files
+*.tmp
+*.bak
+*.old
