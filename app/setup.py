@@ -30,11 +30,3 @@ if APP_SETTINGS.onnx.rootpath and not os.path.isabs(APP_SETTINGS.onnx.rootpath):
 logger.info(f"Appsettings-> ONNX root: {APP_SETTINGS.onnx.rootpath}")
 
 logger.info(f"Environment: {os.getenv('FLOUDS_API_ENV', 'Production')}")
-
-# NLTK setup
-try:
-    nltk.data.find("corpora/stopwords")
-    logger.info("NLTK stopwords corpus already downloaded.")
-except LookupError:
-    nltk.download("stopwords")
-    logger.info("NLTK stopwords corpus downloaded successfully.")

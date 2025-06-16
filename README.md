@@ -333,6 +333,7 @@ docker build -t flouds-py .
 
 ```sh
 docker run -p 19690:19690 \
+  -v /path/to/your/onnx:/flouds-py/onnx \
   -e FLOUDS_API_ENV=Production \
   -e FLOUDS_DEBUG_MODE=0 \
   -e FLOUDS_ONNX_ROOT=/flouds-py/onnx \
@@ -340,6 +341,7 @@ docker run -p 19690:19690 \
   gmalakar/flouds-py-cpu
 ```
 
+- The `-v /path/to/your/onnx:/flouds-py/onnx` option mounts your local ONNX model directory into the container.
 - The default port is `19690` (see `appsettings.json` or override with `FLOUDS_PORT`).
 - The ONNX model root path is set via the `FLOUDS_ONNX_ROOT` environment variable (default: `/flouds-py/onnx`).
 - You can override any config value using environment variables.
