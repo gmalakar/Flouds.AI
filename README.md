@@ -312,7 +312,13 @@ response = SentenceTransformer.embed_batch_async(batch_req)
 
 You can run Flouds.Py as a Docker container for easy deployment.
 
-### 1. Build the Docker image
+### 1. Pull the prebuilt image
+
+```sh
+docker pull gmalakar/flouds-py-cpu
+```
+
+### 2. Or build the Docker image locally
 
 ```sh
 docker build -t flouds-py .
@@ -323,7 +329,7 @@ docker build -t flouds-py .
   docker build --build-arg GPU=true -t flouds-py-gpu .
   ```
 
-### 2. Run the container
+### 3. Run the container
 
 ```sh
 docker run -p 19690:19690 \
@@ -331,14 +337,14 @@ docker run -p 19690:19690 \
   -e FLOUDS_DEBUG_MODE=0 \
   -e FLOUDS_ONNX_ROOT=/flouds-py/onnx \
   -e FLOUDS_PORT=19690 \
-  flouds-py
+  gmalakar/flouds-py-cpu
 ```
 
 - The default port is `19690` (see `appsettings.json` or override with `FLOUDS_PORT`).
 - The ONNX model root path is set via the `FLOUDS_ONNX_ROOT` environment variable (default: `/flouds-py/onnx`).
 - You can override any config value using environment variables.
 
-### 3. Mount your ONNX models (optional)
+### 4. Mount your ONNX models (optional)
 
 If you want to use your own ONNX models from outside the container:
 
@@ -347,7 +353,7 @@ docker run -p 19690:19690 \
   -v /path/to/your/onnx:/flouds-py/onnx \
   -e FLOUDS_ONNX_ROOT=/flouds-py/onnx \
   -e FLOUDS_PORT=19690 \
-  flouds-py
+  gmalakar/flouds-py-cpu
 ```
 
 - This mounts your local ONNX model directory into the container.

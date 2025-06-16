@@ -4,17 +4,15 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-import importlib
 import os
-import subprocess
 
 import nltk
 
+from app.app_init import APP_SETTINGS
 from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
 
 # Load settings using AppSettingsLoader
-APP_SETTINGS = ConfigLoader.get_app_settings()
 logger = get_logger("setup")
 
 # Ensure APP_SETTINGS.app.working_dir is set to an absolute path

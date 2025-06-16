@@ -6,13 +6,24 @@
 
 import asyncio
 import logging
+import sys
+from contextlib import asynccontextmanager
 
-from app import app
+from fastapi import FastAPI
+
+from app.app_init import APP_SETTINGS
 from app.routers import embedder, summarizer
-from app.setup import APP_SETTINGS
 
 logger = logging.getLogger("main")
 
+app = FastAPI(
+    title="Flouds.Py API",
+    description="API for Flouds.Py, a cloud-based summarization and embedding service.",
+    version="1.0.0",
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
 app.include_router(summarizer.router)
 app.include_router(embedder.router)
 

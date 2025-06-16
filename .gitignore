@@ -16,3 +16,4 @@ scripts/
 app/onnx/
 onnx/
 pyvenv.cfg
+clean_proj.bat

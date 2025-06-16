@@ -11,10 +11,10 @@ import numpy as np
 import onnxruntime as ort
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
+from app.app_init import APP_SETTINGS
 from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
 from app.modules.concurrent_dict import ConcurrentDict
-from app.setup import APP_SETTINGS
 
 logger = get_logger("base_nlp_service")
 
