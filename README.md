@@ -60,7 +60,7 @@ If `rootpath` is not set, the default path (`<WORKING-DIRECTORY>/onnx`) will be 
 ```json
 {
     "app": {
-        "name": "Flouds PY"
+        "name": "Flouds AI"
     },
     "server": {
         "type": "uvicorn",
@@ -315,35 +315,35 @@ You can run Flouds.Py as a Docker container for easy deployment.
 ### 1. Pull the prebuilt image
 
 ```sh
-docker pull gmalakar/flouds-py-cpu
+docker pull gmalakar/flouds-ai-cpu
 ```
 
 ### 2. Or build the Docker image locally
 
 ```sh
-docker build -t flouds-py .
+docker build -t flouds-ai-cpu .
 ```
 
 - To build with GPU support (requires CUDA drivers on host):
   ```sh
-  docker build --build-arg GPU=true -t flouds-py-gpu .
+  docker build --build-arg GPU=true -t flouds-ai-gpu .
   ```
 
 ### 3. Run the container
 
 ```sh
 docker run -p 19690:19690 \
-  -v /path/to/your/onnx:/flouds-py/onnx \
+  -v /path/to/your/onnx:/flouds-ai/onnx \
   -e FLOUDS_API_ENV=Production \
   -e FLOUDS_DEBUG_MODE=0 \
-  -e FLOUDS_ONNX_ROOT=/flouds-py/onnx \
+  -e FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
   -e FLOUDS_PORT=19690 \
-  gmalakar/flouds-py-cpu
+  gmalakar/flouds-ai-cpu
 ```
 
-- The `-v /path/to/your/onnx:/flouds-py/onnx` option mounts your local ONNX model directory into the container.
+- The `-v /path/to/your/onnx:/flouds-ai/onnx` option mounts your local ONNX model directory into the container.
 - The default port is `19690` (see `appsettings.json` or override with `FLOUDS_PORT`).
-- The ONNX model root path is set via the `FLOUDS_ONNX_ROOT` environment variable (default: `/flouds-py/onnx`).
+- The ONNX model root path is set via the `FLOUDS_ONNX_ROOT` environment variable (default: `/flouds-ai/onnx`).
 - You can override any config value using environment variables.
 
 ### 4. Mount your ONNX models (optional)
@@ -352,10 +352,9 @@ If you want to use your own ONNX models from outside the container:
 
 ```sh
 docker run -p 19690:19690 \
-  -v /path/to/your/onnx:/flouds-py/onnx \
-  -e FLOUDS_ONNX_ROOT=/flouds-py/onnx \
+  -v /path/to/your/onnx:/flouds-aiai/onnx \
   -e FLOUDS_PORT=19690 \
-  gmalakar/flouds-py-cpu
+  gmalakar/flouds-ai-cpu
 ```
 
 - This mounts your local ONNX model directory into the container.
@@ -364,7 +363,7 @@ docker run -p 19690:19690 \
 
 **Tip:**  
 - For development mode, set `FLOUDS_API_ENV=Development` and `FLOUDS_DEBUG_MODE=1`.
-- For GPU builds, use the `flouds-py-gpu` image and ensure your host has the necessary CUDA libraries.
+- For GPU builds, use the `flouds-ai-gpu` image and ensure your host has the necessary CUDA libraries.
 
 ---
 
@@ -386,9 +385,9 @@ Example for development mode:
 docker run -p 19690:19690 \
   -e FLOUDS_API_ENV=Development \
   -e FLOUDS_DEBUG_MODE=1 \
-  -e FLOUDS_ONNX_ROOT=/flouds-py/onnx \
+  -e FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
   -e FLOUDS_PORT=19690 \
-  flouds-py
+  flouds-ai
 ```
 
 ---

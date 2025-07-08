@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class AppConfig(BaseModel):
-    name: str = Field(default="Flouds PY")
+    name: str = Field(default="Flouds AI")
     debug: bool = Field(default=False)
     working_dir: str = Field(default=os.getcwd())
 

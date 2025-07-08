@@ -8,6 +8,7 @@ __pycache__/
 logs/
 venv/
 .venv/
+.vs/
 .envrc
 .idea/
 .vscode/

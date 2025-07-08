@@ -7,6 +7,7 @@
 import json
 import os
 
+from app.config import appsettings
 from app.config.appsettings import AppSettings
 from app.config.onnx_config import OnnxConfig
 from app.logger import get_logger
@@ -51,7 +52,7 @@ class ConfigLoader:
         Raises KeyError if the key is not found.
         """
         if ConfigLoader._onnx_config_cache is None:
-            config_file_name = "onnx_config.json"
+            config_file_name = os.getenv("FLOUDS_ONNX_CONFIG_FILE", "onnx_config.json")
             data = ConfigLoader._load_config_data(config_file_name)
             ConfigLoader._onnx_config_cache = {
                 k: OnnxConfig(**v) for k, v in data.items()

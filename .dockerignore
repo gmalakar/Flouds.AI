@@ -18,6 +18,7 @@ htmlcov/
 
 # IDE/editor folders
 .vscode/
+.vs/
 .idea/
 *.swp
 *.swo
