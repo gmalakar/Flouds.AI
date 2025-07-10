@@ -7,7 +7,6 @@
 import json
 import os
 
-from app.config import appsettings
 from app.config.appsettings import AppSettings
 from app.config.onnx_config import OnnxConfig
 from app.logger import get_logger
@@ -27,8 +26,11 @@ class ConfigLoader:
         data = ConfigLoader._load_config_data("appsettings.json", True)
         appsettings = AppSettings(**data)
         # set ONNX_ROOT
-        appsettings.onnx.rootpath = os.getenv(
-            "FLOUDS_ONNX_ROOT", appsettings.onnx.rootpath
+        appsettings.onnx.model_path = os.getenv(
+            "FLOUDS_ONNX_ROOT", appsettings.onnx.model_path
+        )
+        appsettings.onnx.config_file = os.getenv(
+            "FLOUDS_ONNX_CONFIG_FILE", appsettings.onnx.config_file
         )
         appsettings.server.port = int(os.getenv("FLOUDS_PORT", appsettings.server.port))
         appsettings.server.host = os.getenv("FLOUDS_HOST", appsettings.server.host)
@@ -52,7 +54,7 @@ class ConfigLoader:
         Raises KeyError if the key is not found.
         """
         if ConfigLoader._onnx_config_cache is None:
-            config_file_name = os.getenv("FLOUDS_ONNX_CONFIG_FILE", "onnx_config.json")
+            config_file_name = AppSettings.app.onnx.config_file
             data = ConfigLoader._load_config_data(config_file_name)
             ConfigLoader._onnx_config_cache = {
                 k: OnnxConfig(**v) for k, v in data.items()

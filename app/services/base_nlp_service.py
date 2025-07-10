@@ -23,7 +23,7 @@ _tokenizer_local = threading.local()
 
 
 class BaseNLPService:
-    _root_path: str = APP_SETTINGS.onnx.rootpath
+    _root_path: str = APP_SETTINGS.onnx.model_path
 
     _encoder_sessions: ConcurrentDict = ConcurrentDict("_encoder_sessions")
 

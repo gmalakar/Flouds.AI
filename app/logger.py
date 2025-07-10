@@ -9,13 +9,11 @@ import os
 from logging.handlers import RotatingFileHandler
 
 
-def get_logger(
-    name: str = "flouds",
-    log_file: str = "app.log",
-    log_dir: str = "logs",
-    max_bytes: int = 5 * 1024 * 1024,
-    backup_count: int = 3,  # 5 MB, 3 backups
-) -> logging.Logger:
+def get_logger(name: str = "flouds") -> logging.Logger:
+    log_dir = os.getenv("FLOUDS_LOG_PATH", "/var/log/flouds")
+    log_file = "flouds-vectordb.log"
+    max_bytes = 10485760
+    backup_count = 5
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     if log_file is None:

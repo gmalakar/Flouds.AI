@@ -25,16 +25,11 @@ class ServerConfig(BaseModel):
 
 
 class OnnxConfigSection(BaseModel):
-    rootpath: str = Field(default="onnx")
-
-
-class LoggingConfig(BaseModel):
-    folder: str = Field(default="logs")
-    app_log_file: str = Field(default="flouds.log")
+    model_path: str = Field(default="onnx")
+    config_file: str = Field(default="/app/config/onnx_config.json")
 
 
 class AppSettings(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     onnx: OnnxConfigSection = Field(default_factory=OnnxConfigSection)
-    logging: LoggingConfig = Field(default_factory=LoggingConfig)
