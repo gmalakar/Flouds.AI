@@ -1,82 +1,23 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*.so
-*.pyd
-
-# Environment files
-.env
-*.env
-
-# Logs and test output
-*.log
-logs/
-.pytest_cache/
-coverage.*
-htmlcov/
-.tox/
-
-# IDE/editor folders
-.vscode/
-.vs/
-.idea/
-*.swp
-*.swo
-
-# Virtual environments
-venv/
-.venv/
-ENV/
-env/
-env.bak/
-venv.bak/
-
-# Git and version control
+**/*.onnx
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
 .git/
 .gitignore
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-.eggs/
-*.whl
-
-# Data, models, and cache
+README.md
+Dockerfile*
+tests/
+logs/
 onnx/
-*.onnx
-*.pb
-*.tflite
-*.mlmodel
-*.hdf5 
-*.ckpt
-*.pth
-*.pt
-*.pkl
-*.pkl.gz
-*.tar.gz
-data/
-*.h5
-*.h5py
-*.model
-*.weights
-*.bin
-*.npz
-
-# Misc
-.DS_Store
-Thumbs.db
-
-# OS-specific
-ehthumbs.db
-Icon?
-desktop.ini
-
-# Jupyter and notebooks
-.ipynb_checkpoints/
-*.ipynb
-
-# Temporary files
-*.tmp
-*.bak
-*.old
+.pytest_cache/
+.coverage
+*.log
+.env*
+.venv/
+venv/
+env/
+*.md
+*.txt
+!app/requirements.txt

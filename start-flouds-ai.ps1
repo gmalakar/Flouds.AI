@@ -1,5 +1,5 @@
 # =============================================================================
-# File: .ps1
+# File: start-flouds-ai.ps1
 # Date: 2024-06-10
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
@@ -8,12 +8,13 @@
 # and environment variable handling based on a .env file.
 #
 # Usage:
-#   ./start-flouds-ai.ps1 [-EnvFile <path>] [-InstanceName <name>] [-ImageName <name>] [-Force] [-BuildImage]
+#   ./start-flouds-ai.ps1 [-EnvFile <path>] [-InstanceName <name>] [-ImageName <name>] [-Tag <tag>] [-Force] [-BuildImage]
 #
 # Parameters:
 #   -EnvFile       : Path to .env file (default: ".env")
 #   -InstanceName  : Name of the Docker container (default: "flouds-ai-instance")
-#   -ImageName     : Docker image to use (default: "gmalakar/flouds-ai-cpu:latest")
+#   -ImageName     : Base Docker image name (default: "gmalakar/flouds-ai")
+#   -Tag           : Tag for the Docker image (default: "latest-cpu")
 #   -Force         : Force restart container if it exists
 #   -BuildImage    : Build Docker image locally before starting container
 # =============================================================================
@@ -21,7 +22,9 @@
 param (
     [string]$EnvFile = ".env",
     [string]$InstanceName = "flouds-ai-instance",
-    [string]$ImageName = "gmalakar/flouds-ai-cpu:latest",
+    [string]$ImageName = "gmalakar/flouds-ai-cpu",  # Changed from gmalakar/flouds-ai
+    [string]$Tag = "latest",                        # Changed from latest-cpu
+    [switch]$GPU = $false,                          # Added GPU switch
     [switch]$Force = $false,
     [switch]$BuildImage = $false
 )
@@ -99,13 +102,56 @@ function Check-Docker {
     }
 }
 
+function Attach-NetworkIfNotConnected {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$Container,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$Network
+    )
+    
+    # Check if container is running
+    $containerRunning = docker ps --format '{{.Names}}' | Where-Object { $_ -eq $Container }
+    if (-not $containerRunning) {
+        Write-Warning "Container $Container is not running. Skipping network attachment."
+        return
+    }
+    
+    # Get current networks for the container
+    $networks = docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' $Container
+    
+    # Check if container is already connected to the network
+    if ($networks -notmatch "\b$Network\b") {
+        Write-Host "🔗 Attaching network $Network to container $Container" -ForegroundColor Yellow
+        docker network connect $Network $Container 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "Successfully connected $Container to $Network"
+        } else {
+            Write-Warning "Failed to connect $Container to $Network"
+        }
+    } else {
+        Write-Success "Container $Container is already connected to $Network"
+    }
+}
+
 # ========================== MAIN SCRIPT ==========================
 
+# Adjust image name based on GPU flag
+if ($GPU -and $ImageName -eq "gmalakar/flouds-ai-cpu") {
+    $ImageName = "gmalakar/flouds-ai-gpu"
+}
+
+# Create full image name with tag
+$fullImageName = "${ImageName}:${Tag}"
+
 Write-Host "========================================================="
-Write-Host "                 FLOUDS.PY STARTER SCRIPT                " -ForegroundColor Cyan
+Write-Host "                 Flouds AI STARTER SCRIPT                " -ForegroundColor Cyan
 Write-Host "========================================================="
 Write-Host "Instance Name : $InstanceName"
-Write-Host "Image         : $ImageName"
+Write-Host "Base Image    : $ImageName"
+Write-Host "Tag           : $Tag"
+Write-Host "Full Image    : $fullImageName"
 Write-Host "Environment   : $EnvFile"
 Write-Host "Build Image   : $BuildImage"
 Write-Host "Force Restart : $Force"
@@ -183,15 +229,15 @@ if (-not $envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
 # Build image if requested
 if ($BuildImage) {
     Write-StepHeader "Building Docker image"
-    Write-Host "Building $ImageName..."
-    docker build -t $ImageName .
+    Write-Host "Building $fullImageName..."
+    docker build -t $fullImageName .
     
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to build Docker image."
         exit 1
     }
     
-    Write-Success "Docker image built successfully: $ImageName"
+    Write-Success "Docker image built successfully: $fullImageName"
 }
 
 # Create Docker network
@@ -231,7 +277,7 @@ if ($envVars.ContainsKey("FLOUDS_ONNX_CONFIG_FILE_AT_HOST")) {
     $configPath = $envVars["FLOUDS_ONNX_CONFIG_FILE_AT_HOST"]
     $dockerConfigPath = $envVars["FLOUDS_ONNX_CONFIG_FILE"]
     if (-not $dockerConfigPath) {
-        $dockerConfigPath = "/flouds-ai/app/config/onnx_config.json"
+        $dockerConfigPath = "/flouds-py/app/config/onnx_config.json"
     }
     Write-Host "Mapping ONNX config: $configPath → $dockerConfigPath"
     $dockerArgs += "-v", "${configPath}:${dockerConfigPath}:ro"
@@ -243,7 +289,7 @@ if ($envVars.ContainsKey("FLOUDS_ONNX_MODEL_PATH_AT_HOST")) {
     $modelPath = $envVars["FLOUDS_ONNX_MODEL_PATH_AT_HOST"] 
     $dockerOnnxPath = $envVars["FLOUDS_ONNX_ROOT"]
     if (-not $dockerOnnxPath) {
-        $dockerOnnxPath = "/flouds-ai/onnx"
+        $dockerOnnxPath = "/flouds-py/onnx"
     }
     Write-Host "Mapping ONNX models: $modelPath → $dockerOnnxPath"
     $dockerArgs += "-v", "${modelPath}:${dockerOnnxPath}:ro"
@@ -255,25 +301,32 @@ if ($envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
     $logPath = $envVars["FLOUDS_LOG_PATH_AT_HOST"]
     $dockerLogPath = $envVars["FLOUDS_LOG_PATH"] 
     if (-not $dockerLogPath) {
-        $dockerLogPath = "/var/log/flouds"
+        $dockerLogPath = "/var/logs/flouds"
     }
     Write-Host "Mapping logs: $logPath → $dockerLogPath"
     $dockerArgs += "-v", "${logPath}:${dockerLogPath}:rw"
     $dockerArgs += "-e", "FLOUDS_LOG_PATH=${dockerLogPath}"
 }
 
+# Add platform flag if specified
+if ($envVars.ContainsKey("DOCKER_PLATFORM")) {
+    $platform = $envVars["DOCKER_PLATFORM"]
+    Write-Host "Setting platform: $platform"
+    $dockerArgs += "--platform", $platform
+}
+
 # Add image name
-$dockerArgs += $ImageName
+$dockerArgs += $fullImageName
 
 # Start the container
-Write-StepHeader "Starting Flouds.Py container"
+Write-StepHeader "Starting Flouds AI container"
 Write-Host "Command: docker $($dockerArgs -join ' ')" -ForegroundColor Gray
 
 try {
     & docker $dockerArgs
     
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "Flouds.Py container started successfully"
+        Write-Success "Flouds AI container started successfully"
         Write-Success "API available at: http://localhost:19690/docs"
         
         # Wait for container to initialize
@@ -283,13 +336,21 @@ try {
         # Show container status
         Write-StepHeader "Container Status"
         docker ps --filter "name=$InstanceName" --format "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+        
+        # Connect to other networks if needed
+        $vectorNetwork = "flouds_vector_network"
+        $networkExists = docker network ls --format '{{.Name}}' | Where-Object { $_ -eq $vectorNetwork }
+        if ($networkExists) {
+            Write-Host "Connecting to vector network: $vectorNetwork" -ForegroundColor Yellow
+            Attach-NetworkIfNotConnected -Container $InstanceName -Network $vectorNetwork
+        }
     } else {
-        Write-Error "Failed to start Flouds.Py container."
+        Write-Error "Failed to start Flouds AI container."
         exit 1
     }
 }
 catch {
-    Write-Error "Error starting Flouds.Py container: $_"
+    Write-Error "Error starting Flouds AI container: $_"
     exit 1
 }
 
@@ -299,6 +360,7 @@ Write-Host "Use the following commands to manage the container:" -ForegroundColo
 Write-Host "  * View logs: docker logs -f $InstanceName" -ForegroundColor Gray
 Write-Host "  * Stop container: docker stop $InstanceName" -ForegroundColor Gray
 Write-Host "  * Remove container: docker rm $InstanceName" -ForegroundColor Gray
+Write-Host "  * View API docs: http://localhost:19690/docs" -ForegroundColor Gray
 Write-Host ""
 
 $showLogs = Read-Host "Would you like to view container logs now? (y/n)"

@@ -18,3 +18,4 @@ app/onnx/
 onnx/
 pyvenv.cfg
 clean_proj.bat
+app/config/appsettings.development.json

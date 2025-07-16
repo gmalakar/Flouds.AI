@@ -732,9 +732,9 @@ class TextSummarizer(BaseNLPService):
                         # Greedy decoding
                         next_token_id = int(np.argmax(logits))
 
-                    logger.debug(
-                        f"Step: {_}, next_token_id: {next_token_id}, eos_token_id: {eos_token_id}"
-                    )
+                    # logger.debug(
+                    #    f"Step: {_}, next_token_id: {next_token_id}, eos_token_id: {eos_token_id}"
+                    # )
 
                     summary_ids.append(next_token_id)
                     if next_token_id == eos_token_id:

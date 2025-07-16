@@ -4,6 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
+import os
 import threading
 from typing import Any, Optional
 
@@ -20,6 +21,10 @@ logger = get_logger("base_nlp_service")
 
 # Add thread-local storage for tokenizers
 _tokenizer_local = threading.local()
+
+
+def is_local_path(path: str) -> bool:
+    return os.path.exists(path)
 
 
 class BaseNLPService:
@@ -59,9 +64,17 @@ class BaseNLPService:
         if not hasattr(_tokenizer_local, "tokenizers"):
             _tokenizer_local.tokenizers = {}
         if tokenizer_path not in _tokenizer_local.tokenizers:
-            _tokenizer_local.tokenizers[tokenizer_path] = AutoTokenizer.from_pretrained(
-                tokenizer_path
-            )
+            if is_local_path(tokenizer_path):
+                _tokenizer_local.tokenizers[tokenizer_path] = (
+                    AutoTokenizer.from_pretrained(
+                        tokenizer_path,
+                        local_files_only=True,
+                    )
+                )
+            else:
+                _tokenizer_local.tokenizers[tokenizer_path] = (
+                    AutoTokenizer.from_pretrained(tokenizer_path)
+                )
         return _tokenizer_local.tokenizers[tokenizer_path]
 
     # Optionally, for backward compatibility:

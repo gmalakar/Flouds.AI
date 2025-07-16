@@ -13,20 +13,20 @@ class AppConfig(BaseModel):
     name: str = Field(default="Flouds AI")
     debug: bool = Field(default=False)
     working_dir: str = Field(default=os.getcwd())
+    is_production: bool = Field(default=True)
 
 
 class ServerConfig(BaseModel):
     type: str = Field(default="uvicorn")
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=5001)
-    reload: bool = Field(default=True)
-    workers: int = Field(default=4)
     model_session_provider: str = Field(default="CPUExecutionProvider")
+    model_config = {"protected_namespaces": ()}
 
 
 class OnnxConfigSection(BaseModel):
-    model_path: str = Field(default="onnx")
-    config_file: str = Field(default="/app/config/onnx_config.json")
+    model_path: str = None
+    config_file: str = Field(default="onnx_config.json")
 
 
 class AppSettings(BaseModel):

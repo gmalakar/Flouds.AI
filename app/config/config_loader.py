@@ -6,6 +6,7 @@
 
 import json
 import os
+import sys
 
 from app.config.appsettings import AppSettings
 from app.config.onnx_config import OnnxConfig
@@ -15,7 +16,8 @@ logger = get_logger("config_loader")
 
 
 class ConfigLoader:
-    _onnx_config_cache = None
+    __onnx_config_cache = None
+    __appsettings = None
 
     @staticmethod
     def get_app_settings() -> AppSettings:
@@ -24,25 +26,46 @@ class ConfigLoader:
         Performs a deep merge for nested config sections.
         """
         data = ConfigLoader._load_config_data("appsettings.json", True)
-        appsettings = AppSettings(**data)
+        ConfigLoader.__appsettings = AppSettings(**data)
+        # set isproduction
+        ConfigLoader.__appsettings.app.is_production = (
+            os.getenv("FLOUDS_API_ENV", "Production").lower() == "production"
+        )
         # set ONNX_ROOT
-        appsettings.onnx.model_path = os.getenv(
-            "FLOUDS_ONNX_ROOT", appsettings.onnx.model_path
+        ConfigLoader.__appsettings.onnx.model_path = os.getenv(
+            "FLOUDS_ONNX_ROOT", ConfigLoader.__appsettings.onnx.model_path
         )
-        appsettings.onnx.config_file = os.getenv(
-            "FLOUDS_ONNX_CONFIG_FILE", appsettings.onnx.config_file
+        if not ConfigLoader.__appsettings.onnx.model_path:
+            logger.error(
+                f"ONNX model path is not set. Please set it in appsettings.json or via the FLOUDS_ONNX_ROOT environment variable and restart application."
+            )
+            sys.exit(1)
+        ConfigLoader.__appsettings.onnx.config_file = os.getenv(
+            "FLOUDS_ONNX_CONFIG_FILE", ConfigLoader.__appsettings.onnx.config_file
         )
-        appsettings.server.port = int(os.getenv("FLOUDS_PORT", appsettings.server.port))
-        appsettings.server.host = os.getenv("FLOUDS_HOST", appsettings.server.host)
-        appsettings.server.type = os.getenv(
-            "FLOUDS_SERVER_TYPE", appsettings.server.type
+        if not ConfigLoader.__appsettings.onnx.config_file:
+            logger.error(
+                "ONNX config file is not set. Please set it in appsettings.json or via the FLOUDS_ONNX_CONFIG_FILE environment variable and restart application."
+            )
+            sys.exit(1)
+        ConfigLoader.__appsettings.server.port = int(
+            os.getenv("FLOUDS_PORT", ConfigLoader.__appsettings.server.port)
         )
-        appsettings.server.model_session_provider = os.getenv(
+        ConfigLoader.__appsettings.server.host = os.getenv(
+            "FLOUDS_HOST", ConfigLoader.__appsettings.server.host
+        )
+        ConfigLoader.__appsettings.server.type = os.getenv(
+            "FLOUDS_SERVER_TYPE", ConfigLoader.__appsettings.server.type
+        )
+        ConfigLoader.__appsettings.server.model_session_provider = os.getenv(
             "FLOUDS_MODEL_SESSION_PROVIDER",
-            appsettings.server.model_session_provider,
+            ConfigLoader.__appsettings.server.model_session_provider,
         )
-        appsettings.app.debug = os.getenv("FLOUDS_DEBUG_MODE", "0") == "1"
-        return appsettings
+        ConfigLoader.__appsettings.app.debug = (
+            os.getenv("FLOUDS_DEBUG_MODE", "0") == "1"
+        )
+        # logger.debug("Loaded AppSettings: %s", ConfigLoader.__appsettings)
+        return ConfigLoader.__appsettings
 
     @staticmethod
     def get_onnx_config(key: str) -> OnnxConfig:
@@ -53,16 +76,16 @@ class ConfigLoader:
         Returns the OnnxConfig for the specified key/model.
         Raises KeyError if the key is not found.
         """
-        if ConfigLoader._onnx_config_cache is None:
-            config_file_name = AppSettings.app.onnx.config_file
+        if ConfigLoader.__onnx_config_cache is None:
+            config_file_name = ConfigLoader.__appsettings.onnx.config_file
             data = ConfigLoader._load_config_data(config_file_name)
-            ConfigLoader._onnx_config_cache = {
+            ConfigLoader.__onnx_config_cache = {
                 k: OnnxConfig(**v) for k, v in data.items()
             }
 
-        if key not in ConfigLoader._onnx_config_cache:
+        if key not in ConfigLoader.__onnx_config_cache:
             raise KeyError(f"Model config '{key}' not found in onnx_config.json")
-        return ConfigLoader._onnx_config_cache[key]
+        return ConfigLoader.__onnx_config_cache[key]
 
     @staticmethod
     def _load_config_data(config_file_name: str, check_env_file: bool = False) -> dict:
@@ -93,10 +116,15 @@ class ConfigLoader:
             env = os.getenv("FLOUDS_API_ENV", "Production")
             name, ext = os.path.splitext(config_file_name)
             env_path = os.path.join(base_dir, f"{name}.{env.lower()}{ext}")
+            logger.debug(f"Loading config from {env_path}")
             if os.path.exists(env_path):
                 with open(env_path, "r", encoding="utf-8") as f:
                     env_data = json.load(f)
                 deep_update(data, env_data)
+            else:
+                logger.warning(
+                    f"Environment-specific config file not found: {env_path}. Using base config."
+                )
 
         return data
 

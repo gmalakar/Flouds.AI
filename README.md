@@ -1,10 +1,10 @@
 > **Note:**  
-> This project is under active development and we are looking for more collaborators to help improve and extend Flouds.Py!  
+> This project is under active development and we are looking for more collaborators to help improve and extend Flouds AI!  
 > If you're interested in contributing, please reach out or open a pull request.
 
-# Flouds.Py
+# Flouds AI
 
-**Flouds.Py** is a Python-based NLP service framework for text summarization and embedding, supporting both HuggingFace Transformers and ONNX runtime models. It is designed for extensibility, robust error handling, and easy integration into larger applications or microservices.
+**Flouds AI** is a Python-based NLP service framework for text summarization and embedding, supporting both HuggingFace Transformers and ONNX runtime models. It is designed for extensibility, robust error handling, and easy integration into larger applications or microservices.
 
 ---
 
@@ -13,7 +13,7 @@
 - **Text Summarization**: Supports both sequence-to-sequence language models and ONNX-based summarization.
 - **Text Embedding**: Provides sentence and document embeddings using ONNX or HuggingFace models.
 - **Batch Processing**: Efficiently handles batch summarization and embedding requests.
-- **Configurable**: Easily switch between models and runtime backends via configuration.
+- **Configurable**: Easily switch between models and runtime backends via configuration or environment variables.
 - **Test Coverage**: Includes comprehensive unit tests with pytest and mocking for all major service paths.
 - **Extensible**: Designed for easy extension to new NLP tasks and models.
 - **FastAPI Powered**: Uses [FastAPI](https://fastapi.tiangolo.com/) for serving APIs.
@@ -52,9 +52,9 @@ tests/
 All main configuration is handled via `app/config/appsettings.json`.  
 You can set server type, host, port, logging, ONNX options, and more.
 
-**New:**  
-You can now set a custom ONNX model root path using the `rootpath` field in the `onnx` section.  
-If `rootpath` is not set, the default path (`<WORKING-DIRECTORY>/onnx`) will be used.
+**ONNX Model Path is Required:**  
+You **must** set the ONNX model root path using the `model_path` field in the `onnx` section or override it with the `FLOUDS_ONNX_ROOT` environment variable.  
+If not set, the application will exit with an error.
 
 **Example:**
 ```json
@@ -66,19 +66,16 @@ If `rootpath` is not set, the default path (`<WORKING-DIRECTORY>/onnx`) will be 
         "type": "uvicorn",
         "host": "0.0.0.0",
         "port": 19690,
-        "reload": true,
-        "workers": 4,
         "model_session_provider": "CPUExecutionProvider"
     },
     "onnx": {
-        "rootpath": "onnx"
-    },
-    "logging": {
-        "folder": "logs",
-        "app_log_file": "flouds.log"
+        "model_path": "onnx",
+        "config_file": "onnx_config.json"
     }
 }
 ```
+
+- You can override any value using environment variables.
 
 ---
 
@@ -124,9 +121,6 @@ Each entry in this file corresponds to a model you have downloaded and placed in
 }
 ```
 
-**How it works:**
-- You must add an entry for each ONNX model you want to use.
-- The paths and configuration options are defined according to the `embedder_task` (for embedding models) or `summarization_task` (for summarization models).
 - The structure of your ONNX model folder should match the configuration in this file.
 
 #### ONNX Model Folder Structure
@@ -145,31 +139,22 @@ For embedding models, the folder will use the `embedder_task` value.
 
 **Note:**  
 The `summarization_task` or `embedder_task` values are typically set to the same value as the `--model_for` argument used when exporting models to ONNX (see `onnx_loaders/load_scripts.txt`).  
-However, you are free to use any folder name for your task (e.g., `s2s`, `fe`, or a custom name) and organize your ONNX models and configurations accordingly.  
 Just make sure the path you specify in `summarization_task` or `embedder_task` matches the folder structure where your ONNX models and config files are stored.
-
-If you want to use the same ONNX model for both summarization and embedding tasks, you can specify the same path for both `summarization_task` and `embedder_task` in your configuration.
 
 #### `use_seq2seqlm` Option
 
-There are two ways to perform summarization with ONNX models:
-
 - **`use_seq2seqlm: true`**  
-  If you set `use_seq2seqlm` to `true`, the service will use `ORTModelForSeq2SeqLM` and its `.generate()` method for summarization, which closely mimics HuggingFace's generate pipeline and is typically easier to use for supported models.
-
+  Uses `ORTModelForSeq2SeqLM` and its `.generate()` method for summarization (recommended for supported models).
 - **`use_seq2seqlm: false`** (default)  
-  If you set `use_seq2seqlm` to `false` (or omit it), the service will use the lower-level `ort.InferenceSession` for both encoding and decoding, giving you more control and compatibility with custom ONNX models.
-
-Choose the option that matches your exported ONNX model and desired inference flow.
+  Uses the lower-level `ort.InferenceSession` for both encoding and decoding.
 
 #### Embedder Model Notes
 
 - For embedding models, if your ONNX model file is named `model.onnx`, you do **not** need to specify the model name in the config (`encoder_onnx_model` is optional).
-- If your model file has a different name, set `encoder_onnx_model` to the correct filename (see the `sentence-t5-base` example).
+- If your model file has a different name, set `encoder_onnx_model` to the correct filename.
 - The `logits` flag:  
   - If you know the encoder output is logits, set `"logits": true` in your config.
-  - If not set (default is `false`), the process will try to detect if the output is logits and process accordingly.
-- For embedders, ONNX `InferenceSession` will always be used.
+  - If not set, the process will try to detect if the output is logits and process accordingly.
 
 ---
 
@@ -217,14 +202,6 @@ python onnx_loaders/export_model.py --model_for "s2s" --model_name "Falconsai/te
 - `"s2s"` = sequence-to-sequence (summarization)
 - `--optimize` enables ONNX graph optimizations
 - `--task` specifies the HuggingFace task type
-
-**Note:**  
-The `summarization_task` or `embedder_task` in your `onnx_config.json` are typically set to the same value as the `--model_for` argument used when exporting models to ONNX.  
-However, you can use any name for your task folder and keep your ONNX models and configurations organized as you prefer.  
-Just ensure the path you specify in `summarization_task` or `embedder_task` matches your folder structure.  
-If you want to use the same ONNX model for both tasks, you can specify the same path for both.
-
-See `onnx_loaders/load_scripts.txt` for more examples.
 
 ---
 
@@ -310,60 +287,91 @@ response = SentenceTransformer.embed_batch_async(batch_req)
 
 ## Docker Usage
 
-You can run Flouds.Py as a Docker container for easy deployment.
+You can run Flouds AI as a Docker container for easy deployment.
 
-### 1. Pull the prebuilt image
+### Docker Hub
+
+Prebuilt images are available on [Docker Hub](https://hub.docker.com/r/gmalakar/flouds-ai-cpu):
 
 ```sh
-docker pull gmalakar/flouds-ai-cpu
+docker pull gmalakar/flouds-ai-cpu:latest
 ```
 
-### 2. Or build the Docker image locally
+### Build the Docker Image Locally
 
 ```sh
 docker build -t flouds-ai-cpu .
 ```
 
-- To build with GPU support (requires CUDA drivers on host):
-  ```sh
-  docker build --build-arg GPU=true -t flouds-ai-gpu .
-  ```
+For GPU support (requires CUDA drivers on host):
 
-### 3. Run the container
+```sh
+docker build --build-arg GPU=true -t flouds-ai-gpu .
+```
+
+### Start the Docker Container
 
 ```sh
 docker run -p 19690:19690 \
   -v /path/to/your/onnx:/flouds-ai/onnx \
-  -e FLOUDS_API_ENV=Production \
-  -e FLOUDS_DEBUG_MODE=0 \
   -e FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
-  -e FLOUDS_PORT=19690 \
+  -e FLOUDS_ONNX_CONFIG_FILE=/flouds-ai/onnx/onnx_config.json \
   gmalakar/flouds-ai-cpu
 ```
 
-- The `-v /path/to/your/onnx:/flouds-ai/onnx` option mounts your local ONNX model directory into the container.
-- The default port is `19690` (see `appsettings.json` or override with `FLOUDS_PORT`).
-- The ONNX model root path is set via the `FLOUDS_ONNX_ROOT` environment variable (default: `/flouds-ai/onnx`).
-- You can override any config value using environment variables.
-
-### 4. Mount your ONNX models (optional)
-
-If you want to use your own ONNX models from outside the container:
-
-```sh
-docker run -p 19690:19690 \
-  -v /path/to/your/onnx:/flouds-aiai/onnx \
-  -e FLOUDS_PORT=19690 \
-  gmalakar/flouds-ai-cpu
-```
-
-- This mounts your local ONNX model directory into the container.
+- `-v /path/to/your/onnx:/flouds-ai/onnx` mounts your ONNX model directory into the container.
+- `-e FLOUDS_ONNX_ROOT` sets the ONNX model root path (**required**).
+- `-e FLOUDS_ONNX_CONFIG_FILE` sets the ONNX config file path (optional, defaults to `onnx_config.json` in the model path).
 
 ---
 
+### Using PowerShell Scripts for Docker
+
+You can use the provided PowerShell scripts to build and run the Docker container on Windows:
+
+#### Build the Docker Image
+
+```powershell
+.\build-flouds-ai.ps1
+.\build-flouds-ai.ps1 -Tag v1.0.0
+.\build-flouds-ai.ps1 -GPU
+.\build-flouds-ai.ps1 -PushImage
+```
+
+#### Start the Docker Container
+
+```powershell
+.\start-flouds-ai.ps1
+.\start-flouds-ai.ps1 -EnvFile .env -Tag v1.0.0
+.\start-flouds-ai.ps1 -Force
+```
+
+- The script will validate required environment variables, map your ONNX and log directories, and set up Docker networks as needed.
+
 **Tip:**  
-- For development mode, set `FLOUDS_API_ENV=Development` and `FLOUDS_DEBUG_MODE=1`.
-- For GPU builds, use the `flouds-ai-gpu` image and ensure your host has the necessary CUDA libraries.
+You can also use the Bash script [`start-flouds-ai.sh`](start-flouds-ai.sh) for Linux/macOS environments.
+
+---
+
+## Significance of the `.env` File
+
+The `.env` file allows you to set environment variables for configuration without modifying code.
+
+**Common variables:**
+- `FLOUDS_API_ENV` — Set to `Development` or `Production`
+- `FLOUDS_DEBUG_MODE` — Set to `1` for debug logging
+- `FLOUDS_ONNX_ROOT` — **(Required)** Path to your ONNX model directory
+- `FLOUDS_ONNX_CONFIG_FILE` — Path to your ONNX config file (default: `onnx_config.json` in the model path)
+
+**Example `.env`:**
+```
+FLOUDS_API_ENV=Production
+FLOUDS_DEBUG_MODE=0
+FLOUDS_ONNX_ROOT=/flouds-ai/onnx
+FLOUDS_ONNX_CONFIG_FILE=/flouds-ai/onnx/onnx_config.json
+```
+
+You can mount your `.env` file into the container and load it using `python-dotenv`.
 
 ---
 
@@ -373,22 +381,12 @@ You can control the application behavior using the following environment variabl
 
 - `FLOUDS_API_ENV` — Set to `Development` or `Production` (default: `Production`)
 - `FLOUDS_DEBUG_MODE` — Set to `1` for debug logging, `0` for normal (default: `0`)
-- `FLOUDS_ONNX_ROOT` — Path to the ONNX model root directory (default: as in `appsettings.json`)
+- `FLOUDS_ONNX_ROOT` — Path to the ONNX model root directory (**required**)
+- `FLOUDS_ONNX_CONFIG_FILE` — Path to the ONNX config file (default: `onnx_config.json` in the model path)
 - `FLOUDS_PORT` — Override the server port (default: `19690`)
 - `FLOUDS_HOST` — Override the server host (default: `0.0.0.0`)
 - `FLOUDS_SERVER_TYPE` — Server type, e.g., `uvicorn` or `hypercorn` (default: `uvicorn`)
 - `FLOUDS_MODEL_SESSION_PROVIDER` — ONNX session provider (default: `CPUExecutionProvider`)
-
-Example for development mode:
-
-```sh
-docker run -p 19690:19690 \
-  -e FLOUDS_API_ENV=Development \
-  -e FLOUDS_DEBUG_MODE=1 \
-  -e FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
-  -e FLOUDS_PORT=19690 \
-  flouds-ai
-```
 
 ---
 
@@ -398,7 +396,7 @@ The ONNX model root directory is set in [`app/config/appsettings.json`](app/conf
 
 ```json
 "onnx": {
-    "rootpath": "onnx"
+    "model_path": "onnx"
 }
 ```
 

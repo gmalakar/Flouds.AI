@@ -10,14 +10,26 @@ from logging.handlers import RotatingFileHandler
 
 
 def get_logger(name: str = "flouds") -> logging.Logger:
-    log_dir = os.getenv("FLOUDS_LOG_PATH", "/var/log/flouds")
-    log_file = "flouds-vectordb.log"
+    is_production = os.getenv("FLOUDS_API_ENV", "Production").lower() == "production"
+
+    if is_production:
+        log_dir = os.getenv("FLOUDS_LOG_PATH", "/var/logs/flouds")
+    else:
+        # Get parent directory of app folder and create logs folder there
+        current_dir = os.path.dirname(os.path.abspath(__file__))  # app folder
+        parent_dir = os.path.dirname(current_dir)  # parent of app
+        log_dir = os.path.join(parent_dir, "logs")
+
+    # Add date to log file name
+    from datetime import datetime
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    log_file = f"flouds-ai-{date_str}.log"
     max_bytes = 10485760
     backup_count = 5
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-    if log_file is None:
-        log_file = f"{name}.log"
+
     log_path = os.path.join(log_dir, log_file)
 
     logger = logging.getLogger(name)

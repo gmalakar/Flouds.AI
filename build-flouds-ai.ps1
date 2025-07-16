@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # File: build-flouds-ai.ps1
 # Date: 2024-07-09
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
@@ -7,18 +7,16 @@
 # This script builds and optionally pushes a Docker image for Flouds AI.
 #
 # Usage:
-#   ./build-flouds-ai.ps1 [-ImageName <name>] [-Tag <tag>] [-GPU] [-PushImage] [-Force]
+#   ./build-flouds-ai.ps1 [-Tag <tag>] [-GPU] [-PushImage] [-Force]
 #
 # Parameters:
-#   -ImageName     : Base name of the Docker image (default: "gmalakar/flouds-ai-cpu")
 #   -Tag           : Tag for the Docker image (default: "latest")
-#   -GPU           : Build with GPU support (adds -gpu to the tag)
+#   -GPU           : Build with GPU support (uses gmalakar/flouds-ai-gpu instead of gmalakar/flouds-ai-cpu)
 #   -PushImage     : Push the image to a Docker registry after building
 #   -Force         : Force rebuild even if the image already exists
 # =============================================================================
 
 param (
-    [string]$ImageName = "gmalakar/flouds-ai-cpu",
     [string]$Tag = "latest",
     [switch]$GPU = $false,
     [switch]$PushImage = $false,
@@ -66,18 +64,18 @@ function Check-Docker {
 
 # ========================== MAIN SCRIPT ==========================
 
-# Add CPU/GPU suffix to tag if not already present
-$cpuTag = if ($GPU) { "${Tag}-gpu" } else { "${Tag}-cpu" }
-if ($Tag -match "-cpu$" -or $Tag -match "-gpu$") {
-    $cpuTag = $Tag  # Keep original if it already has a suffix
-}
+# Set image name based on GPU flag
+$ImageName = if ($GPU) { "gmalakar/flouds-ai-gpu" } else { "gmalakar/flouds-ai-cpu" }
+
+# Full image name with tag
+$fullImageName = "${ImageName}:${Tag}"
 
 Write-Host "========================================================="
 Write-Host "                  FLOUDS AI BUILD SCRIPT                 " -ForegroundColor Cyan
 Write-Host "========================================================="
 Write-Host "Image Name     : $ImageName"
-Write-Host "Tag            : $cpuTag"
-Write-Host "Full Image     : ${ImageName}:${cpuTag}"
+Write-Host "Tag            : $Tag"
+Write-Host "Full Image     : $fullImageName"
 Write-Host "GPU Support    : $GPU"
 Write-Host "Push to Registry: $PushImage"
 Write-Host "Force Rebuild  : $Force"
@@ -102,22 +100,19 @@ if (-not (Test-Path "app")) {
 }
 Write-Success "app directory found"
 
-# Full image name with tag
-$fullImageName = "${ImageName}:${cpuTag}"
-
 # Check if image already exists
 Write-StepHeader "Checking for existing images"
 $imageExists = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -eq $fullImageName }
 if ($imageExists) {
     if (-not $Force) {
-        Write-Warning "Image $fullImageName already exists"
+        Write-Warning "$fullImageName already exists"
         $confirmation = Read-Host "Rebuild? (y/n)"
         if ($confirmation -ne 'y' -and $confirmation -ne 'Y') {
             Write-Host "Build cancelled by user." -ForegroundColor Yellow
             exit 0
         }
     } else {
-        Write-Warning "Image $fullImageName already exists. Forcing rebuild as requested."
+        Write-Warning "$fullImageName already exists. Forcing rebuild as requested."
     }
 } else {
     Write-Success "No existing image found with name $fullImageName"
@@ -132,7 +127,10 @@ $buildStartTime = Get-Date
 
 $buildArgs = @(
     "build",
-    "--no-cache"
+    "--no-cache",
+    "--platform", "linux/amd64",
+    "-t", $fullImageName,
+    "."
 )
 
 # Add GPU flag if requested
@@ -141,13 +139,37 @@ if ($GPU) {
     Write-Host "Building with GPU support enabled" -ForegroundColor Yellow
 }
 
-$buildArgs += "-t", $fullImageName, "."
-
-# Execute docker build command
+# Execute docker build command with retry logic
 try {
-    & docker $buildArgs
+    $maxRetries = 3
+    $retryCount = 0
+    $success = $false
     
-    if ($LASTEXITCODE -eq 0) {
+    Write-Host "Starting Docker build with max $maxRetries attempts..." -ForegroundColor Yellow
+    
+    while (-not $success -and $retryCount -lt $maxRetries) {
+        $retryCount++
+        
+        if ($retryCount -gt 1) {
+            $waitTime = [math]::Pow(2, $retryCount - 1) * 10 # Exponential backoff: 10s, 20s, 40s...
+            Write-Warning "Retrying in $waitTime seconds (Attempt $retryCount of $maxRetries)..."
+            Start-Sleep -Seconds $waitTime
+        }
+        
+        Write-Host "Docker build attempt $retryCount of $maxRetries..." -ForegroundColor Yellow
+        & docker $buildArgs
+        
+        if ($LASTEXITCODE -eq 0) {
+            $success = $true
+        }
+        else {
+            if ($retryCount -lt $maxRetries) {
+                Write-Warning "Docker build failed. Will retry..."
+            }
+        }
+    }
+    
+    if ($success) {
         $buildEndTime = Get-Date
         $buildDuration = $buildEndTime - $buildStartTime
         
@@ -166,18 +188,36 @@ try {
             Write-StepHeader "Pushing image to registry"
             Write-Host "Pushing $fullImageName to registry..." -ForegroundColor Yellow
             
-            docker push $fullImageName
+            # Also add retry for push operation
+            $pushRetries = 2
+            $pushSuccess = $false
+            $pushAttempt = 0
             
-            if ($LASTEXITCODE -eq 0) {
-                Write-Success "Image pushed successfully to registry"
-            } else {
-                Write-Error "Failed to push image to registry"
+            while (-not $pushSuccess -and $pushAttempt -lt $pushRetries) {
+                $pushAttempt++
+                if ($pushAttempt -gt 1) {
+                    Write-Warning "Retrying push in 10 seconds (Attempt $pushAttempt of $pushRetries)..."
+                    Start-Sleep -Seconds 10
+                }
+                
+                docker push $fullImageName
+                
+                if ($LASTEXITCODE -eq 0) {
+                    $pushSuccess = $true
+                    Write-Success "Image pushed successfully to registry"
+                } else {
+                    Write-Warning "Push attempt $pushAttempt failed"
+                }
+            }
+            
+            if (-not $pushSuccess) {
+                Write-Error "Failed to push image to registry after $pushRetries attempts"
                 Write-Host "Make sure you're logged into Docker Hub with 'docker login'" -ForegroundColor Yellow
                 exit 1
             }
         }
     } else {
-        Write-Error "Failed to build Docker image"
+        Write-Error "Failed to build Docker image after $maxRetries attempts"
         exit 1
     }
 }
@@ -188,11 +228,11 @@ catch {
 
 # Show available images
 Write-StepHeader "Available Flouds AI images"
-docker images "${ImageName}*" --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
+docker images "gmalakar/flouds-ai*" --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
 
 Write-Host "`n== Build Complete ==`n" -ForegroundColor Cyan
 Write-Host "Next Steps:" -ForegroundColor Cyan
-Write-Host "  1. Run the container with: ./start-flouds-ai.ps1 -ImageName $fullImageName" -ForegroundColor Gray
+Write-Host "  1. Run the container with: ./start-flouds-ai.ps1 -ImageName $ImageName -Tag $Tag" -ForegroundColor Gray
 if (-not $PushImage) {
     Write-Host "  2. Push to registry with: docker push $fullImageName" -ForegroundColor Gray
 }
