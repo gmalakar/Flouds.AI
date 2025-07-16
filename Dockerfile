@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1 \
     FLOUDS_API_ENV=Production \
     FLOUDS_DEBUG_MODE=0 \
     FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
-    FLOUDS_LOG_PATH=/var/log/flouds
+    FLOUDS_LOG_PATH=/var/logs/flouds
 
 WORKDIR /flouds-ai
 

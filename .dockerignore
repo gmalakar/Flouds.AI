@@ -21,3 +21,5 @@ env/
 *.md
 *.txt
 !app/requirements.txt
+clean_proj.bat
+app/config/appsettings.development.json
