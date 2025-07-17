@@ -13,7 +13,7 @@ def get_logger(name: str = "flouds") -> logging.Logger:
     is_production = os.getenv("FLOUDS_API_ENV", "Production").lower() == "production"
 
     if is_production:
-        log_dir = os.getenv("FLOUDS_LOG_PATH", "/var/logs/flouds")
+        log_dir = os.getenv("FLOUDS_LOG_PATH", "/flouds-ai/logs")
     else:
         # Get parent directory of app folder and create logs folder there
         current_dir = os.path.dirname(os.path.abspath(__file__))  # app folder
@@ -51,10 +51,14 @@ def get_logger(name: str = "flouds") -> logging.Logger:
         and h.baseFilename == os.path.abspath(log_path)
         for h in logger.handlers
     ):
-        fh = RotatingFileHandler(
-            log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
-        )
-        fh.setFormatter(formatter)
-        logger.addHandler(fh)
+        try:
+            fh = RotatingFileHandler(
+                log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+            )
+            fh.setFormatter(formatter)
+            logger.addHandler(fh)
+        except PermissionError:
+            print(f"Warning: Permission denied for log file: {log_path}")
+            logger.warning(f"Cannot write to log file: {log_path} - permission denied")
 
     return logger

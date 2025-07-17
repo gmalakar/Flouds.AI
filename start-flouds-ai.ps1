@@ -8,25 +8,28 @@
 # and environment variable handling based on a .env file.
 #
 # Usage:
-#   ./start-flouds-ai.ps1 [-EnvFile <path>] [-InstanceName <name>] [-ImageName <name>] [-Tag <tag>] [-Force] [-BuildImage]
+#   ./start-flouds-ai.ps1 [-EnvFile <path>] [-InstanceName <name>] [-ImageName <name>] [-Tag <tag>] [-Force] [-BuildImage] [-PullAlways]
 #
 # Parameters:
 #   -EnvFile       : Path to .env file (default: ".env")
 #   -InstanceName  : Name of the Docker container (default: "flouds-ai-instance")
-#   -ImageName     : Base Docker image name (default: "gmalakar/flouds-ai")
-#   -Tag           : Tag for the Docker image (default: "latest-cpu")
+#   -ImageName     : Base Docker image name (default: "gmalakar/flouds-ai-cpu")
+#   -Tag           : Tag for the Docker image (default: "latest")
+#   -GPU           : Use GPU image (default: $false)
 #   -Force         : Force restart container if it exists
 #   -BuildImage    : Build Docker image locally before starting container
+#   -PullAlways    : Always pull image from registry before running
 # =============================================================================
 
 param (
     [string]$EnvFile = ".env",
     [string]$InstanceName = "flouds-ai-instance",
-    [string]$ImageName = "gmalakar/flouds-ai-cpu",  # Changed from gmalakar/flouds-ai
-    [string]$Tag = "latest",                        # Changed from latest-cpu
-    [switch]$GPU = $false,                          # Added GPU switch
+    [string]$ImageName = "gmalakar/flouds-ai-cpu",
+    [string]$Tag = "latest",
+    [switch]$GPU = $false,
     [switch]$Force = $false,
-    [switch]$BuildImage = $false
+    [switch]$BuildImage = $false,
+    [switch]$PullAlways = $false
 )
 
 # ========================== HELPER FUNCTIONS ==========================
@@ -38,46 +41,67 @@ function Write-StepHeader {
 
 function Write-Success {
     param ([string]$Message)
-    Write-Host "✅ $Message" -ForegroundColor Green
+    Write-Host " $Message" -ForegroundColor Green
 }
 
 function Write-Warning {
     param ([string]$Message)
-    Write-Host "⚠️ $Message" -ForegroundColor Yellow
+    Write-Host " $Message" -ForegroundColor Yellow
 }
 
 function Write-Error {
     param ([string]$Message)
-    Write-Host "❌ $Message" -ForegroundColor Red
+    Write-Host " $Message" -ForegroundColor Red
+    exit 1
 }
 
-function Ensure-Network {
+function New-NetworkIfMissing {
     param ([string]$Name)
-    
     if (-not (docker network ls --format '{{.Name}}' | Where-Object { $_ -eq $Name })) {
-        Write-Host "🔧 Creating network: $Name" -ForegroundColor Yellow
+        Write-Host " Creating network: $Name" -ForegroundColor Yellow
         docker network create $Name | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Network $Name created successfully"
         } else {
             Write-Error "Failed to create network: $Name"
-            exit 1
         }
     } else {
         Write-Success "Network $Name already exists"
     }
 }
 
+function Connect-NetworkIfNotConnected {
+    param (
+        [string]$Container,
+        [string]$Network
+    )
+    $containerRunning = docker ps --format '{{.Names}}' | Where-Object { $_ -eq $Container }
+    if (-not $containerRunning) {
+        Write-Warning "Container $Container is not running. Skipping network connection."
+        return
+    }
+    $networks = docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' $Container
+    if ($networks -notmatch "\b$Network\b") {
+        Write-Host " Connecting network $Network to container $Container" -ForegroundColor Yellow
+        docker network connect $Network $Container 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "Successfully connected $Container to $Network"
+        } else {
+            Write-Warning "Failed to connect $Container to $Network"
+        }
+    } else {
+        Write-Success "Container $Container is already connected to $Network"
+    }
+}
+
 function Read-EnvFile {
     param ([string]$FilePath)
-    
     $envVars = @{}
     if (Test-Path $FilePath) {
         Get-Content $FilePath | ForEach-Object {
             if ($_ -match '^([^=]+)=(.*)$') {
                 $key = $Matches[1].Trim()
                 $value = $Matches[2].Trim()
-                # Remove quotes if present
                 $value = $value -replace '^"(.*)"$', '$1'
                 $value = $value -replace "^'(.*)'$", '$1'
                 $envVars[$key] = $value
@@ -87,7 +111,7 @@ function Read-EnvFile {
     return $envVars
 }
 
-function Check-Docker {
+function Test-Docker {
     try {
         $process = Start-Process -FilePath "docker" -ArgumentList "version" -NoNewWindow -Wait -PassThru -RedirectStandardError "NUL"
         if ($process.ExitCode -ne 0) {
@@ -102,48 +126,15 @@ function Check-Docker {
     }
 }
 
-function Attach-NetworkIfNotConnected {
-    param (
-        [Parameter(Mandatory=$true)]
-        [string]$Container,
-        
-        [Parameter(Mandatory=$true)]
-        [string]$Network
-    )
-    
-    # Check if container is running
-    $containerRunning = docker ps --format '{{.Names}}' | Where-Object { $_ -eq $Container }
-    if (-not $containerRunning) {
-        Write-Warning "Container $Container is not running. Skipping network attachment."
-        return
-    }
-    
-    # Get current networks for the container
-    $networks = docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' $Container
-    
-    # Check if container is already connected to the network
-    if ($networks -notmatch "\b$Network\b") {
-        Write-Host "🔗 Attaching network $Network to container $Container" -ForegroundColor Yellow
-        docker network connect $Network $Container 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Successfully connected $Container to $Network"
-        } else {
-            Write-Warning "Failed to connect $Container to $Network"
-        }
-    } else {
-        Write-Success "Container $Container is already connected to $Network"
-    }
-}
-
 # ========================== MAIN SCRIPT ==========================
 
-# Adjust image name based on GPU flag
+# Adjust image name for GPU
 if ($GPU -and $ImageName -eq "gmalakar/flouds-ai-cpu") {
     $ImageName = "gmalakar/flouds-ai-gpu"
 }
-
-# Create full image name with tag
 $fullImageName = "${ImageName}:${Tag}"
+
+$workingDir = "/flouds-ai"
 
 Write-Host "========================================================="
 Write-Host "                 Flouds AI STARTER SCRIPT                " -ForegroundColor Cyan
@@ -155,25 +146,21 @@ Write-Host "Full Image    : $fullImageName"
 Write-Host "Environment   : $EnvFile"
 Write-Host "Build Image   : $BuildImage"
 Write-Host "Force Restart : $Force"
+Write-Host "Pull Always   : $PullAlways"
 Write-Host "========================================================="
 
-# Check if Docker is available
 Write-StepHeader "Checking Docker installation"
-Check-Docker
+Test-Docker
 
-# Read environment variables
 Write-StepHeader "Reading environment configuration"
 if (-not (Test-Path $EnvFile)) {
     Write-Error "$EnvFile not found. Please create this file with required environment variables."
     exit 1
-} 
+}
 Write-Success "Using environment file: $EnvFile"
 $envVars = Read-EnvFile -FilePath $EnvFile
 
-# Validate required environment variables
 Write-StepHeader "Validating required environment variables"
-
-# Check ONNX config file
 if (-not $envVars.ContainsKey("FLOUDS_ONNX_CONFIG_FILE_AT_HOST")) {
     Write-Error "FLOUDS_ONNX_CONFIG_FILE_AT_HOST environment variable is required but not set in $EnvFile"
     exit 1
@@ -181,39 +168,26 @@ if (-not $envVars.ContainsKey("FLOUDS_ONNX_CONFIG_FILE_AT_HOST")) {
 $configPath = $envVars["FLOUDS_ONNX_CONFIG_FILE_AT_HOST"]
 if (-not (Test-Path $configPath)) {
     Write-Error "ONNX config file not found: $configPath"
-    Write-Error "This file is required. Please check the path and try again."
     exit 1
 }
 Write-Success "Found ONNX config file: $configPath"
 
-# Check ONNX model path
 if (-not $envVars.ContainsKey("FLOUDS_ONNX_MODEL_PATH_AT_HOST")) {
-    Write-Warning "FLOUDS_ONNX_MODEL_PATH_AT_HOST not set. Container will use internal models only."
-} else {
-    $modelPath = $envVars["FLOUDS_ONNX_MODEL_PATH_AT_HOST"]
-    if (-not (Test-Path $modelPath)) {
-        Write-Warning "ONNX model path does not exist: $modelPath"
-        Write-Warning "Creating directory..."
-        try {
-            New-Item -ItemType Directory -Path $modelPath -Force | Out-Null
-            Write-Success "ONNX model directory created: $modelPath"
-        } catch {
-            Write-Error "Failed to create ONNX model directory: $_"
-            exit 1
-        }
-    } else {
-        Write-Success "Found ONNX model path: $modelPath"
-    }
+    Write-Error "FLOUDS_ONNX_MODEL_PATH_AT_HOST environment variable is required but not set in $EnvFile"
+    exit 1
 }
+$modelPath = $envVars["FLOUDS_ONNX_MODEL_PATH_AT_HOST"]
+if (-not (Test-Path $modelPath)) {
+    Write-Error "ONNX model path does not exist: $modelPath"
+    exit 1
+}
+Write-Success "Found ONNX model path: $modelPath"
 
-# Ensure log directory exists
-if (-not $envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
-    Write-Warning "FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
-} else {
+if ($envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
     $logPath = $envVars["FLOUDS_LOG_PATH_AT_HOST"]
     if (-not (Test-Path $logPath)) {
         Write-Warning "Log directory does not exist: $logPath"
-        Write-Warning "Creating directory..."
+        Write-Host "Creating directory..." -ForegroundColor Yellow
         try {
             New-Item -ItemType Directory -Path $logPath -Force | Out-Null
             Write-Success "Log directory created: $logPath"
@@ -224,28 +198,25 @@ if (-not $envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
     } else {
         Write-Success "Found log directory: $logPath"
     }
+} else {
+    Write-Warning "FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
 }
 
-# Build image if requested
 if ($BuildImage) {
     Write-StepHeader "Building Docker image"
-    Write-Host "Building $fullImageName..."
+    Write-Host "Building $fullImageName..." -ForegroundColor Yellow
     docker build -t $fullImageName .
-    
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to build Docker image."
         exit 1
     }
-    
     Write-Success "Docker image built successfully: $fullImageName"
 }
 
-# Create Docker network
 Write-StepHeader "Setting up Docker network"
 $aiNetwork = "flouds_ai_network"
-Ensure-Network -Name $aiNetwork
+New-NetworkIfMissing -Name $aiNetwork
 
-# Stop and remove existing container if it exists
 Write-StepHeader "Managing container instance"
 $containerExists = docker ps -a --format '{{.Names}}' | Where-Object { $_ -eq $InstanceName }
 if ($containerExists) {
@@ -261,89 +232,69 @@ if ($containerExists) {
     }
 }
 
-# Prepare Docker run command
 Write-StepHeader "Preparing container configuration"
-$dockerArgs = @(
-    "run", "-d", 
-    "--name", $InstanceName, 
-    "--network", $aiNetwork, 
+$dockerArgs = @("run", "-d")
+if ($PullAlways) {
+    $dockerArgs += "--pull"
+    $dockerArgs += "always"
+}
+$dockerArgs += @(
+    "--name", $InstanceName,
+    "--network", $aiNetwork,
     "-p", "19690:19690",
-    "-e", "FLOUDS_API_ENV=Production", 
+    "-e", "FLOUDS_API_ENV=Production",
     "-e", "FLOUDS_DEBUG_MODE=0"
 )
 
-# Configure ONNX config file mapping
+# ONNX config file mapping
 if ($envVars.ContainsKey("FLOUDS_ONNX_CONFIG_FILE_AT_HOST")) {
-    $configPath = $envVars["FLOUDS_ONNX_CONFIG_FILE_AT_HOST"]
-    $dockerConfigPath = $envVars["FLOUDS_ONNX_CONFIG_FILE"]
-    if (-not $dockerConfigPath) {
-        $dockerConfigPath = "/flouds-py/app/config/onnx_config.json"
-    }
-    Write-Host "Mapping ONNX config: $configPath → $dockerConfigPath"
-    $dockerArgs += "-v", "${configPath}:${dockerConfigPath}:ro"
-    $dockerArgs += "-e", "FLOUDS_ONNX_CONFIG_FILE=${dockerConfigPath}"
+    $dockerConfigPath = "$workingDir/app/config/onnx_config.json"
+    Write-Host "Mapping ONNX config: $configPath  $dockerConfigPath"
+    $dockerArgs += "-v"
+    $dockerArgs += "${configPath}:${dockerConfigPath}:ro"
 }
 
-# Configure ONNX model directory mapping
+# ONNX model directory mapping
 if ($envVars.ContainsKey("FLOUDS_ONNX_MODEL_PATH_AT_HOST")) {
-    $modelPath = $envVars["FLOUDS_ONNX_MODEL_PATH_AT_HOST"] 
-    $dockerOnnxPath = $envVars["FLOUDS_ONNX_ROOT"]
-    if (-not $dockerOnnxPath) {
-        $dockerOnnxPath = "/flouds-py/onnx"
-    }
-    Write-Host "Mapping ONNX models: $modelPath → $dockerOnnxPath"
-    $dockerArgs += "-v", "${modelPath}:${dockerOnnxPath}:ro"
-    $dockerArgs += "-e", "FLOUDS_ONNX_ROOT=${dockerOnnxPath}"
+    $dockerOnnxPath = "$workingDir/onnx"
+    Write-Host "Mapping ONNX models: $modelPath  $dockerOnnxPath"
+    $dockerArgs += "-v"
+    $dockerArgs += "${modelPath}:${dockerOnnxPath}:ro"
 }
 
-# Configure log directory mapping
+# Log directory mapping
 if ($envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
-    $logPath = $envVars["FLOUDS_LOG_PATH_AT_HOST"]
-    $dockerLogPath = $envVars["FLOUDS_LOG_PATH"] 
-    if (-not $dockerLogPath) {
-        $dockerLogPath = "/var/logs/flouds"
-    }
-    Write-Host "Mapping logs: $logPath → $dockerLogPath"
-    $dockerArgs += "-v", "${logPath}:${dockerLogPath}:rw"
-    $dockerArgs += "-e", "FLOUDS_LOG_PATH=${dockerLogPath}"
+    $dockerLogPath = "$workingDir/logs"
+    Write-Host "Mapping logs: $logPath  $dockerLogPath"
+    $dockerArgs += "-v"
+    $dockerArgs += "${logPath}:${dockerLogPath}:rw"
+    $dockerArgs += "-e"
+    $dockerArgs += "FLOUDS_LOG_PATH=$dockerLogPath"
 }
 
 # Add platform flag if specified
 if ($envVars.ContainsKey("DOCKER_PLATFORM")) {
     $platform = $envVars["DOCKER_PLATFORM"]
     Write-Host "Setting platform: $platform"
-    $dockerArgs += "--platform", $platform
+    $dockerArgs += "--platform"
+    $dockerArgs += $platform
 }
 
-# Add image name
 $dockerArgs += $fullImageName
 
-# Start the container
 Write-StepHeader "Starting Flouds AI container"
 Write-Host "Command: docker $($dockerArgs -join ' ')" -ForegroundColor Gray
 
 try {
     & docker $dockerArgs
-    
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Flouds AI container started successfully"
         Write-Success "API available at: http://localhost:19690/docs"
-        
-        # Wait for container to initialize
         Write-Host "Waiting for container to initialize..." -ForegroundColor Yellow
         Start-Sleep -Seconds 3
-        
-        # Show container status
+
         Write-StepHeader "Container Status"
         docker ps --filter "name=$InstanceName" --format "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
-        
-        # Connect to other networks if needed
-        $vectorNetwork = "flouds_vector_network"
-        $networkExists = docker network ls --format '{{.Name}}' | Where-Object { $_ -eq $vectorNetwork }
-        if ($networkExists) {
-            Write-Host "Connecting to vector network: $vectorNetwork" -ForegroundColor Yellow
-            Attach-NetworkIfNotConnected -Container $InstanceName -Network $vectorNetwork
-        }
     } else {
         Write-Error "Failed to start Flouds AI container."
         exit 1
@@ -354,7 +305,6 @@ catch {
     exit 1
 }
 
-# Show logs option
 Write-StepHeader "Container Management"
 Write-Host "Use the following commands to manage the container:" -ForegroundColor Cyan
 Write-Host "  * View logs: docker logs -f $InstanceName" -ForegroundColor Gray

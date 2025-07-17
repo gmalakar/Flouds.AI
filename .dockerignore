@@ -1,25 +1,100 @@
-**/*.onnx
-**/__pycache__
-**/*.pyc
-**/*.pyo
-**/*.pyd
-**/.pytest_cache
-.git/
-.gitignore
-README.md
-Dockerfile*
-tests/
-logs/
-onnx/
-.pytest_cache/
-.coverage
-*.log
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+
+# Environment files
 .env*
-.venv/
-venv/
-env/
-*.md
-*.txt
+*.env*
+
+# Development configuration files
+appsettings.development.json
+appsettings.*.json
+!appsettings.json
 !app/requirements.txt
 clean_proj.bat
-app/config/appsettings.development.json
+
+# Logs and test output
+*.log
+logs/
+.pytest_cache/
+coverage.*
+htmlcov/
+.tox/
+
+# IDE/editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Git and version control
+.git/
+.gitignore
+.gitattributes
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.whl
+
+# Docker files
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# Scripts and documentation
+*.md
+*.ps1
+LICENSE*
+
+# Data, models, and cache
+*.pb
+*.tflite
+*.mlmodel
+*.hdf5 
+*.ckpt
+*.pth
+*.pt
+*.pkl
+*.pkl.gz
+*.tar.gz
+data/
+*.h5
+*.h5py
+*.model
+*.weights
+*.bin
+*.npz
+
+# OS-specific
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+desktop.ini
+
+# Jupyter and notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Temporary files
+*.tmp
+*.bak
+*.old
+
+# Tests
+tests/
+test_*/
+*_test.py
