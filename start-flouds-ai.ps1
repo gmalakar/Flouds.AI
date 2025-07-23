@@ -126,6 +126,62 @@ function Test-Docker {
     }
 }
 
+function Test-DirectoryWritable {
+    param ([string]$Path)
+    try {
+        $testFile = Join-Path -Path $Path -ChildPath "test_write_$([Guid]::NewGuid().ToString()).tmp"
+        [System.IO.File]::WriteAllText($testFile, "test")
+        Remove-Item -Path $testFile -Force
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Set-DirectoryPermissions {
+    param (
+        [string]$Path,
+        [string]$Description
+    )
+    if (-not (Test-Path $Path)) {
+        Write-Warning "$Description directory does not exist: $Path"
+        Write-Host "Creating directory..." -ForegroundColor Yellow
+        try {
+            New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            Write-Success "$Description directory created: $Path"
+        } catch {
+            Write-Error "Failed to create $Description directory: $_"
+            exit 1
+        }
+    } else {
+        Write-Success "Found $Description directory: $Path"
+    }
+    
+    # Test if directory is writable
+    if (Test-DirectoryWritable -Path $Path) {
+        Write-Success "$Description directory is writable: $Path"
+    } else {
+        Write-Warning "$Description directory is not writable: $Path"
+        Write-Host "Setting permissions on $Description directory..." -ForegroundColor Yellow
+        try {
+            # Try to set permissions (works on Windows)
+            $acl = Get-Acl $Path
+            $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+            $acl.SetAccessRule($accessRule)
+            Set-Acl $Path $acl
+            Write-Success "Permissions set successfully"
+        } catch {
+            Write-Warning "Failed to set permissions: $_"
+            Write-Warning "$Description may not be writable. Please check directory permissions manually."
+            $continue = Read-Host "Continue anyway? (y/n)"
+            if ($continue -ne "y") {
+                Write-Host "Aborted by user." -ForegroundColor Red
+                exit 0
+            }
+        }
+    }
+}
+
 # ========================== MAIN SCRIPT ==========================
 
 # Adjust image name for GPU
@@ -183,21 +239,10 @@ if (-not (Test-Path $modelPath)) {
 }
 Write-Success "Found ONNX model path: $modelPath"
 
+# Check and set permissions for log directory
 if ($envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
     $logPath = $envVars["FLOUDS_LOG_PATH_AT_HOST"]
-    if (-not (Test-Path $logPath)) {
-        Write-Warning "Log directory does not exist: $logPath"
-        Write-Host "Creating directory..." -ForegroundColor Yellow
-        try {
-            New-Item -ItemType Directory -Path $logPath -Force | Out-Null
-            Write-Success "Log directory created: $logPath"
-        } catch {
-            Write-Error "Failed to create log directory: $_"
-            exit 1
-        }
-    } else {
-        Write-Success "Found log directory: $logPath"
-    }
+    Set-DirectoryPermissions -Path $logPath -Description "Log"
 } else {
     Write-Warning "FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
 }
@@ -294,7 +339,7 @@ try {
         Start-Sleep -Seconds 3
 
         Write-StepHeader "Container Status"
-        docker ps --filter "name=$InstanceName" --format "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+        docker ps --filter "name=$InstanceName" --format "table {{.ID}}`t{{.Image}}`t{{.Status}}`t{{.Ports}}"
     } else {
         Write-Error "Failed to start Flouds AI container."
         exit 1

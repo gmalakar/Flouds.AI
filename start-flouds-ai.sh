@@ -82,6 +82,57 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Helper functions
+test_directory_writable() {
+    local path="$1"
+    local test_file="${path}/test_write_$$_$(date +%s).tmp"
+    if echo "test" > "$test_file" 2>/dev/null && rm -f "$test_file" 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+set_directory_permissions() {
+    local path="$1"
+    local description="$2"
+    
+    if [[ ! -d "$path" ]]; then
+        echo "⚠️ $description directory does not exist: $path"
+        echo "Creating directory..."
+        if ! mkdir -p "$path"; then
+            echo "❌ Failed to create $description directory: $path"
+            exit 1
+        fi
+        echo "✅ $description directory created: $path"
+    else
+        echo "✅ Found $description directory: $path"
+    fi
+    
+    # Test if directory is writable
+    if test_directory_writable "$path"; then
+        echo "✅ $description directory is writable: $path"
+    else
+        echo "⚠️ $description directory is not writable: $path"
+        echo "Setting permissions on $description directory..."
+        if chmod 755 "$path" 2>/dev/null; then
+            echo "✅ Permissions set successfully"
+        else
+            echo "⚠️ Failed to set permissions on $description directory"
+            echo "⚠️ $description may not be writable. Please check directory permissions manually."
+            if [[ "$FORCE" != true ]]; then
+                read -p "Continue anyway? (y/n) " continue
+                if [[ "$continue" != "y" ]]; then
+                    echo "Aborted by user."
+                    exit 0
+                fi
+            else
+                echo "Force flag set, continuing anyway."
+            fi
+        fi
+    fi
+}
+
 # Adjust image name for GPU if needed
 if [ "$USE_GPU" = true ] && [ "$IMAGE_NAME" = "gmalakar/flouds-ai-cpu" ]; then
   IMAGE_NAME="gmalakar/flouds-ai-gpu"
@@ -138,6 +189,13 @@ if [[ ! -f "$FLOUDS_ONNX_CONFIG_FILE_AT_HOST" ]]; then
     exit 1
 fi
 echo "✅ Found ONNX config file: $FLOUDS_ONNX_CONFIG_FILE_AT_HOST"
+
+# Check and set permissions for log directory
+if [[ -n "$FLOUDS_LOG_PATH_AT_HOST" ]]; then
+    set_directory_permissions "$FLOUDS_LOG_PATH_AT_HOST" "Log"
+else
+    echo "⚠️ FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
+fi
 
 # Build image if requested
 if [ "$BUILD_IMAGE" = true ]; then
