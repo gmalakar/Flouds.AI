@@ -20,12 +20,11 @@ class ServerConfig(BaseModel):
     type: str = Field(default="uvicorn")
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=5001)
-    model_session_provider: str = Field(default="CPUExecutionProvider")
-    model_config = {"protected_namespaces": ()}
+    session_provider: str = Field(default="CPUExecutionProvider")
 
 
 class OnnxConfigSection(BaseModel):
-    model_path: str = None
+    onnx_path: str = None
     config_file: str = Field(default="onnx_config.json")
 
 

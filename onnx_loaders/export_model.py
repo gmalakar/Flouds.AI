@@ -17,6 +17,7 @@
 # - Use optimum.onnxruntime pipelines for easy ONNX inference testing after export.
 
 import argparse
+import os
 
 from export_model_to_onnx import export_and_optimize_onnx
 
@@ -53,7 +54,15 @@ if __name__ == "__main__":
         "--use_t5_encoder", action="store_true", help="Whether to use T5 encoder"
     )
     parser.add_argument("--model_folder", help="HuggingFace model folder or path")
+    parser.add_argument(
+        "--onnx_path",
+        help="Path to ONNX output directory (default: ../onnx or ONNX_PATH env var)",
+    )
     args = parser.parse_args()
+
+    # Check for ONNX path: parameter > env variable > default
+    onnx_path = args.onnx_path or os.getenv("ONNX_PATH", "../onnx")
+    print(f"Using ONNX path: {os.path.abspath(onnx_path)}")
 
     export_and_optimize_onnx(
         model_name=args.model_name,
@@ -64,4 +73,5 @@ if __name__ == "__main__":
         use_t5_encoder=args.use_t5_encoder,
         use_cache=args.use_cache,
         model_folder=args.model_folder,
+        onnx_path=onnx_path,
     )

@@ -10,13 +10,15 @@
 
 ## Features
 
-- **Text Summarization**: Supports both sequence-to-sequence language models and ONNX-based summarization.
-- **Text Embedding**: Provides sentence and document embeddings using ONNX or HuggingFace models.
-- **Batch Processing**: Efficiently handles batch summarization and embedding requests.
-- **Configurable**: Easily switch between models and runtime backends via configuration or environment variables.
-- **Test Coverage**: Includes comprehensive unit tests with pytest and mocking for all major service paths.
-- **Extensible**: Designed for easy extension to new NLP tasks and models.
-- **FastAPI Powered**: Uses [FastAPI](https://fastapi.tiangolo.com/) for serving APIs.
+- **Text Summarization**: Supports both sequence-to-sequence language models and ONNX-based summarization with automatic sentence capitalization
+- **Text Embedding**: Provides sentence and document embeddings using ONNX models with configurable chunking strategies
+- **Batch Processing**: Efficiently handles batch summarization and embedding requests with async support
+- **Model Optimization**: Supports both regular and optimized ONNX models with automatic fallback
+- **Legacy Compatibility**: Handles tokenizer compatibility across different transformers versions
+- **Configurable**: Per-model configuration with optimization flags, chunking logic, and tokenizer settings
+- **Test Coverage**: Comprehensive unit tests with pytest and proper mocking
+- **Production Ready**: Docker support, health checks, and environment-based configuration
+- **FastAPI Powered**: Modern async API with automatic documentation
 
 ---
 
@@ -53,7 +55,7 @@ All main configuration is handled via `app/config/appsettings.json`.
 You can set server type, host, port, logging, ONNX options, and more.
 
 **ONNX Model Path is Required:**  
-You **must** set the ONNX model root path using the `model_path` field in the `onnx` section or override it with the `FLOUDS_ONNX_ROOT` environment variable.  
+You **must** set the ONNX model root path using the `onnx_path` field in the `onnx` section or override it with the `FLOUDS_ONNX_ROOT` environment variable.  
 If not set, the application will exit with an error.
 
 **Example:**
@@ -66,10 +68,12 @@ If not set, the application will exit with an error.
         "type": "uvicorn",
         "host": "0.0.0.0",
         "port": 19690,
-        "model_session_provider": "CPUExecutionProvider"
+        "reload": false,
+        "workers": 1,
+        "session_provider": "CPUExecutionProvider"
     },
     "onnx": {
-        "model_path": "onnx",
+        "onnx_path": "onnx",
         "config_file": "onnx_config.json"
     }
 }
@@ -89,6 +93,8 @@ Each entry in this file corresponds to a model you have downloaded and placed in
   - `dimension`, `max_length`, `embedder_task` or `summarization_task`
   - `inputnames`, `outputnames`, `decoder_inputnames`
   - ONNX model file paths (`encoder_onnx_model`, `decoder_onnx_model`)
+  - Optimized model paths (`encoder_optimized_onnx_model`, `decoder_optimized_onnx_model`)
+  - Performance flags (`use_optimized`, `legacy_tokenizer`)
   - Special tokens, generation config, and other options
 
 **Example snippet:**
@@ -98,8 +104,9 @@ Each entry in this file corresponds to a model you have downloaded and placed in
     "max_length": 512,
     "pad_token_id": 0,
     "eos_token_id": 1,
-    "logits": false,
     "summarization_task": "s2s",
+    "legacy_tokenizer": true,
+    "use_optimized": false,
     "inputnames": {
         "input": "input_ids",
         "mask": "attention_mask"
@@ -112,8 +119,10 @@ Each entry in this file corresponds to a model you have downloaded and placed in
         "input": "input_ids",
         "mask": "encoder_attention_mask"
     },
-    "decoder_onnx_model": "decoder_model.onnx",
     "encoder_onnx_model": "encoder_model.onnx",
+    "decoder_onnx_model": "decoder_model.onnx",
+    "encoder_optimized_onnx_model": "encoder_model_optimized.onnx",
+    "decoder_optimized_onnx_model": "decoder_model_optimized.onnx",
     "special_tokens_map_path": "special_tokens_map.json",
     "num_beams": 4,
     "early_stopping": true,
@@ -362,13 +371,17 @@ The `.env` file allows you to set environment variables for configuration withou
 - `FLOUDS_DEBUG_MODE` — Set to `1` for debug logging
 - `FLOUDS_ONNX_ROOT` — **(Required)** Path to your ONNX model directory
 - `FLOUDS_ONNX_CONFIG_FILE` — Path to your ONNX config file (default: `onnx_config.json` in the model path)
+- `FLOUDS_HOST` — Override server host (default: `0.0.0.0`)
+- `FLOUDS_PORT` — Override server port (default: `19690`)
 
 **Example `.env`:**
 ```
 FLOUDS_API_ENV=Production
 FLOUDS_DEBUG_MODE=0
-FLOUDS_ONNX_ROOT=/flouds-ai/onnx
-FLOUDS_ONNX_CONFIG_FILE=/flouds-ai/onnx/onnx_config.json
+FLOUDS_ONNX_ROOT=C:/path/to/your/onnx/models
+FLOUDS_ONNX_CONFIG_FILE=C:/path/to/your/onnx_config.json
+FLOUDS_HOST=0.0.0.0
+FLOUDS_PORT=19690
 ```
 
 You can mount your `.env` file into the container and load it using `python-dotenv`.
@@ -396,11 +409,29 @@ The ONNX model root directory is set in [`app/config/appsettings.json`](app/conf
 
 ```json
 "onnx": {
-    "model_path": "onnx"
+    "onnx_path": "onnx",
+    "config_file": "onnx_config.json"
 }
 ```
 
 You can override this with the `FLOUDS_ONNX_ROOT` environment variable.
+
+## Model Optimization
+
+Flouds AI supports both regular and optimized ONNX models for better performance:
+
+- **Regular models**: Direct ONNX conversion, slower but always compatible
+- **Optimized models**: Graph-optimized versions, 20-50% faster inference
+- **Per-model control**: Set `"use_optimized": true` in model config
+- **Automatic fallback**: Uses regular models if optimized ones don't exist
+
+## Legacy Tokenizer Support
+
+For models exported with older transformers versions:
+
+- Set `"legacy_tokenizer": true` in model config
+- Automatically handles tokenizer compatibility issues
+- Default is `false` for newly exported models
 
 ---
 

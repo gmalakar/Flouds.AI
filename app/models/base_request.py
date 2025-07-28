@@ -14,5 +14,6 @@ class BaseRequest(BaseModel):
 
     model: str = Field(
         ...,
-        description="The model name to use for summarization. This field is required.",
+        min_length=1,
+        description="The model name to use. This field is required and cannot be empty.",
     )

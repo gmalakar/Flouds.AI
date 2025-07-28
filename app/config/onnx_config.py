@@ -48,10 +48,19 @@ class OnnxConfig(BaseModel):
     projected_dimension: int = Field(default=256)
     encoder_onnx_model: str = Field(default="encoder_model.onnx")
     decoder_onnx_model: str = Field(default="decoder_model.onnx")
+    encoder_optimized_onnx_model: str = Field(default="model_optimized.onnx")
+    decoder_optimized_onnx_model: str = Field(default="decoder_model_optimized.onnx")
+    use_optimized: bool = Field(default=False)
     special_tokens_map_path: str = Field(default="special_tokens_map.json")
     generation_config_path: str = Field(default="generation_config.json")
-    num_beams: int = (0,)
+    num_beams: int = 4
     temperature: float = 0.0
     early_stopping: bool = True
     use_seq2seqlm: bool = Field(default=False)
     prepend_text: str = Field(default="summarize: ")
+    chunk_logic: str = Field(default="sentence")
+    chunk_overlap: int = Field(default=1)
+    chunk_size: int = Field(default=None)  # For fixed chunking
+    legacy_tokenizer: bool = Field(
+        default=False
+    )  # Use legacy tokenizer for older models

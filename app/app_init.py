@@ -5,8 +5,6 @@
 # =============================================================================
 import os
 
-import nltk
-
 from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
 
@@ -24,11 +22,3 @@ logger.info(f"FLOUDS_ONNX_ROOT: {os.environ.get('FLOUDS_ONNX_ROOT')}")
 logger.info(f"FLOUDS_ONNX_CONFIG_FILE: {os.environ.get('FLOUDS_ONNX_CONFIG_FILE')}")
 
 APP_SETTINGS = ConfigLoader.get_app_settings()
-
-# NLTK setup
-try:
-    nltk.data.find("corpora/stopwords")
-    logger.info("NLTK stopwords corpus already downloaded.")
-except LookupError:
-    nltk.download("stopwords")
-    logger.info("NLTK stopwords corpus downloaded successfully.")

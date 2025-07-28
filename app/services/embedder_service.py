@@ -1,30 +1,23 @@
 # =============================================================================
 # File: embedder_service.py
-# Date: 2025-06-10
+# Date: 2025-01-15
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
 import asyncio
 import functools
 import os
-import re
 import time
 from typing import Any, List
 
 import numpy as np
-import onnxruntime as ort
-from nltk.corpus import stopwords
 from pydantic import BaseModel, Field
 
-# from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
 from app.models.embedded_chunk import EmbededChunk
 from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
 from app.models.embedding_response import EmbeddingBatchResponse, EmbeddingResponse
 from app.services.base_nlp_service import BaseNLPService
-
-# from transformers import AutoTokenizer
-
 
 logger = get_logger("embedder_service")
 
@@ -35,102 +28,190 @@ class _EmbeddingResults(BaseModel):
     success: bool = Field(default=True)
 
 
-# Example stop words set; expand as needed
-_STOP_WORDS = set(stopwords.words("english"))
-_NO_TEXT_FOR_LARGE_TEXT = ""
-
-# HINTS:
-# - All static methods use type hints for clarity and editor support.
-# - embed_text returns an EmbeddingResponse and is static.
-# - embed_batch_async is async and returns List[EmbeddingResponse].
-# - _split_text_into_chunks returns List[str].
-# - _small_text_embedding returns list (of floats).
-# - _get_tokenizer, _get_encoder_session, _get_model_config are static and type hinted.
-# - Use debug logs for tracing.
-# - This class is thread-safe and caches tokenizers and ONNX sessions for efficiency.
-# - embed_batch_async uses run_in_executor to parallelize embedding for each request.
-
-
 class SentenceTransformer(BaseNLPService):
-    """
-    Static class for sentence embedding using ONNX or HuggingFace models.
-    """
+    """Static class for sentence embedding using ONNX models."""
 
     @staticmethod
     def _merge_vectors(chunks: list[EmbededChunk], method: str = "mean") -> list[float]:
-        """
-        Merge embedding vectors from a list of EmbededChunk using mean or max pooling.
-
-        Args:
-            chunks: List of EmbededChunk objects (each with a .vector attribute).
-            method: "mean" (default) or "max" pooling.
-
-        Returns:
-            A single merged embedding vector as a list of floats.
-        """
+        """Merge embedding vectors using mean or max pooling."""
         vectors = [
             np.array(chunk.vector) for chunk in chunks if hasattr(chunk, "vector")
         ]
         if not vectors:
             return []
+
         stacked = np.stack(vectors)
-        if method == "max":
-            merged = np.max(stacked, axis=0)
-        else:
-            merged = np.mean(stacked, axis=0)
+        merged = (
+            np.max(stacked, axis=0) if method == "max" else np.mean(stacked, axis=0)
+        )
         return merged.tolist()
 
     @staticmethod
     def _preprocess_text(text: str) -> str:
-        logger.debug("Preprocessing text for embedding.")
-        text = text.lower()
-        text = re.sub(r"[^\w\s.]", "", text)
-        tokens = [word for word in text.split() if word not in _STOP_WORDS]
-        return " ".join(tokens)
+        """Text preprocessing with line break handling."""
+        import re
+
+        # Handle line breaks and normalize whitespace
+        text = re.sub(
+            r"\s+", " ", text
+        )  # Replace multiple whitespace with single space
+        text = text.strip()
+
+        return text
 
     @staticmethod
     def _pooling(embedding: np.ndarray, strategy: str = "mean") -> np.ndarray:
-        """
-        Generalized pooling for n-dimensional embeddings.
-        - "mean": mean over all axes except the last
-        - "max": max over all axes except the last
-        - "cls": first vector along all axes except the last (like [0,0,...,0,:])
-        """
+        """Apply pooling strategy to embeddings."""
         if embedding.ndim == 1:
             return embedding
-        elif strategy == "cls":
-            idx = tuple(0 for _ in range(embedding.ndim - 1)) + (slice(None),)
-            return embedding[idx]
+
+        if strategy == "cls":
+            return (
+                embedding[0]
+                if embedding.ndim == 2
+                else embedding[(0,) * (embedding.ndim - 1)]
+            )
         elif strategy == "max":
-            axes = tuple(range(embedding.ndim - 1))
-            return embedding.max(axis=axes)
-        else:
-            axes = tuple(range(embedding.ndim - 1))
-            return embedding.mean(axis=axes)
+            return embedding.max(axis=tuple(range(embedding.ndim - 1)))
+        else:  # mean
+            return embedding.mean(axis=tuple(range(embedding.ndim - 1)))
 
     @staticmethod
-    def _truncate_text_to_token_limit(
-        text: str, tokenizer: Any, max_tokens: int = 128
-    ) -> str:
-        logger.debug(f"Truncating text to max {max_tokens} tokens.")
+    def _split_text_into_chunks(
+        text: str, tokenizer: Any, max_tokens: int, model_config: Any
+    ) -> List[str]:
+        """Dynamic chunking based on model config."""
+
+        if len(tokenizer.encode(text)) <= max_tokens:
+            return [text]
+
+        chunk_logic = getattr(model_config, "chunk_logic", "sentence")
+        overlap = getattr(model_config, "chunk_overlap", 1)
+
+        if chunk_logic == "sentence":
+            return SentenceTransformer._chunk_by_sentences(
+                text, tokenizer, max_tokens, overlap
+            )
+        elif chunk_logic == "paragraph":
+            return SentenceTransformer._chunk_by_paragraphs(
+                text, tokenizer, max_tokens, overlap
+            )
+        elif chunk_logic == "fixed":
+            chunk_size = getattr(model_config, "chunk_size", max_tokens // 2)
+            return SentenceTransformer._chunk_fixed_size(
+                text, tokenizer, chunk_size, overlap
+            )
+        else:
+            # Default fallback
+            return SentenceTransformer._chunk_by_sentences(
+                text, tokenizer, max_tokens, overlap
+            )
+
+    @staticmethod
+    def _chunk_by_sentences(
+        text: str, tokenizer: Any, max_tokens: int, overlap: int = 1
+    ) -> List[str]:
+        """Sentence-based chunking with overlap (your original logic)."""
+        logger.debug("Splitting text into overlapping sentence chunks.")
+
         sentences = [s.strip() for s in text.split(".") if s.strip()]
-        current_chunk = ""
-        tokenized = False
+        chunks: List[str] = []
+        i = 0
 
-        for sentence in sentences:
-            candidate = (current_chunk + sentence).strip()
-            token_count = len(tokenizer.encode(candidate))
-            if token_count < max_tokens:
-                current_chunk = candidate + ". "
-                tokenized = True
+        while i < len(sentences):
+            chunk_sentences = []
+            j = i
+
+            while j < len(sentences):
+                candidate = " ".join(chunk_sentences + [sentences[j]])
+                tokens = tokenizer.encode(candidate)
+
+                if len(tokens) < max_tokens:
+                    chunk_sentences.append(sentences[j])
+                    j += 1
+                else:
+                    break
+
+            if chunk_sentences:
+                chunks.append(". ".join(chunk_sentences) + ".")
+
+            # Move forward with overlap
+            if j == i:  # Single sentence too long
+                i += 1
             else:
-                text = current_chunk.strip()
-                break
+                i = max(i + 1, j - overlap)  # Overlap sentences
 
-        if not tokenized and len(text) > max_tokens:
-            text = text[:max_tokens]
+        logger.debug(f"Split text into {len(chunks)} sentence chunks.")
+        return chunks
 
-        return text.strip()
+    @staticmethod
+    def _chunk_by_paragraphs(
+        text: str, tokenizer: Any, max_tokens: int, overlap: int = 0
+    ) -> List[str]:
+        """Paragraph-based chunking."""
+        logger.debug("Splitting text into paragraph chunks.")
+
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        chunks: List[str] = []
+        i = 0
+
+        while i < len(paragraphs):
+            chunk_paragraphs = []
+            j = i
+
+            while j < len(paragraphs):
+                candidate = "\n\n".join(chunk_paragraphs + [paragraphs[j]])
+                tokens = tokenizer.encode(candidate)
+
+                if len(tokens) < max_tokens:
+                    chunk_paragraphs.append(paragraphs[j])
+                    j += 1
+                else:
+                    break
+
+            if chunk_paragraphs:
+                chunks.append("\n\n".join(chunk_paragraphs))
+
+            # Move forward with overlap
+            if j == i:
+                i += 1
+            else:
+                i = max(i + 1, j - overlap)
+
+        logger.debug(f"Split text into {len(chunks)} paragraph chunks.")
+        return chunks
+
+    @staticmethod
+    def _chunk_fixed_size(
+        text: str, tokenizer: Any, chunk_size: int, overlap: int = 0
+    ) -> List[str]:
+        """Fixed-size chunking with character estimation."""
+        logger.debug(f"Splitting text into fixed chunks of {chunk_size} tokens.")
+
+        # Estimate characters per token (varies by tokenizer)
+        char_per_token = 4  # Conservative estimate
+        char_chunk_size = chunk_size * char_per_token
+        char_overlap = overlap * char_per_token
+
+        chunks: List[str] = []
+        start = 0
+
+        while start < len(text):
+            end = start + char_chunk_size
+            chunk = text[start:end]
+
+            # Validate and adjust token count
+            while len(tokenizer.encode(chunk)) > chunk_size and len(chunk) > 10:
+                chunk = chunk[: int(len(chunk) * 0.9)]
+
+            if chunk.strip():
+                chunks.append(chunk.strip())
+
+            # Move start position with overlap
+            start = end - char_overlap if overlap > 0 else end
+
+        logger.debug(f"Split text into {len(chunks)} fixed-size chunks.")
+        return chunks
 
     @staticmethod
     def _small_text_embedding(
@@ -140,23 +221,21 @@ class SentenceTransformer(BaseNLPService):
         session: Any,
         projected_dimension: int = 128,
         **kwargs,
-    ):
-        _results = _EmbeddingResults(
+    ) -> _EmbeddingResults:
+        """Generate embedding for a single text chunk."""
+        results = _EmbeddingResults(
             EmbeddingResults=[],
             message="Embedding generated successfully",
             success=True,
         )
-        embedding = None  # Ensure embedding is always defined
+
         try:
             input_names = getattr(model_config, "inputnames", {})
             output_names = getattr(model_config, "outputnames", {})
-            logger.debug(f"Using input name: {input_names} for ONNX session.")
             max_length = getattr(input_names, "max_length", 128)
-            processed_text = SentenceTransformer._truncate_text_to_token_limit(
-                SentenceTransformer._preprocess_text(small_text), tokenizer, max_length
-            )
 
-            logger.debug(f"Tokenizing processed text: {processed_text[:50]}...")
+            # Tokenize
+            processed_text = SentenceTransformer._preprocess_text(small_text)
             encoding = tokenizer(
                 processed_text,
                 padding="max_length",
@@ -164,11 +243,15 @@ class SentenceTransformer(BaseNLPService):
                 max_length=max_length,
                 return_tensors="np",
             )
-            input_ids = encoding["input_ids"]
+
+            input_ids = encoding["input_ids"].astype(np.int64)
             attention_mask = encoding.get("attention_mask", None)
+            if attention_mask is not None:
+                attention_mask = attention_mask.astype(np.int64)
 
             # Prepare ONNX inputs
             inputs = {getattr(input_names, "input", "input_ids"): input_ids}
+
             if attention_mask is not None:
                 inputs[getattr(input_names, "mask", "attention_mask")] = attention_mask
 
@@ -176,7 +259,7 @@ class SentenceTransformer(BaseNLPService):
             position_name = getattr(input_names, "position", None)
             if position_name:
                 seq_len = input_ids.shape[1]
-                position_ids = np.arange(seq_len)[None, :]
+                position_ids = np.arange(seq_len, dtype=np.int64)[None, :]
                 inputs[position_name] = position_ids
 
             # Add token_type_ids if required
@@ -188,169 +271,72 @@ class SentenceTransformer(BaseNLPService):
 
             # Add decoder_input_ids if required
             use_decoder_input = getattr(input_names, "use_decoder_input", False)
-            logger.debug(f"Use decoder inputs: {use_decoder_input}")
             if use_decoder_input:
                 seq_len = input_ids.shape[1]
                 decoder_input_ids = np.zeros((1, seq_len), dtype=np.int64)
-                inputs[
-                    getattr(input_names, "decoder_input_name", "decoder_input_ids")
-                ] = decoder_input_ids
+                decoder_input_name = getattr(
+                    input_names, "decoder_input_name", "decoder_input_ids"
+                )
+                inputs[decoder_input_name] = decoder_input_ids
 
-            logger.debug(
-                f"Running ONNX session for embedding for input: {inputs.keys()}..."
-            )
-
+            # Run inference
             outputs = session.run(None, inputs)
             SentenceTransformer._log_onnx_outputs(outputs, session)
 
-            logits = getattr(output_names, "logits", False)
-            if logits or SentenceTransformer._is_logits_output(outputs, session):
-                logger.debug("Output is logits, applying softmax.")
-                embedding = SentenceTransformer._softmax(outputs[0])
-            else:
-                embedding = outputs[0]
-            logger.debug(
-                f"Generated embedding with shape: {embedding.shape}, dtype: {embedding.dtype}, dimension: {embedding.ndim}"
-            )
+            # Process output
+            embedding = outputs[0]
+            if getattr(
+                output_names, "logits", False
+            ) or SentenceTransformer._is_logits_output(outputs, session):
+                embedding = SentenceTransformer._softmax(embedding)
 
+            # Apply pooling
             pooling_strategy = getattr(model_config, "pooling_strategy", "mean")
             embedding = SentenceTransformer._pooling(embedding, pooling_strategy)
-            logger.debug(
-                f"Pooling strategy: {pooling_strategy}, resulting embedding shape: {embedding.shape}"
-            )
+
+            # Normalize if required
             if getattr(model_config, "normalize", True):
                 norm = np.linalg.norm(embedding)
                 if norm > 0:
                     embedding = embedding / norm
-                    logger.debug("Normalized embedding vector.")
-            logger.debug(
-                f"Projecting embedding from {embedding.shape[-1]} to {projected_dimension}"
-            )
+
+            # Project dimensions if needed
             if projected_dimension > 0 and embedding.shape[-1] != projected_dimension:
-                logger.debug(
-                    f"Projecting embedding from {embedding.shape[-1]} to {projected_dimension} dimensions."
-                )
                 embedding = SentenceTransformer._project_embedding(
                     embedding, projected_dimension
                 )
 
-                _results.EmbeddingResults = embedding.flatten().tolist()
+            results.EmbeddingResults = embedding.flatten().tolist()
+
         except Exception as e:
-            _results.message = f"Error generating embedding: {e}"
-            _results.success = False
-            embedding = np.zeros(projected_dimension)  # fallback embedding
-            _results.EmbeddingResults = embedding.flatten().tolist()
-            logger.error(f"Error generating embedding for small text chunk: {e}")
-        finally:
-            logger.debug(
-                f"Generated embedding for small text chunk: {small_text[:25]}... with shape: {embedding.shape}"
-            )
-            return _results
+            results.message = f"Error generating embedding: {e}"
+            results.success = False
+            results.EmbeddingResults = np.zeros(projected_dimension).tolist()
+            logger.error(f"Embedding error: {e}")
+
+        return results
 
     @staticmethod
     def _project_embedding(
         embedding: np.ndarray, projected_dimension: int
     ) -> np.ndarray:
-        """
-        Projects the embedding to the desired dimension using a random matrix (fixed seed for reproducibility).
-        """
+        """Project embedding to target dimension using fixed random matrix."""
         input_dim = embedding.shape[-1]
         rng = np.random.default_rng(seed=42)
         random_matrix = rng.uniform(-1, 1, (input_dim, projected_dimension))
-        logger.debug(
-            f"Projecting embedding with shape {embedding.shape} to {projected_dimension} dimensions."
-        )
         return np.dot(embedding, random_matrix)
 
     @staticmethod
-    def _split_text_into_chunks(
-        large_text: str, tokenizer: Any, max_tokens: int, overlap_sentences: int = 1
-    ) -> List[str]:
-        logger.debug("Splitting large text into overlapping chunks for embedding.")
-        sentences = [s.strip() for s in large_text.split(".") if s.strip()]
-        chunks: List[str] = []
-        i = 0
-        while i < len(sentences):
-            chunk_sentences = []
-            token_count = 0
-            j = i
-            while j < len(sentences):
-                candidate = " ".join(chunk_sentences + [sentences[j]])
-                tokens = tokenizer.encode(candidate)
-                if len(tokens) < max_tokens:
-                    chunk_sentences.append(sentences[j])
-                    token_count = len(tokens)
-                    j += 1
-                else:
-                    break
-            if chunk_sentences:
-                chunks.append(". ".join(chunk_sentences) + ".")
-            if j == i:
-                i += 1
-            else:
-                i = j - overlap_sentences if (j - overlap_sentences) > i else j
-        logger.debug(f"Split text into {len(chunks)} overlapping chunk(s).")
-        return chunks
-
-    @staticmethod
-    async def embed_batch_async(
-        requests: EmbeddingBatchRequest, **kwargs: Any
-    ) -> EmbeddingBatchResponse:
-        """
-        Asynchronously embed a batch of texts using run_in_executor for concurrency.
-        """
-        start_time = time.time()
-        response = EmbeddingBatchResponse(
-            success=True,
-            message="Batch embedding generated successfully",
-            model=requests.model,
-            results=[],
-            time_taken=0.0,
-        )
-        try:
-            loop = asyncio.get_event_loop()
-            tasks = [
-                loop.run_in_executor(
-                    None,
-                    functools.partial(
-                        SentenceTransformer._embed_text_local,
-                        text=input,
-                        model=requests.model,
-                        projected_dimension=requests.projected_dimension,
-                        join_chunks=requests.join_chunks,
-                        join_by_pooling_strategy=requests.join_by_pooling_strategy,
-                        output_large_text_upon_join=requests.output_large_text_upon_join,
-                        **kwargs,
-                    ),
-                )
-                for input in requests.inputs
-            ]
-            results = await asyncio.gather(*tasks)
-            for result in results:
-                if result and result.success:
-                    response.results.extend(result.EmbeddingResults)
-                else:
-                    response.success = False
-                    response.message = getattr(
-                        result, "message", "Unknown error during embedding"
-                    )
-                    break
-        except Exception as e:
-            response.success = False
-            response.message = f"Error generating embedding: {str(e)}"
-            logger.exception("Unexpected error during embedding")
-        finally:
-            elapsed = time.time() - start_time
-            logger.debug(f"Embedding completed in {elapsed:.2f} seconds.")
-            response.time_taken = elapsed
-            return response
+    def _truncate_text_to_token_limit(
+        text: str, tokenizer: Any, max_tokens: int = 128
+    ) -> str:
+        """Backward compatibility for tests."""
+        return SentenceTransformer._preprocess_text(text)[: max_tokens * 4]
 
     @staticmethod
     def embed_text(req: EmbeddingRequest, **kwargs: Any) -> EmbeddingResponse:
-        """
-        Splits text into chunks and generates embeddings for each chunk.
-        Returns a list of dicts: [{"Embedding": embedding, "TextChunk": chunk}, ...]
-        """
+        """Main embedding function for single text."""
+        start_time = time.time()
         response = EmbeddingResponse(
             success=True,
             message="Embedding generated successfully",
@@ -358,7 +344,7 @@ class SentenceTransformer(BaseNLPService):
             results=[],
             time_taken=0.0,
         )
-        start_time = time.time()
+
         try:
             result = SentenceTransformer._embed_text_local(
                 text=req.input,
@@ -369,32 +355,69 @@ class SentenceTransformer(BaseNLPService):
                 output_large_text_upon_join=req.output_large_text_upon_join,
                 **kwargs,
             )
-            if not result.success:
+
+            if result.success:
+                response.results = result.EmbeddingResults
+            else:
                 response.success = False
                 response.message = result.message
-                logger.error(f"Error generating embedding: {result.message}")
-            else:
-                # Ensure results is a flat list of EmbededChunk
-                if (
-                    isinstance(result.EmbeddingResults, list)
-                    and result.EmbeddingResults
-                    and isinstance(result.EmbeddingResults[0], EmbededChunk)
-                ):
-                    response.results = result.EmbeddingResults
-                else:
-                    logger.warning(
-                        "Unexpected EmbeddingResults format in embed_text or no embeddings generated."
-                    )
-                    response.results = result.EmbeddingResults or []
-                logger.debug(f"Generated length: {len(response.results)} embeddings.")
+
         except Exception as e:
             response.success = False
             response.message = f"Error generating embedding: {str(e)}"
             logger.exception("Unexpected error during embedding")
         finally:
-            elapsed = time.time() - start_time
-            logger.debug(f"Embedding completed in {elapsed:.2f} seconds.")
-            response.time_taken = elapsed
+            response.time_taken = time.time() - start_time
+            return response
+
+    @staticmethod
+    async def embed_batch_async(
+        requests: EmbeddingBatchRequest, **kwargs: Any
+    ) -> EmbeddingBatchResponse:
+        """Asynchronous batch embedding."""
+        start_time = time.time()
+        response = EmbeddingBatchResponse(
+            success=True,
+            message="Batch embedding generated successfully",
+            model=requests.model,
+            results=[],
+            time_taken=0.0,
+        )
+
+        try:
+            loop = asyncio.get_event_loop()
+            tasks = [
+                loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        SentenceTransformer._embed_text_local,
+                        text=input_text,
+                        model=requests.model,
+                        projected_dimension=requests.projected_dimension,
+                        join_chunks=requests.join_chunks,
+                        join_by_pooling_strategy=requests.join_by_pooling_strategy,
+                        output_large_text_upon_join=requests.output_large_text_upon_join,
+                        **kwargs,
+                    ),
+                )
+                for input_text in requests.inputs
+            ]
+
+            results = await asyncio.gather(*tasks)
+            for result in results:
+                if result and result.success:
+                    response.results.extend(result.EmbeddingResults)
+                else:
+                    response.success = False
+                    response.message = getattr(result, "message", "Unknown error")
+                    break
+
+        except Exception as e:
+            response.success = False
+            response.message = f"Error generating embedding: {str(e)}"
+            logger.exception("Unexpected error during batch embedding")
+        finally:
+            response.time_taken = time.time() - start_time
             return response
 
     @staticmethod
@@ -407,10 +430,7 @@ class SentenceTransformer(BaseNLPService):
         output_large_text_upon_join: bool = False,
         **kwargs: Any,
     ) -> _EmbeddingResults:
-        """
-        Splits text into chunks and generates embeddings for each chunk.
-        Returns a list of dicts: [{"Embedding": embedding, "TextChunk": chunk}, ...]
-        """
+        """Core embedding logic for text processing."""
         results = _EmbeddingResults(
             EmbeddingResults=[],
             message="Embedding generated successfully",
@@ -419,41 +439,51 @@ class SentenceTransformer(BaseNLPService):
 
         try:
             model_config = SentenceTransformer._get_model_config(model)
-            logger.debug(
-                f"Embedding text using model: {model}, projected_dimension: {projected_dimension} and task: {getattr(model_config, 'embedder_task', 'fe')}..."
-            )
             model_to_use_path = os.path.join(
                 SentenceTransformer._root_path,
                 "models",
                 getattr(model_config, "embedder_task", "fe"),
                 model,
             )
-            logger.debug(f"Using model path: {model_to_use_path}")
-            tokenizer = SentenceTransformer._get_tokenizer_threadsafe(model_to_use_path)
 
-            model_path = os.path.join(
-                model_to_use_path,
-                getattr(model_config, "encoder_onnx_model", None) or "model.onnx",
+            use_legacy = getattr(model_config, "legacy_tokenizer", False)
+            tokenizer = SentenceTransformer._get_tokenizer_threadsafe(
+                model_to_use_path, use_legacy
             )
-            logger.debug(f"Using ONNX model path: {model_path}")
+            if not tokenizer:
+                results.success = False
+                results.message = f"Failed to load tokenizer: {model_to_use_path}"
+                return results
+
+            # Choose optimized or regular model based on flag
+            use_optimized = getattr(model_config, "use_optimized", False)
+            if use_optimized:
+                model_filename = getattr(
+                    model_config, "encoder_optimized_onnx_model", "model_optimized.onnx"
+                )
+            else:
+                model_filename = (
+                    getattr(model_config, "encoder_onnx_model", None) or "model.onnx"
+                )
+
+            model_path = os.path.join(model_to_use_path, model_filename)
+
             session = SentenceTransformer._get_encoder_session(model_path)
             if not session:
-                logger.error(
-                    f"Failed to get ONNX session for model: {model} and path: {model_path}"
-                )
-                return None
+                results.success = False
+                results.message = f"Failed to load ONNX session: {model_path}"
+                return results
+
             max_tokens = getattr(
                 getattr(model_config, "inputnames", {}), "max_length", 128
             )
-
-            logger.debug(f"Splitting text into chunks with max_tokens={max_tokens}")
             chunks = SentenceTransformer._split_text_into_chunks(
-                text, tokenizer, max_tokens
+                text, tokenizer, max_tokens, model_config
             )
+
+            # Process each chunk
             for chunk in chunks:
-                display_chunk = chunk if len(chunk) <= 50 else chunk[:50]
-                logger.debug(f"Generating embedding for chunk: {display_chunk}...")
-                embedding = SentenceTransformer._small_text_embedding(
+                embedding_result = SentenceTransformer._small_text_embedding(
                     small_text=chunk,
                     model_config=model_config,
                     tokenizer=tokenizer,
@@ -461,59 +491,39 @@ class SentenceTransformer(BaseNLPService):
                     projected_dimension=projected_dimension,
                     **kwargs,
                 )
-                if not embedding.success:
+
+                if not embedding_result.success:
                     results.success = False
-                    error = f"Error generating embedding for chunk: {display_chunk}... {embedding.message}"
-                    results.message = error
-                    logger.error(error)
+                    results.message = embedding_result.message
                     break
-                else:
-                    results.EmbeddingResults.append(
-                        EmbededChunk(vector=embedding.EmbeddingResults, chunk=chunk)
-                    )
-            if (
-                join_chunks
-                and results.EmbeddingResults
-                and len(results.EmbeddingResults) > 1
-            ):
-                logger.debug("Joining chunks into a single embedding.")
-                if join_by_pooling_strategy is None:
-                    join_by_pooling_strategy = getattr(
-                        model_config, "pooling_strategy", "mean"
-                    )
-                logger.debug(
-                    f"Joining chunks using pooling strategy: {join_by_pooling_strategy}."
+
+                results.EmbeddingResults.append(
+                    EmbededChunk(vector=embedding_result.EmbeddingResults, chunk=chunk)
                 )
-                if join_by_pooling_strategy not in ["mean", "max"]:
-                    logger.warning(
-                        f"Invalid pooling strategy: {join_by_pooling_strategy}. Defaulting to 'mean'."
-                    )
-                    join_by_pooling_strategy = "mean"
+
+            # Join chunks if requested
+            if join_chunks and len(results.EmbeddingResults) > 1:
+                pooling_strategy = join_by_pooling_strategy or getattr(
+                    model_config, "pooling_strategy", "mean"
+                )
+                if pooling_strategy not in ["mean", "max"]:
+                    pooling_strategy = "mean"
+
                 merged_vector = SentenceTransformer._merge_vectors(
-                    results.EmbeddingResults, method=join_by_pooling_strategy
+                    results.EmbeddingResults, pooling_strategy
                 )
                 results.EmbeddingResults = [
                     EmbededChunk(
                         vector=merged_vector,
                         joined_chunk=True,
                         only_vector=not output_large_text_upon_join,
-                        chunk=(
-                            _NO_TEXT_FOR_LARGE_TEXT
-                            if not output_large_text_upon_join
-                            else text
-                        ),
+                        chunk="" if not output_large_text_upon_join else text,
                     )
                 ]
+
         except Exception as e:
             results.success = False
             results.message = f"Error generating embedding: {str(e)}"
             logger.exception("Unexpected error during embedding")
-        finally:
-            return results
 
-
-# HINT:
-# - Logging is added at key steps for tracing and debugging.
-# - Use debug logs for internal steps and info logs for high-level process.
-# - This class is thread-safe and caches tokenizers and ONNX sessions for efficiency.
-# - Make sure your model config and tokenizer paths are correct for your deployment.
+        return results

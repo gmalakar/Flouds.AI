@@ -32,10 +32,10 @@ class ConfigLoader:
             os.getenv("FLOUDS_API_ENV", "Production").lower() == "production"
         )
         # set ONNX_ROOT
-        ConfigLoader.__appsettings.onnx.model_path = os.getenv(
-            "FLOUDS_ONNX_ROOT", ConfigLoader.__appsettings.onnx.model_path
+        ConfigLoader.__appsettings.onnx.onnx_path = os.getenv(
+            "FLOUDS_ONNX_ROOT", ConfigLoader.__appsettings.onnx.onnx_path
         )
-        if not ConfigLoader.__appsettings.onnx.model_path:
+        if not ConfigLoader.__appsettings.onnx.onnx_path:
             logger.error(
                 f"ONNX model path is not set. Please set it in appsettings.json or via the FLOUDS_ONNX_ROOT environment variable and restart application."
             )
@@ -57,9 +57,9 @@ class ConfigLoader:
         ConfigLoader.__appsettings.server.type = os.getenv(
             "FLOUDS_SERVER_TYPE", ConfigLoader.__appsettings.server.type
         )
-        ConfigLoader.__appsettings.server.model_session_provider = os.getenv(
+        ConfigLoader.__appsettings.server.session_provider = os.getenv(
             "FLOUDS_MODEL_SESSION_PROVIDER",
-            ConfigLoader.__appsettings.server.model_session_provider,
+            ConfigLoader.__appsettings.server.session_provider,
         )
         ConfigLoader.__appsettings.app.debug = (
             os.getenv("FLOUDS_DEBUG_MODE", "0") == "1"

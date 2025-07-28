@@ -14,11 +14,14 @@ WORKDIR /flouds-ai
 COPY app/requirements.txt .
 
 # Install dependencies in single layer
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+    && pip install --no-cache-dir numpy==1.24.4 \
     && if [ "$GPU" = "true" ]; then \
-         pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu121; \
+         pip install --no-cache-dir torch==2.1.0 --index-url https://download.pytorch.org/whl/cu121; \
        else \
-         pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
+         pip install --no-cache-dir torch==2.1.0 --index-url https://download.pytorch.org/whl/cpu; \
        fi \
     && pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y build-essential \

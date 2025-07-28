@@ -1,9 +1,12 @@
+# Embedding models
 python onnx_loaders/export_model.py --model_for "fe" --model_name "sentence-transformers/all-MiniLM-L6-v2" --optimize
-python onnx_loaders/export_model.py --model_for "s2s" --model_name "t5-small" --optimize --task "seq2seq-lm"
-python onnx_loaders/export_model.py --model_for "fe" --model_name "PleIAs/Pleias-Pico" --optimize
-python onnx_loaders/export_model.py --model_for "s2s" --model_name "PleIAs/Pleias-Pico" --optimize --task "seq2seq-lm"
+python onnx_loaders/export_model.py --model_for "fe" --model_name "sentence-transformers/paraphrase-MiniLM-L6-v2" --optimize
 python onnx_loaders/export_model.py --model_for "fe" --model_name "sentence-transformers/sentence-t5-base" --optimize --use_t5_encoder
-python onnx_loaders/export_model.py --model_for "s2s" --model_name "google/pegasus-cnn_dailymail" --task "seq2seq-lm"
-python onnx_loaders/export_model.py --model_for "s2s" --model_name "Falconsai/text_summarization" --task "seq2seq-lm" --model_folder "falconsai_text_summarization"
-python onnx_loaders/export_model.py --model_for "s2s" --model_name "facebook/bart-large-cnn" --task "text2text-generation" --use_cache
+python onnx_loaders/export_model.py --model_for "fe" --model_name "PleIAs/Pleias-Pico" --optimize
+
+# Summarization models
+python onnx_loaders/export_model.py --model_for "s2s" --model_name "t5-small" --optimize --task "seq2seq-lm"
+python onnx_loaders/export_model.py --model_for "s2s" --model_name "facebook/bart-large-cnn" --optimize --task "seq2seq-lm" --use_cache
+python onnx_loaders/export_model.py --model_for "s2s" --model_name "Falconsai/text_summarization" --optimize --task "seq2seq-lm" --model_folder "falconsai_text_summarization"
+python onnx_loaders/export_model.py --model_for "s2s" --model_name "google/pegasus-cnn_dailymail" --optimize --task "seq2seq-lm" --use_cache
 

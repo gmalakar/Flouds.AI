@@ -4,6 +4,8 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
+from typing import Annotated
+
 from pydantic import Field
 
 from app.models.base_request import BaseRequest
@@ -12,7 +14,8 @@ from app.models.base_request import BaseRequest
 class EmbeddingBaseRequest(BaseRequest):
     projected_dimension: int = Field(
         None,
-        description="The dimension to which the embedding will be projected. Defaults to None.",
+        gt=0,
+        description="The dimension to which the embedding will be projected. Must be greater than 0. Defaults to None.",
     )
     join_chunks: bool = Field(
         True,
@@ -33,7 +36,9 @@ class EmbeddingRequest(EmbeddingBaseRequest):
     Request model for text embedding.
     """
 
-    input: str = Field(..., description="The input text to be embedded.")
+    input: str = Field(
+        ..., min_length=1, description="The input text to be embedded. Cannot be empty."
+    )
 
 
 class EmbeddingBatchRequest(EmbeddingBaseRequest):
@@ -41,4 +46,8 @@ class EmbeddingBatchRequest(EmbeddingBaseRequest):
     Request model for batch text embedding.
     """
 
-    inputs: list[str] = Field(..., description="The input texts to be embedded.")
+    inputs: list[Annotated[str, Field(min_length=1)]] = Field(
+        ...,
+        min_length=1,
+        description="The input texts to be embedded. Must contain at least one non-empty text.",
+    )

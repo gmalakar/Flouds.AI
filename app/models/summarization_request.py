@@ -4,6 +4,8 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
+from typing import Annotated
+
 from pydantic import Field
 
 from app.models.base_request import BaseRequest
@@ -19,8 +21,16 @@ class SummarizationBaseRequest(BaseRequest):
 
 
 class SummarizationRequest(SummarizationBaseRequest):
-    input: str = Field(..., description="The input text to be summarized.")
+    input: str = Field(
+        ...,
+        min_length=1,
+        description="The input text to be summarized. Cannot be empty.",
+    )
 
 
 class SummarizationBatchRequest(SummarizationBaseRequest):
-    inputs: list[str] = Field(..., description="The input texts to be summarized.")
+    inputs: list[Annotated[str, Field(min_length=1)]] = Field(
+        ...,
+        min_length=1,
+        description="The input texts to be summarized. Must contain at least one non-empty text.",
+    )

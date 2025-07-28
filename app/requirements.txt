@@ -1,10 +1,7 @@
-fastapi
-uvicorn
-hypercorn
-optimum[onnxruntime]
-transformers
-numpy
-onnxruntime
-pydantic
-typing-extensions
-nltk
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+optimum[onnxruntime]==1.16.0
+onnxruntime==1.16.3
+transformers==4.35.0
+numpy==1.24.4
+pydantic==2.5.0

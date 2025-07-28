@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_embedder_service.py
-# Date: 2025-06-10
+# Date: 2025-01-15
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
@@ -11,7 +11,7 @@ import pytest
 
 from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
 from app.models.embedding_response import EmbededChunk
-from app.services.embedder_service import _STOP_WORDS, SentenceTransformer
+from app.services.embedder_service import SentenceTransformer
 
 
 class DummyTokenizer:
@@ -39,44 +39,38 @@ class DummySession:
         return [DummyOutput("output")]
 
 
+class DummyConfig:
+    embedder_task = "fe"
+    encoder_onnx_model = "model.onnx"
+    normalize = True
+    pooling_strategy = "mean"
+    chunk_logic = "sentence"
+    chunk_overlap = 1
+    inputnames = type(
+        "inputnames",
+        (),
+        {
+            "input": "input_ids",
+            "mask": "attention_mask",
+            "max_length": 8,
+            "tokentype": None,
+            "position": None,
+            "use_decoder_input": False,
+            "decoder_input_name": None,
+        },
+    )()
+    outputnames = type(
+        "outputnames",
+        (),
+        {
+            "logits": False,
+        },
+    )()
+
+
 @pytest.fixture
 def dummy_model_config():
-    class DummyConfig:
-        embedder_task = "fe"
-        encoder_onnx_model = "model.onnx"
-        normalize = True
-        pooling_strategy = "mean"
-        inputnames = type(
-            "inputnames",
-            (),
-            {
-                "input": "input_ids",
-                "mask": "attention_mask",
-                "max_length": 8,
-                "tokentype": None,
-                "position": None,
-                "use_decoder_input": False,
-                "decoder_input_name": None,
-            },
-        )()
-        outputnames = type(
-            "outputnames",
-            (),
-            {
-                "logits": False,
-            },
-        )()
-
     return DummyConfig()
-
-
-def test_preprocess_text_removes_stopwords():
-    text = "The quick brown fox jumps over the lazy dog."
-    processed = SentenceTransformer._preprocess_text(text)
-    processed_words = set(processed.lower().split())
-    for stop_word in _STOP_WORDS:
-        assert stop_word not in processed_words
-    assert "quick" in processed_words
 
 
 def test_truncate_text_to_token_limit():
@@ -85,13 +79,16 @@ def test_truncate_text_to_token_limit():
     truncated = SentenceTransformer._truncate_text_to_token_limit(
         text, tokenizer, max_tokens=5
     )
-    assert len(truncated.split()) <= 5
+    assert len(truncated) <= 20  # 5 tokens * 4 chars estimate
 
 
 def test_split_text_into_chunks():
     text = "Sentence one. Sentence two. Sentence three."
     tokenizer = DummyTokenizer()
-    chunks = SentenceTransformer._split_text_into_chunks(text, tokenizer, max_tokens=3)
+    config = DummyConfig()
+    chunks = SentenceTransformer._split_text_into_chunks(
+        text, tokenizer, max_tokens=3, model_config=config
+    )
     assert isinstance(chunks, list)
     assert all(isinstance(chunk, str) for chunk in chunks)
     assert len(chunks) > 0

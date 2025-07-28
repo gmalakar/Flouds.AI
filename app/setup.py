@@ -6,8 +6,6 @@
 
 import os
 
-import nltk
-
 from app.app_init import APP_SETTINGS
 from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
@@ -28,17 +26,17 @@ env_onnx_root = os.getenv("FLOUDS_ONNX_ROOT")
 if env_onnx_root:
     # Environment variable takes precedence - no need to make it absolute
     # as Docker container paths might be different from host paths
-    logger.info(f"Using ONNX root from environment: {APP_SETTINGS.onnx.model_path}")
+    logger.info(f"Using ONNX root from environment: {APP_SETTINGS.onnx.onnx_path}")
 else:
     # Only make paths absolute if they weren't set from environment
-    if APP_SETTINGS.onnx.model_path and not os.path.isabs(APP_SETTINGS.onnx.model_path):
+    if APP_SETTINGS.onnx.onnx_path and not os.path.isabs(APP_SETTINGS.onnx.onnx_path):
         # If not absolute and not from env var, join with current working directory
-        APP_SETTINGS.onnx.model_path = os.path.join(
-            os.getcwd(), APP_SETTINGS.onnx.model_path
+        APP_SETTINGS.onnx.onnx_path = os.path.join(
+            os.getcwd(), APP_SETTINGS.onnx.onnx_path
         )
         logger.info(
-            f"Converted relative ONNX path to absolute: {APP_SETTINGS.onnx.model_path}"
+            f"Converted relative ONNX path to absolute: {APP_SETTINGS.onnx.onnx_path}"
         )
 
-logger.info(f"Appsettings-> ONNX root: {APP_SETTINGS.onnx.model_path}")
+logger.info(f"Appsettings-> ONNX root: {APP_SETTINGS.onnx.onnx_path}")
 logger.info(f"Environment: {os.getenv('FLOUDS_API_ENV', 'Production')}")
