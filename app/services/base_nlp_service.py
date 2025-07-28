@@ -95,7 +95,7 @@ class BaseNLPService:
             return None
 
     @staticmethod
-    def _preprocess_text(text: str, prepend_text: Optional[str] = None) -> str:
+    def _prepend_text(text: str, prepend_text: Optional[str] = None) -> str:
         """Prepend text if provided."""
         return f"{prepend_text}{text}" if prepend_text else text
 

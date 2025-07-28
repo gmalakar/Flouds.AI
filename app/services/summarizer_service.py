@@ -280,7 +280,7 @@ class TextSummarizer(BaseNLPService):
                 generate_kwargs["do_sample"] = True
 
             # Tokenize input
-            input_text = TextSummarizer._preprocess_text(
+            input_text = TextSummarizer._prepend_text(
                 request.input, getattr(model_config, "prepend_text", None)
             )
             inputs = tokenizer(input_text, return_tensors="pt")
@@ -342,7 +342,7 @@ class TextSummarizer(BaseNLPService):
                     decoder_start_token_id = pad_token_id
 
             # Tokenize input
-            input_text = TextSummarizer._preprocess_text(
+            input_text = TextSummarizer._prepend_text(
                 request.input, getattr(model_config, "prepend_text", None)
             )
             inputs = tokenizer(

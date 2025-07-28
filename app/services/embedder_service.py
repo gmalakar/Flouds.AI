@@ -7,7 +7,9 @@
 import asyncio
 import functools
 import os
+import re
 import time
+import unicodedata
 from typing import Any, List
 
 import numpy as np
@@ -47,14 +49,29 @@ class SentenceTransformer(BaseNLPService):
         return merged.tolist()
 
     @staticmethod
-    def _preprocess_text(text: str) -> str:
-        """Text preprocessing with line break handling."""
-        import re
+    def _preprocess_text(
+        text: str, lowercase: bool = True, remove_emojis: bool = False
+    ) -> str:
+        """Clean and normalize raw text for embedding."""
 
-        # Handle line breaks and normalize whitespace
-        text = re.sub(
-            r"\s+", " ", text
-        )  # Replace multiple whitespace with single space
+        # Normalize Unicode characters (e.g. curly quotes, accented letters)
+        text = unicodedata.normalize("NFKC", text)
+
+        # Remove HTML or XML tags
+        text = re.sub(r"<[^>]+>", "", text)
+
+        # Replace all types of whitespace (tabs, line breaks, multiple spaces) with single space
+        text = re.sub(r"\s+", " ", text)
+
+        # Optional: Remove emojis and non-ASCII characters
+        if remove_emojis:
+            text = re.sub(r"[^\x00-\x7F]+", "", text)
+
+        # Optional: Convert to lowercase
+        if lowercase:
+            text = text.lower()
+
+        # Final cleanup: trim leading and trailing whitespace
         text = text.strip()
 
         return text
@@ -235,7 +252,11 @@ class SentenceTransformer(BaseNLPService):
             max_length = getattr(input_names, "max_length", 128)
 
             # Tokenize
-            processed_text = SentenceTransformer._preprocess_text(small_text)
+            lowercase = getattr(model_config, "lowercase", True)
+            remove_emojis = getattr(model_config, "remove_emojis", False)
+            processed_text = SentenceTransformer._preprocess_text(
+                small_text, lowercase, remove_emojis
+            )
             encoding = tokenizer(
                 processed_text,
                 padding="max_length",
@@ -331,7 +352,7 @@ class SentenceTransformer(BaseNLPService):
         text: str, tokenizer: Any, max_tokens: int = 128
     ) -> str:
         """Backward compatibility for tests."""
-        return SentenceTransformer._preprocess_text(text)[: max_tokens * 4]
+        return SentenceTransformer._preprocess_text(text, True, False)[: max_tokens * 4]
 
     @staticmethod
     def embed_text(req: EmbeddingRequest, **kwargs: Any) -> EmbeddingResponse:
