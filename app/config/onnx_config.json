@@ -1,13 +1,15 @@
 {
     "all-MiniLM-L6-v2": {
         "dimension": 384,
-        "max_length": 384,
+        "max_length": 256,
         "embedder_task": "fe",
         "normalize": true,
         "pooling_strategy": "mean",
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
         "legacy_tokenizer": false,
+        "lowercase": false,
+        "remove_emojis": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask"
@@ -27,6 +29,8 @@
         "pooling_strategy": "mean",
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
+        "lowercase": false,
+        "remove_emojis": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask"
@@ -46,6 +50,8 @@
         "pooling_strategy": "mean",
         "chunk_logic": "paragraph",
         "chunk_overlap": 0,
+        "lowercase": false,
+        "remove_emojis": false,
         "inputnames": {
             "input": "input_ids",
             "position": "position_ids",
@@ -65,6 +71,8 @@
         "chunk_logic": "sentence",
         "chunk_overlap": 0,
         "legacy_tokenizer": true,
+        "lowercase": false,
+        "remove_emojis": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask",
@@ -88,6 +96,8 @@
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
         "legacy_tokenizer": true,
+        "lowercase": false,
+        "remove_emojis": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask"
@@ -120,6 +130,8 @@
         "chunk_logic": "fixed",
         "chunk_size": 256,
         "chunk_overlap": 0,
+        "lowercase": false,
+        "remove_emojis": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask"
@@ -152,6 +164,8 @@
         "summarization_task": "s2s",
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
+        "lowercase": false,
+        "remove_emojis": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask"

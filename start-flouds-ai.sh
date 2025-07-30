@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # File: start-flouds-ai.sh
-# Date: 2024-07-10
+# Date: 2024-06-10
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 #
@@ -9,88 +9,117 @@
 # and environment variable handling based on a .env file.
 #
 # Usage:
-#   ./start-flouds-ai.sh [--env-file <path>] [--instance <name>] [--image <name>] [--tag <tag>] [--gpu] [--force] [--build]
+#   ./start-flouds-ai.sh [--env-file <path>] [--instance <name>] [--image <name>] [--tag <tag>] [--force] [--build] [--pull-always] [--gpu] [--development]
 #
 # Parameters:
-#   --env-file     : Path to .env file (default: ".env")
-#   --instance     : Name of the Docker container (default: "flouds-ai-instance")
-#   --image        : Base Docker image name (default: "gmalakar/flouds-ai-cpu")
-#   --tag          : Tag for the Docker image (default: "latest")
-#   --gpu          : Use GPU image instead of CPU image
-#   --force        : Force restart container if it exists
-#   --build        : Build Docker image locally before starting container
-#   --pull-always  : Always pull image from registry before running
-#   --development  : Run in development mode
+#   --env-file       : Path to .env file (default: ".env")
+#   --instance       : Name of the Docker container (default: "flouds-ai-instance")
+#   --image          : Base Docker image name (default: "gmalakar/flouds-ai-cpu")
+#   --tag            : Tag for the Docker image (default: "latest")
+#   --gpu            : Use GPU image (default: false)
+#   --force          : Force restart container if it exists
+#   --build          : Build Docker image locally before starting container
+#   --pull-always    : Always pull image from registry before running
+#   --development    : Run in development mode
 # =============================================================================
 
-# Default parameters
+# Default values
 ENV_FILE=".env"
 INSTANCE_NAME="flouds-ai-instance"
 IMAGE_NAME="gmalakar/flouds-ai-cpu"
 TAG="latest"
-USE_GPU=false
+GPU=false
 FORCE=false
 BUILD_IMAGE=false
-AI_NETWORK="flouds_ai_network"
-PORT=19690
 PULL_ALWAYS=false
 DEVELOPMENT=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
-  case $1 in
-    --env-file)
-      ENV_FILE="$2"
-      shift 2
-      ;;
-    --instance)
-      INSTANCE_NAME="$2"
-      shift 2
-      ;;
-    --image)
-      IMAGE_NAME="$2"
-      shift 2
-      ;;
-    --tag)
-      TAG="$2"
-      shift 2
-      ;;
-    --gpu)
-      USE_GPU=true
-      shift
-      ;;
-    --force)
-      FORCE=true
-      shift
-      ;;
-    --build)
-      BUILD_IMAGE=true
-      shift
-      ;;
-    --pull-always)
-      PULL_ALWAYS=true
-      shift
-      ;;
-    --development)
-      DEVELOPMENT=true
-      shift
-      ;;
-    *)
-      echo "❌ Unknown option: $1"
-      exit 1
-      ;;
-  esac
+    case $1 in
+        --env-file)
+            ENV_FILE="$2"
+            shift 2
+            ;;
+        --instance)
+            INSTANCE_NAME="$2"
+            shift 2
+            ;;
+        --image)
+            IMAGE_NAME="$2"
+            shift 2
+            ;;
+        --tag)
+            TAG="$2"
+            shift 2
+            ;;
+        --gpu)
+            GPU=true
+            shift
+            ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        --build)
+            BUILD_IMAGE=true
+            shift
+            ;;
+        --pull-always)
+            PULL_ALWAYS=true
+            shift
+            ;;
+        --development)
+            DEVELOPMENT=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
 done
 
 # Helper functions
-test_directory_writable() {
-    local path="$1"
-    local test_file="${path}/test_write_$$_$(date +%s).tmp"
-    if echo "test" > "$test_file" 2>/dev/null && rm -f "$test_file" 2>/dev/null; then
-        return 0
-    else
+write_step_header() {
+    echo -e "\n== $1 =="
+}
+
+write_success() {
+    echo -e " \033[32m$1\033[0m"
+}
+
+write_warning() {
+    echo -e " \033[33m$1\033[0m"
+}
+
+write_error() {
+    echo -e " \033[31m$1\033[0m"
+    exit 1
+}
+
+test_docker() {
+    if ! command -v docker &> /dev/null; then
+        write_error "Docker is not installed or not in PATH"
+    fi
+    
+    if ! docker version &> /dev/null; then
+        write_error "Docker is not running or not accessible"
+    fi
+    
+    write_success "Docker is running"
+}
+
+read_env_file() {
+    local file_path="$1"
+    if [[ ! -f "$file_path" ]]; then
         return 1
     fi
+    
+    # Export variables from .env file
+    set -a
+    source "$file_path"
+    set +a
 }
 
 set_directory_permissions() {
@@ -98,212 +127,224 @@ set_directory_permissions() {
     local description="$2"
     
     if [[ ! -d "$path" ]]; then
-        echo "⚠️ $description directory does not exist: $path"
+        write_warning "$description directory does not exist: $path"
         echo "Creating directory..."
         if ! mkdir -p "$path"; then
-            echo "❌ Failed to create $description directory: $path"
-            exit 1
+            write_error "Failed to create $description directory: $path"
         fi
-        echo "✅ $description directory created: $path"
+        write_success "$description directory created: $path"
     else
-        echo "✅ Found $description directory: $path"
+        write_success "Found $description directory: $path"
     fi
     
     # Test if directory is writable
-    if test_directory_writable "$path"; then
-        echo "✅ $description directory is writable: $path"
-    else
-        echo "⚠️ $description directory is not writable: $path"
+    if [[ ! -w "$path" ]]; then
+        write_warning "$description directory is not writable: $path"
         echo "Setting permissions on $description directory..."
-        if chmod 755 "$path" 2>/dev/null; then
-            echo "✅ Permissions set successfully"
-        else
-            echo "⚠️ Failed to set permissions on $description directory"
-            echo "⚠️ $description may not be writable. Please check directory permissions manually."
-            if [[ "$FORCE" != true ]]; then
-                read -p "Continue anyway? (y/n) " continue
-                if [[ "$continue" != "y" ]]; then
-                    echo "Aborted by user."
-                    exit 0
-                fi
-            else
-                echo "Force flag set, continuing anyway."
+        if ! chmod 755 "$path"; then
+            write_warning "Failed to set permissions: $path"
+            read -p "Continue anyway? (y/n): " continue_choice
+            if [[ "$continue_choice" != "y" ]]; then
+                echo "Aborted by user."
+                exit 0
             fi
+        else
+            write_success "Permissions set successfully"
         fi
+    else
+        write_success "$description directory is writable: $path"
     fi
 }
 
-# Adjust image name for GPU if needed
-if [ "$USE_GPU" = true ] && [ "$IMAGE_NAME" = "gmalakar/flouds-ai-cpu" ]; then
-  IMAGE_NAME="gmalakar/flouds-ai-gpu"
+# Adjust image name for GPU
+if [[ "$GPU" == true && "$IMAGE_NAME" == "gmalakar/flouds-ai-cpu" ]]; then
+    IMAGE_NAME="gmalakar/flouds-ai-gpu"
 fi
-
-# Create full image name with tag
 FULL_IMAGE_NAME="${IMAGE_NAME}:${TAG}"
 
+WORKING_DIR="/flouds-ai"
+
 echo "========================================================="
-echo "                 FLOUDS.AI STARTER SCRIPT                "
+echo "                 Flouds AI STARTER SCRIPT                "
 echo "========================================================="
 echo "Instance Name : $INSTANCE_NAME"
 echo "Base Image    : $IMAGE_NAME"
 echo "Tag           : $TAG"
 echo "Full Image    : $FULL_IMAGE_NAME"
 echo "Environment   : $ENV_FILE"
-echo "GPU Support   : $USE_GPU"
 echo "Build Image   : $BUILD_IMAGE"
 echo "Force Restart : $FORCE"
+echo "Pull Always   : $PULL_ALWAYS"
+echo "GPU Mode      : $GPU"
 echo "Development   : $DEVELOPMENT"
 echo "========================================================="
 
-# Check Docker
-echo
-echo "== Checking Docker =="
-if ! docker version >/dev/null 2>&1; then
-    echo "❌ Docker is not running. Please start Docker and try again."
-    exit 1
-fi
-echo "✅ Docker is running"
+write_step_header "Checking Docker installation"
+test_docker
 
-# Read .env file
-echo
-echo "== Reading environment configuration =="
+write_step_header "Reading environment configuration"
 if [[ ! -f "$ENV_FILE" ]]; then
-    echo "⚠️ $ENV_FILE not found. Using default configuration."
-else
-    echo "✅ Using environment file: $ENV_FILE"
-    # Convert to Unix line endings and source
-    awk '{ sub("\r$", ""); print }' "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
-    source "$ENV_FILE"
+    write_error "$ENV_FILE not found. Please create this file with required environment variables."
+fi
+write_success "Using environment file: $ENV_FILE"
+
+if ! read_env_file "$ENV_FILE"; then
+    write_error "Failed to read environment file: $ENV_FILE"
 fi
 
-# Validate required ONNX config file
-echo
-echo "== Validating ONNX configuration =="
+write_step_header "Validating required environment variables"
 if [[ -z "$FLOUDS_ONNX_CONFIG_FILE_AT_HOST" ]]; then
-    echo "❌ FLOUDS_ONNX_CONFIG_FILE_AT_HOST is required in $ENV_FILE"
-    exit 1
+    write_error "FLOUDS_ONNX_CONFIG_FILE_AT_HOST environment variable is required but not set in $ENV_FILE"
 fi
 
 if [[ ! -f "$FLOUDS_ONNX_CONFIG_FILE_AT_HOST" ]]; then
-    echo "❌ ONNX config file not found: $FLOUDS_ONNX_CONFIG_FILE_AT_HOST"
-    exit 1
+    write_error "ONNX config file not found: $FLOUDS_ONNX_CONFIG_FILE_AT_HOST"
 fi
-echo "✅ Found ONNX config file: $FLOUDS_ONNX_CONFIG_FILE_AT_HOST"
+write_success "Found ONNX config file: $FLOUDS_ONNX_CONFIG_FILE_AT_HOST"
+
+if [[ -z "$FLOUDS_ONNX_MODEL_PATH_AT_HOST" ]]; then
+    write_error "FLOUDS_ONNX_MODEL_PATH_AT_HOST environment variable is required but not set in $ENV_FILE"
+fi
+
+if [[ ! -d "$FLOUDS_ONNX_MODEL_PATH_AT_HOST" ]]; then
+    write_error "ONNX model path does not exist: $FLOUDS_ONNX_MODEL_PATH_AT_HOST"
+fi
+write_success "Found ONNX model path: $FLOUDS_ONNX_MODEL_PATH_AT_HOST"
 
 # Check and set permissions for log directory
 if [[ -n "$FLOUDS_LOG_PATH_AT_HOST" ]]; then
     set_directory_permissions "$FLOUDS_LOG_PATH_AT_HOST" "Log"
 else
-    echo "⚠️ FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
+    write_warning "FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
 fi
 
-# Build image if requested
-if [ "$BUILD_IMAGE" = true ]; then
-    echo
-    echo "== Building Docker image =="
-    BUILD_ARGS=()
-    if [ "$USE_GPU" = true ]; then
-        BUILD_ARGS+=(--build-arg GPU=true)
-    fi
-    
-    if docker build "${BUILD_ARGS[@]}" -t "$FULL_IMAGE_NAME" .; then
-        echo "✅ Docker image built successfully: $FULL_IMAGE_NAME"
-    else
-        echo "❌ Failed to build Docker image."
-        exit 1
-    fi
-fi
-
-# Stop and remove existing container if it exists
-echo
-echo "== Managing container instance =="
-if docker ps -a --format '{{.Names}}' | grep -q "^${INSTANCE_NAME}$"; then
-    echo "⚠️ Container $INSTANCE_NAME already exists"
-    if [ "$FORCE" = true ]; then
-        echo "🛑 Stopping and removing existing container: $INSTANCE_NAME"
-        docker stop "$INSTANCE_NAME" >/dev/null 2>&1
-        docker rm "$INSTANCE_NAME" >/dev/null 2>&1
-        echo "✅ Container removed"
-    else
-        echo "❌ Container already exists. Use --force to replace it."
-        exit 1
-    fi
-fi
-
-# Prepare Docker run command
-DOCKER_ARGS=(run -d)
-
-if [ "$PULL_ALWAYS" = true ]; then
-  DOCKER_ARGS+=(--pull always)
-fi
-
-DOCKER_ARGS+=(--name "$INSTANCE_NAME" -p ${PORT}:${PORT})
-
-# Set environment mode
-if [ "$DEVELOPMENT" = true ]; then
-    DOCKER_ARGS+=(-e FLOUDS_API_ENV=Development -e FLOUDS_DEBUG_MODE=1)
-    echo "Running in Development mode"
+# Check and set permissions for TinyDB directory
+if [[ -n "$FLOUDS_TINYDB_PATH_AT_HOST" ]]; then
+    set_directory_permissions "$FLOUDS_TINYDB_PATH_AT_HOST" "TinyDB"
 else
-    DOCKER_ARGS+=(-e FLOUDS_API_ENV=Production -e FLOUDS_DEBUG_MODE=0)
-    echo "Running in Production mode"
+    write_warning "FLOUDS_TINYDB_PATH_AT_HOST not set. Client database will not be persisted to host."
 fi
 
-# Add config file mapping
-docker_config_path="${FLOUDS_ONNX_CONFIG_FILE:-/flouds-ai/app/config/onnx_config.json}"
-echo "Mapping ONNX config: $FLOUDS_ONNX_CONFIG_FILE_AT_HOST → $docker_config_path"
-DOCKER_ARGS+=(-v "$FLOUDS_ONNX_CONFIG_FILE_AT_HOST:$docker_config_path:ro" -e "FLOUDS_ONNX_CONFIG_FILE=$docker_config_path")
+if [[ "$BUILD_IMAGE" == true ]]; then
+    write_step_header "Building Docker image"
+    echo "Building $FULL_IMAGE_NAME..."
+    if ! docker build -t "$FULL_IMAGE_NAME" .; then
+        write_error "Failed to build Docker image."
+    fi
+    write_success "Docker image built successfully: $FULL_IMAGE_NAME"
+fi
 
-# Add ONNX model directory mapping if exists
+write_step_header "Setting up Docker network"
+AI_NETWORK="flouds_ai_network"
+if ! docker network ls --format '{{.Name}}' | grep -q "^${AI_NETWORK}$"; then
+    echo "Creating network: $AI_NETWORK"
+    if ! docker network create "$AI_NETWORK" > /dev/null; then
+        write_error "Failed to create network: $AI_NETWORK"
+    fi
+    write_success "Network $AI_NETWORK created successfully"
+else
+    write_success "Network $AI_NETWORK already exists"
+fi
+
+write_step_header "Managing container instance"
+if docker ps -a --format '{{.Names}}' | grep -q "^${INSTANCE_NAME}$"; then
+    write_warning "Container $INSTANCE_NAME already exists"
+    if [[ "$FORCE" == true ]]; then
+        echo "Stopping and removing existing container: $INSTANCE_NAME"
+        docker stop "$INSTANCE_NAME" > /dev/null 2>&1
+        docker rm "$INSTANCE_NAME" > /dev/null 2>&1
+        write_success "Container removed"
+    else
+        write_error "Container already exists. Use --force to replace it."
+    fi
+fi
+
+write_step_header "Preparing container configuration"
+DOCKER_ARGS=("run" "-d")
+
+if [[ "$PULL_ALWAYS" == true ]]; then
+    DOCKER_ARGS+=("--pull" "always")
+fi
+
+DOCKER_ARGS+=(
+    "--name" "$INSTANCE_NAME"
+    "--network" "$AI_NETWORK"
+    "-p" "19690:19690"
+)
+
+# Set environment based on development flag
+if [[ "$DEVELOPMENT" == true ]]; then
+    DOCKER_ARGS+=("-e" "FLOUDS_API_ENV=Development")
+    DOCKER_ARGS+=("-e" "FLOUDS_DEBUG_MODE=1")
+else
+    DOCKER_ARGS+=("-e" "FLOUDS_API_ENV=Production")
+    DOCKER_ARGS+=("-e" "FLOUDS_DEBUG_MODE=0")
+fi
+
+# ONNX config file mapping
+if [[ -n "$FLOUDS_ONNX_CONFIG_FILE_AT_HOST" ]]; then
+    DOCKER_CONFIG_PATH="$WORKING_DIR/app/config/onnx_config.json"
+    echo "Mapping ONNX config: $FLOUDS_ONNX_CONFIG_FILE_AT_HOST -> $DOCKER_CONFIG_PATH"
+    DOCKER_ARGS+=("-v" "${FLOUDS_ONNX_CONFIG_FILE_AT_HOST}:${DOCKER_CONFIG_PATH}:ro")
+    DOCKER_ARGS+=("-e" "FLOUDS_ONNX_CONFIG_FILE=$DOCKER_CONFIG_PATH")
+fi
+
+# ONNX model directory mapping
 if [[ -n "$FLOUDS_ONNX_MODEL_PATH_AT_HOST" ]]; then
-    docker_onnx_path="${FLOUDS_ONNX_ROOT:-/flouds-ai/onnx}"
-    echo "Mapping ONNX models: $FLOUDS_ONNX_MODEL_PATH_AT_HOST → $docker_onnx_path"
-    DOCKER_ARGS+=(-v "$FLOUDS_ONNX_MODEL_PATH_AT_HOST:$docker_onnx_path:ro" -e "FLOUDS_ONNX_ROOT=$docker_onnx_path")
+    DOCKER_ONNX_PATH="$WORKING_DIR/onnx"
+    echo "Mapping ONNX models: $FLOUDS_ONNX_MODEL_PATH_AT_HOST -> $DOCKER_ONNX_PATH"
+    DOCKER_ARGS+=("-v" "${FLOUDS_ONNX_MODEL_PATH_AT_HOST}:${DOCKER_ONNX_PATH}:ro")
+    DOCKER_ARGS+=("-e" "FLOUDS_ONNX_ROOT=$DOCKER_ONNX_PATH")
 fi
 
 # Log directory mapping
 if [[ -n "$FLOUDS_LOG_PATH_AT_HOST" ]]; then
-    docker_log_path="/flouds-ai/logs"
-    echo "Mapping logs: $FLOUDS_LOG_PATH_AT_HOST → $docker_log_path"
-    DOCKER_ARGS+=(-v "$FLOUDS_LOG_PATH_AT_HOST:$docker_log_path:rw" -e "FLOUDS_LOG_PATH=$docker_log_path")
+    DOCKER_LOG_PATH="$WORKING_DIR/logs"
+    echo "Mapping logs: $FLOUDS_LOG_PATH_AT_HOST -> $DOCKER_LOG_PATH"
+    DOCKER_ARGS+=("-v" "${FLOUDS_LOG_PATH_AT_HOST}:${DOCKER_LOG_PATH}:rw")
+    DOCKER_ARGS+=("-e" "FLOUDS_LOG_PATH=$DOCKER_LOG_PATH")
+fi
+
+# TinyDB directory mapping
+if [[ -n "$FLOUDS_TINYDB_PATH_AT_HOST" ]]; then
+    DOCKER_TINYDB_PATH="$WORKING_DIR/tinydb"
+    echo "Mapping TinyDB: $FLOUDS_TINYDB_PATH_AT_HOST -> $DOCKER_TINYDB_PATH"
+    DOCKER_ARGS+=("-v" "${FLOUDS_TINYDB_PATH_AT_HOST}:${DOCKER_TINYDB_PATH}:rw")
+    DOCKER_ARGS+=("-e" "FLOUDS_CLIENTS_DB=$DOCKER_TINYDB_PATH/clients.db")
 fi
 
 # Add platform flag if specified
 if [[ -n "$DOCKER_PLATFORM" ]]; then
     echo "Setting platform: $DOCKER_PLATFORM"
-    DOCKER_ARGS+=(--platform "$DOCKER_PLATFORM")
+    DOCKER_ARGS+=("--platform" "$DOCKER_PLATFORM")
 fi
 
-# Add image name
 DOCKER_ARGS+=("$FULL_IMAGE_NAME")
 
-echo
-echo "== Starting Flouds.AI container =="
+write_step_header "Starting Flouds AI container"
 echo "Command: docker ${DOCKER_ARGS[*]}"
+
 if docker "${DOCKER_ARGS[@]}"; then
-    echo "✅ Flouds.AI container started successfully"
-    
-    # Wait for container to initialize
+    write_success "Flouds AI container started successfully"
+    write_success "API available at: http://localhost:19690/docs"
     echo "Waiting for container to initialize..."
-    sleep 5
+    sleep 3
     
-    echo "========================================================="
-    echo "Container Status:"
+    write_step_header "Container Status"
     docker ps --filter "name=$INSTANCE_NAME" --format "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
-    echo "========================================================="
-    echo "API available at: http://localhost:${PORT}/docs"
 else
-    echo "❌ Failed to start Flouds.AI container."
-    exit 1
+    write_error "Failed to start Flouds AI container."
 fi
 
-echo "========================================================="
-echo "Container Management:"
+write_step_header "Container Management"
+echo "Use the following commands to manage the container:"
 echo "  * View logs: docker logs -f $INSTANCE_NAME"
 echo "  * Stop container: docker stop $INSTANCE_NAME"
 echo "  * Remove container: docker rm $INSTANCE_NAME"
-echo
+echo "  * View API docs: http://localhost:19690/docs"
+echo ""
 
-read -p "Would you like to view container logs now? (y/n) " showLogs
-if [[ "$showLogs" == "y" || "$showLogs" == "Y" ]]; then
+read -p "Would you like to view container logs now? (y/n): " show_logs
+if [[ "$show_logs" == "y" || "$show_logs" == "Y" ]]; then
     docker logs -f "$INSTANCE_NAME"
 fi

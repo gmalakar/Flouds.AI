@@ -16,6 +16,7 @@ from app.app_init import APP_SETTINGS
 from app.config.config_loader import ConfigLoader
 from app.logger import get_logger
 from app.modules.concurrent_dict import ConcurrentDict
+from app.utils.model_cache import LRUModelCache
 
 logger = get_logger("base_nlp_service")
 
@@ -24,8 +25,14 @@ _tokenizer_local = threading.local()
 
 
 class BaseNLPService:
+    """
+    Base class for NLP services providing thread-safe tokenizer/session management,
+    configuration loading, and utility methods for ONNX-based inference.
+    """
+
     _root_path: str = APP_SETTINGS.onnx.onnx_path
     _encoder_sessions: ConcurrentDict = ConcurrentDict("_encoder_sessions")
+    _model_cache: LRUModelCache = LRUModelCache(max_size=5, ttl_seconds=3600)
 
     @staticmethod
     def _softmax(x: np.ndarray) -> np.ndarray:
@@ -36,15 +43,39 @@ class BaseNLPService:
         return e_x / np.sum(e_x, axis=-1, keepdims=True)
 
     @staticmethod
+    def _validate_model_config(config: Any) -> bool:
+        """Validate required config fields are present."""
+        if config is None:
+            return False
+        required_fields = ["inputnames", "outputnames"]
+        return all(hasattr(config, field) for field in required_fields)
+
+    @staticmethod
     def _get_model_config(model_to_use: str) -> Any:
-        """Load ONNX model configuration."""
-        return ConfigLoader.get_onnx_config(model_to_use)
+        """
+        Load ONNX model configuration.
+        Logs config path and errors if loading fails.
+        """
+        try:
+            config = ConfigLoader.get_onnx_config(model_to_use)
+            if not BaseNLPService._validate_model_config(config):
+                logger.error(
+                    f"Invalid config for model '{model_to_use}': missing required fields"
+                )
+                return None
+            return config
+        except Exception as e:
+            logger.error(f"Failed to load config for model '{model_to_use}': {e}")
+            return None
 
     @staticmethod
     def _get_tokenizer_threadsafe(
         tokenizer_path: str, use_legacy: bool = False
     ) -> Optional[PreTrainedTokenizer]:
-        """Thread-safe tokenizer loading with error handling."""
+        """
+        Thread-safe tokenizer loading with error handling.
+        Logs which fallback path was used.
+        """
         try:
             if not hasattr(_tokenizer_local, "tokenizers"):
                 _tokenizer_local.tokenizers = {}
@@ -52,23 +83,30 @@ class BaseNLPService:
             cache_key = f"{tokenizer_path}#{use_legacy}"
             if cache_key not in _tokenizer_local.tokenizers:
                 if os.path.exists(tokenizer_path):
-                    if use_legacy:
-                        # Use legacy tokenizer for older models
-                        tokenizer = AutoTokenizer.from_pretrained(
-                            tokenizer_path, local_files_only=True, legacy=True
-                        )
-                    else:
-                        try:
-                            # Try loading with current transformers version
-                            tokenizer = AutoTokenizer.from_pretrained(
-                                tokenizer_path, local_files_only=True
+                    try:
+                        if use_legacy:
+                            logger.debug(
+                                f"Loading legacy tokenizer from {tokenizer_path}"
                             )
-                        except Exception:
-                            # Fallback: try with legacy=True for older tokenizers
                             tokenizer = AutoTokenizer.from_pretrained(
                                 tokenizer_path, local_files_only=True, legacy=True
                             )
+                        else:
+                            logger.debug(f"Loading tokenizer from {tokenizer_path}")
+                            tokenizer = AutoTokenizer.from_pretrained(
+                                tokenizer_path, local_files_only=True
+                            )
+                    except Exception as ex:
+                        logger.warning(
+                            f"Fallback to legacy tokenizer for {tokenizer_path}: {ex}"
+                        )
+                        tokenizer = AutoTokenizer.from_pretrained(
+                            tokenizer_path, local_files_only=True, legacy=True
+                        )
                 else:
+                    logger.debug(
+                        f"Loading tokenizer from HuggingFace Hub: {tokenizer_path}"
+                    )
                     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
                 _tokenizer_local.tokenizers[cache_key] = tokenizer
@@ -81,9 +119,21 @@ class BaseNLPService:
 
     @staticmethod
     def _get_encoder_session(encoder_model_path: str) -> Optional[ort.InferenceSession]:
-        """Get or create ONNX session with error handling."""
+        """
+        Get or create ONNX session with error handling.
+        Adds provider to cache key for multi-provider support.
+        """
         try:
             provider = APP_SETTINGS.server.session_provider or "CPUExecutionProvider"
+
+            # Validate provider availability
+            available_providers = ort.get_available_providers()
+            if provider not in available_providers:
+                logger.warning(
+                    f"Provider {provider} not available, using CPUExecutionProvider"
+                )
+                provider = "CPUExecutionProvider"
+
             cache_key = f"{encoder_model_path}#{provider}"
 
             return BaseNLPService._encoder_sessions.get_or_add(
@@ -95,13 +145,31 @@ class BaseNLPService:
             return None
 
     @staticmethod
+    def clear_encoder_sessions() -> None:
+        """Clear cached ONNX encoder sessions (useful for testing/reloading)."""
+        BaseNLPService._encoder_sessions.clear()
+
+    @staticmethod
+    def clear_thread_tokenizers() -> None:
+        """Clear thread-local tokenizer cache."""
+        if hasattr(_tokenizer_local, "tokenizers"):
+            _tokenizer_local.tokenizers.clear()
+
+    @staticmethod
     def _prepend_text(text: str, prepend_text: Optional[str] = None) -> str:
-        """Prepend text if provided."""
-        return f"{prepend_text}{text}" if prepend_text else text
+        """
+        Prepend text if provided, ensuring both are strings.
+        """
+        if prepend_text is not None:
+            return f"{str(prepend_text)}{str(text)}"
+        return str(text)
 
     @staticmethod
     def _log_onnx_outputs(outputs: Any, session: Optional[Any]) -> None:
-        """Log ONNX outputs in debug mode."""
+        """
+        Log ONNX outputs in debug mode.
+        Logs output shapes, dtypes, and a sample of values for deeper debugging.
+        """
         if not APP_SETTINGS.app.debug or not outputs:
             return
 
@@ -113,10 +181,19 @@ class BaseNLPService:
 
         for name, arr in zip(output_names, outputs):
             logger.debug(f"ONNX output: {name}, shape: {arr.shape}, dtype: {arr.dtype}")
+            # Log a sample of output values for debugging
+            if arr.size > 0:
+                logger.debug(f"Sample values for {name}: {arr.flatten()[:5]}")
 
     @staticmethod
-    def _is_logits_output(outputs: Any, session: Optional[Any] = None) -> bool:
-        """Fast logits detection."""
+    def _is_logits_output(
+        outputs: Any, session: Optional[Any] = None, vocab_threshold: int = 50000
+    ) -> bool:
+        """
+        Fast logits detection.
+        Checks output names and shape heuristics.
+        Vocab size threshold is configurable.
+        """
         if not outputs:
             return False
 
@@ -132,10 +209,4 @@ class BaseNLPService:
 
         # Shape heuristic - likely vocab size
         arr = outputs[0]
-        return arr.ndim >= 2 and arr.shape[-1] <= 50000
-
-    @staticmethod
-    def clear_thread_tokenizers() -> None:
-        """Clear thread-local tokenizer cache."""
-        if hasattr(_tokenizer_local, "tokenizers"):
-            _tokenizer_local.tokenizers.clear()
+        return arr.ndim >= 2 and arr.shape[-1] <= vocab_threshold

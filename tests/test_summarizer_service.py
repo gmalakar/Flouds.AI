@@ -196,7 +196,7 @@ def test_remove_special_tokens():
     text = "This is <pad> a test <eos>."
     special_tokens = {"<pad>", "<eos>"}
     result = TextSummarizer._remove_special_tokens(text, special_tokens)
-    assert result == "This is  a test ."
+    assert result == "This is a test ."
 
 
 # ---- Batch summarization ----

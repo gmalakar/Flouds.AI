@@ -1,33 +1,28 @@
-# Byte-compiled / optimized / DLL files
+# =============================================================================
+# Docker ignore file for Flouds AI
+# Excludes unnecessary files from Docker build context
+# =============================================================================
+
+# Python bytecode and cache
 __pycache__/
 *.py[cod]
-*.so
+*.pyo
 *.pyd
+*.so
+.Python
 
-# Environment files
+# Environment and configuration files
 .env*
 *.env*
-
-# Development configuration files
 appsettings.development.json
 appsettings.*.json
 !appsettings.json
-!app/requirements.txt
-clean_proj.bat
 
-# Logs and test output
-*.log
-logs/
-.pytest_cache/
-coverage.*
-htmlcov/
-.tox/
-
-# IDE/editor folders
-.vscode/
-.idea/
-*.swp
-*.swo
+# Development dependencies and tools
+requirements-dev.txt
+.pre-commit-config.yaml
+pyproject.toml
+pytest.ini
 
 # Virtual environments
 venv/
@@ -36,65 +31,115 @@ ENV/
 env/
 env.bak/
 venv.bak/
+.conda/
+conda-meta/
 
-# Git and version control
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.spyderproject
+.spyproject
+.ropeproject
+
+# Version control
 .git/
 .gitignore
 .gitattributes
+.gitmodules
 
-# Build artifacts
+# Build and distribution
 build/
 dist/
 *.egg-info/
 .eggs/
 *.whl
+*.tar.gz
 
-# Docker files
+# Testing and coverage
+tests/
+test_*/
+*_test.py
+.pytest_cache/
+.coverage
+coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Logs and temporary files
+*.log
+logs/
+*.tmp
+*.bak
+*.old
+*.swp
+
+# Documentation and scripts
+*.md
+!README.md
+*.ps1
+*.sh
+*.bat
+LICENSE*
+
+# Docker files (avoid recursion)
 Dockerfile*
 .dockerignore
 docker-compose*.yml
 
-# Scripts and documentation
-*.md
-*.ps1
-LICENSE*
-
-# Data, models, and cache
+# ML models and data (exclude from image)
 *.pb
 *.tflite
+*.onnx
 *.mlmodel
-*.hdf5 
+*.hdf5
+*.h5
 *.ckpt
 *.pth
 *.pt
 *.pkl
-*.pkl.gz
-*.tar.gz
-data/
-*.h5
-*.h5py
-*.model
-*.weights
 *.bin
 *.npz
+*.safetensors
+onnx/
+models/
+data/
+datasets/
+checkpoints/
 
-# OS-specific
-.DS_Store
-Thumbs.db
-ehthumbs.db
-Icon?
-desktop.ini
-
-# Jupyter and notebooks
+# Jupyter notebooks
 .ipynb_checkpoints/
 *.ipynb
 
-# Temporary files
-*.tmp
-*.bak
-*.old
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
 
-# Tests
-tests/
-test_*/
-*_test.py
+# Node.js (if any frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Monitoring and profiling
+.prof
+*.prof
+
+# Cache directories
+.cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Backup files
+*.backup
+*.orig

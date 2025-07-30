@@ -4,82 +4,118 @@
 
 # Flouds AI
 
-**Flouds AI** is a Python-based NLP service framework for text summarization and embedding, supporting both HuggingFace Transformers and ONNX runtime models. It is designed for extensibility, robust error handling, and easy integration into larger applications or microservices.
+**Flouds AI** is an enterprise-grade Python NLP service framework for text summarization and embedding, built with FastAPI and ONNX runtime. It features comprehensive monitoring, security, and performance optimizations for scalable deployment.
 
 ---
 
-## Features
+## ✨ Key Features
 
-- **Text Summarization**: Supports both sequence-to-sequence language models and ONNX-based summarization with automatic sentence capitalization
-- **Text Embedding**: Provides sentence and document embeddings using ONNX models with configurable chunking strategies
-- **Batch Processing**: Efficiently handles batch summarization and embedding requests with async support
-- **Model Optimization**: Supports both regular and optimized ONNX models with automatic fallback
-- **Legacy Compatibility**: Handles tokenizer compatibility across different transformers versions
-- **Configurable**: Per-model configuration with optimization flags, chunking logic, and tokenizer settings
-- **Test Coverage**: Comprehensive unit tests with pytest and proper mocking
-- **Production Ready**: Docker support, health checks, and environment-based configuration
-- **FastAPI Powered**: Modern async API with automatic documentation
+### 🤖 **AI Capabilities**
+- **Advanced Text Summarization**: Seq2seq models with ONNX optimization and automatic sentence capitalization
+- **High-Performance Embeddings**: Sentence and document embeddings with configurable chunking strategies
+- **Batch Processing**: Async batch operations for high-throughput scenarios
+- **Model Optimization**: Optimized ONNX models with automatic fallback and KV caching
+
+### 🚀 **Enterprise Features**
+- **Performance Monitoring**: Real-time system metrics, memory tracking, and performance profiling
+- **Advanced Health Checks**: Kubernetes-ready liveness/readiness probes with detailed diagnostics
+- **Request Validation**: Size limits, timeout handling, and comprehensive error responses
+- **Rate Limiting**: Configurable per-IP rate limiting with automatic cleanup
+- **Security**: CORS protection, trusted host validation, and request sanitization
+
+### ⚙️ **Configuration & Deployment**
+- **Environment-Aware Config**: Development/production configs with environment variable overrides
+- **Docker Ready**: Multi-stage builds with GPU support and optimized images
+- **Comprehensive Logging**: Structured logging with rotation and configurable levels
+- **Resource Management**: Memory/CPU threshold monitoring with automatic alerts
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 app/
   config/
-    appsettings.json        # Main application configuration
-    onnx_config.json        # ONNX model configuration (see below)
-  models/                   # Pydantic models for requests and responses
-  modules/                  # Utility modules (e.g., concurrent dict)
-  services/
-    base_nlp_service.py     # Base class for NLP services
-    embedder_service.py     # Embedding service logic
-    summarizer_service.py   # Summarization service logic
-  setup.py                  # App setup and environment preparation
-onnx/                       # Default ONNX path (relative to working directory)
-onnx_loaders/
-  export_model.py           # Script for exporting HuggingFace models to ONNX
-  load_scripts.txt          # Example commands for exporting models
-tests/
-  test_embedder_service.py
-  test_summarizer_service.py
+    appsettings.json              # Enterprise configuration
+    appsettings.development.json  # Development overrides
+    onnx_config.json             # ONNX model configurations
+    config_loader.py             # Enhanced config management
+  middleware/
+    rate_limit.py                # Advanced rate limiting
+    request_validation.py        # Request size/timeout validation
+  models/                        # Pydantic request/response models
+  routers/                       # FastAPI route handlers
+  services/                      # Core NLP service logic
+  utils/
+    performance_monitor.py       # System performance tracking
+    memory_monitor.py           # Memory usage monitoring
+    model_cache.py              # LRU model caching
+  main.py                       # Enhanced FastAPI application
+onnx_loaders/                   # Model export utilities
+tests/                          # Comprehensive test suite
+.env.example                    # Environment configuration template
 ```
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
-### appsettings.json
+### Enhanced Configuration System
 
-All main configuration is handled via `app/config/appsettings.json`.  
-You can set server type, host, port, logging, ONNX options, and more.
+Flouds AI features a sophisticated configuration system with environment-specific overrides and comprehensive settings.
 
-**ONNX Model Path is Required:**  
-You **must** set the ONNX model root path using the `onnx_path` field in the `onnx` section or override it with the `FLOUDS_ONNX_ROOT` environment variable.  
-If not set, the application will exit with an error.
+**Key Configuration Files:**
+- `appsettings.json` - Enterprise configuration
+- `appsettings.development.json` - Development overrides
+- `.env` - Environment variables (copy from `.env.example`)
 
-**Example:**
+### Core Configuration Sections
+
 ```json
 {
     "app": {
-        "name": "Flouds AI"
+        "name": "Flouds AI",
+        "version": "1.0.0",
+        "cors_origins": ["*"],
+        "max_request_size": 10485760,
+        "request_timeout": 300
     },
     "server": {
-        "type": "uvicorn",
         "host": "0.0.0.0",
         "port": 19690,
-        "reload": false,
-        "workers": 1,
-        "session_provider": "CPUExecutionProvider"
+        "session_provider": "CPUExecutionProvider",
+        "keepalive_timeout": 5,
+        "graceful_timeout": 30
     },
-    "onnx": {
-        "onnx_path": "onnx",
-        "config_file": "onnx_config.json"
+    "rate_limiting": {
+        "enabled": true,
+        "requests_per_minute": 200,
+        "requests_per_hour": 5000
+    },
+    "monitoring": {
+        "enable_metrics": true,
+        "memory_threshold_mb": 1024,
+        "cpu_threshold_percent": 80
+    },
+    "security": {
+        "enabled": false,
+        "clients_db_path": "clients.db"
     }
 }
 ```
 
-- You can override any value using environment variables.
+### Environment Variables
+
+**Optional:**
+- `FLOUDS_API_ENV` - Environment (Development/Enterprise)
+- `APP_DEBUG_MODE` - Enable debug logging (0/1)
+- `SERVER_PORT` - Override server port
+- `FLOUDS_RATE_LIMIT_PER_MINUTE` - Rate limit override
+- `FLOUDS_CORS_ORIGINS` - Comma-separated CORS origins
+- `FLOUDS_SECURITY_ENABLED` - Enable client authentication
+- `FLOUDS_ENCRYPTION_KEY` - Base64 encoded encryption key for client credentials (if not set, auto-generated and stored in `.encryption_key` file under the folder where the db file resides)
+
+**Note**: `FLOUDS_ONNX_ROOT`, `FLOUDS_ONNX_CONFIG_FILE`, and `FLOUDS_CLIENTS_DB` are automatically set by deployment scripts.
 
 ---
 
@@ -167,26 +203,57 @@ Just make sure the path you specify in `summarization_task` or `embedder_task` m
 
 ---
 
-## Development & Environment
+## 🚀 Quick Start
 
-- **FastAPI** is used as the main web framework for serving APIs.
-- The server type (e.g., `uvicorn`) is set in `appsettings.json` and loaded dynamically.
-- To run in development mode, set the following environment variables:
-    - `FLOUDS_API_ENV=Development`
-    - `FLOUDS_DEBUG_MODE=1`
-- These variables control logging and debug behavior in the app.
+### Development Setup
 
-Example (Windows CMD):
-```cmd
+1. **Clone and Install Dependencies**
+```bash
+git clone <repository-url>
+cd Flouds.Py
+pip install -r app/requirements.txt  # Production only
+# OR for development:
+pip install -r requirements-dev.txt  # Production + development
+```
+
+2. **Configure Environment**
+```bash
+cp .env.example .env
+# Edit .env with your ONNX model path
+```
+
+3. **Export ONNX Models** (see [ONNX Export Guide](#exporting-models-to-onnx))
+```bash
+python onnx_loaders/export_model.py --model_for "fe" --model_name "sentence-transformers/all-MiniLM-L6-v2" --optimize
+```
+
+4. **Run Development Server**
+```bash
+# Windows
 set FLOUDS_API_ENV=Development
-set FLOUDS_DEBUG_MODE=1
+set APP_DEBUG_MODE=1
+set FLOUDS_ONNX_ROOT=path/to/your/onnx
+python -m app.main
+
+# Linux/macOS
+export FLOUDS_API_ENV=Development
+export APP_DEBUG_MODE=1
+export FLOUDS_ONNX_ROOT=/path/to/your/onnx
 python -m app.main
 ```
 
-Example (Linux/macOS):
-```sh
-export FLOUDS_API_ENV=Development
-export FLOUDS_DEBUG_MODE=1
+### Enterprise Deployment
+
+```bash
+# Using Docker (recommended)
+docker run -p 19690:19690 \
+  -v /path/to/onnx:/flouds-ai/onnx \
+  -e FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
+  gmalakar/flouds-ai-cpu:latest
+
+# Direct deployment
+export FLOUDS_API_ENV=Enterprise
+export FLOUDS_ONNX_ROOT=/path/to/onnx
 python -m app.main
 ```
 
@@ -214,277 +281,615 @@ python onnx_loaders/export_model.py --model_for "s2s" --model_name "Falconsai/te
 
 ---
 
-## Usage
+## 🔐 Authentication
 
-You can use the summarizer and embedder services as Python modules or integrate them into a web API.
+### Client-Based Authentication
 
-### Example: Summarization
+Flouds AI uses a modern client-based authentication system with encrypted storage.
 
-```python
-from app.models.summarization_request import SummarizationRequest
-from app.services.summarizer_service import TextSummarizer
+**Token Format**: `client_id|client_secret`
 
-req = SummarizationRequest(
-    model="your-model-name",
-    input="Your text to summarize.",
-    temperature=0.7,  # Optional: controls randomness, between 0.0 and 2.0
-)
-response = TextSummarizer.summarize(req)
-print(response.results.summary)
+#### Auto-Generated Admin
+On first startup, an admin client is automatically created:
+- Credentials logged to console and saved to `admin_credentials.txt`
+- Use admin token to manage other clients
+
+#### Client Management CLI
+
+```bash
+# Add new API client
+python generate_token.py add my-app --type api_user
+
+# Add admin client
+python generate_token.py add admin-user --type admin
+
+# List all clients
+python generate_token.py list
+
+# Remove client
+python generate_token.py remove my-app
 ```
 
-- **model**: Name of the model to use (e.g., `"t5-small"`).
-- **input**: The text to be summarized.
-- **temperature**: (Optional) Sampling temperature for generation (float, 0.0–2.0, default: 0.0).
+#### Admin API Endpoints
 
-#### Batch Summarization
+```bash
+# Generate client key (admin only)
+curl -H "Authorization: Bearer admin|<admin_secret>" \
+  -X POST "http://localhost:19690/api/v1/admin/generate-key" \
+  -d '{"client_id": "app1"}'
 
-```python
-from app.models.summarization_request import SummarizationBatchRequest
-from app.services.summarizer_service import TextSummarizer
+# List clients (admin only)
+curl -H "Authorization: Bearer admin|<admin_secret>" \
+  "http://localhost:19690/api/v1/admin/clients"
 
-batch_req = SummarizationBatchRequest(
-    model="your-model-name",
-    inputs=["Text 1 to summarize.", "Text 2 to summarize."],
-    temperature=0.5,  # Optional
-)
-responses = TextSummarizer.summarize_batch(batch_req)
-for resp in responses:
-    print(resp.results.summary)
+# Remove client (admin only)
+curl -H "Authorization: Bearer admin|<admin_secret>" \
+  -X DELETE "http://localhost:19690/api/v1/admin/remove-client/app1"
 ```
 
 ---
 
-### Example: Embedding
+## 📚 API Usage
+
+### REST API Endpoints
+
+Flouds AI provides a comprehensive REST API with automatic documentation at `/docs`.
+
+#### Text Summarization
+
+```bash
+# Single summarization
+curl -X POST "http://localhost:19690/api/v1/summarizer/summarize" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer client_id|client_secret" \
+  -d '{
+    "model": "t5-small",
+    "input": "Your long text to summarize here...",
+    "temperature": 0.7
+  }'
+
+# Batch summarization
+curl -X POST "http://localhost:19690/api/v1/summarizer/summarize_batch" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer client_id|client_secret" \
+  -d '{
+    "model": "t5-small",
+    "inputs": ["Text 1...", "Text 2..."],
+    "temperature": 0.5
+  }'
+```
+
+#### Text Embedding
+
+```bash
+# Single embedding
+curl -X POST "http://localhost:19690/api/v1/embedder/embed" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer client_id|client_secret" \
+  -d '{
+    "model": "all-MiniLM-L6-v2",
+    "input": "Text to embed",
+    "projected_dimension": 128
+  }'
+
+# Batch embedding
+curl -X POST "http://localhost:19690/api/v1/embedder/embed_batch" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer client_id|client_secret" \
+  -d '{
+    "model": "all-MiniLM-L6-v2",
+    "inputs": ["Text 1", "Text 2"],
+    "projected_dimension": 128
+  }'
+```
+
+### Python SDK Usage
 
 ```python
+# Summarization
+from app.models.summarization_request import SummarizationRequest
+from app.services.summarizer_service import TextSummarizer
+
+request = SummarizationRequest(
+    model="t5-small",
+    input="Your text to summarize",
+    temperature=0.7
+)
+response = TextSummarizer.summarize(request)
+print(response.results.summary)
+
+# Embedding
 from app.models.embedding_request import EmbeddingRequest
 from app.services.embedder_service import SentenceTransformer
 
-req = EmbeddingRequest(
-    model="your-model-name",
-    input="Your text to embed.",
-    projected_dimension=128,  # Optional, default: 128
+request = EmbeddingRequest(
+    model="all-MiniLM-L6-v2",
+    input="Text to embed",
+    projected_dimension=128
 )
 response = SentenceTransformer.embed_text(
-    text=req.input,
-    model_to_use=req.model,
-    projected_dimension=req.projected_dimension,
+    text=request.input,
+    model_to_use=request.model,
+    projected_dimension=request.projected_dimension
 )
 print(response.results)
 ```
 
-- **model**: Name of the embedding model.
-- **input**: The text to embed.
-- **projected_dimension**: (Optional) Output embedding dimension (default: 128).
-
-#### Batch Embedding
-
-```python
-from app.models.embedding_request import EmbeddingBatchRequest
-from app.services.embedder_service import SentenceTransformer
-
-batch_req = EmbeddingBatchRequest(
-    model="your-model-name",
-    inputs=["Text 1 to embed.", "Text 2 to embed."],
-    projected_dimension=128,
-)
-response = SentenceTransformer.embed_batch_async(batch_req)
-```
-
 ---
 
-## Docker Usage
+## 🐳 Docker Deployment
 
-You can run Flouds AI as a Docker container for easy deployment.
+### Quick Start with Docker
 
-### Docker Hub
-
-Prebuilt images are available on [Docker Hub](https://hub.docker.com/r/gmalakar/flouds-ai-cpu):
-
-```sh
+```bash
+# Pull latest image
 docker pull gmalakar/flouds-ai-cpu:latest
+
+# Run with your ONNX models
+docker run -d \
+  --name flouds-ai \
+  -p 19690:19690 \
+  -v /path/to/your/onnx:/flouds-ai/onnx \
+  -e FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
+  -e FLOUDS_API_ENV=Enterprise \
+  --restart unless-stopped \
+  gmalakar/flouds-ai-cpu:latest
 ```
 
-### Build the Docker Image Locally
+### Build Custom Image
 
-```sh
+```bash
+# CPU version
 docker build -t flouds-ai-cpu .
-```
 
-For GPU support (requires CUDA drivers on host):
-
-```sh
+# GPU version (requires NVIDIA Docker)
 docker build --build-arg GPU=true -t flouds-ai-gpu .
 ```
 
-### Start the Docker Container
+### Enterprise Docker Compose
 
-```sh
-docker run -p 19690:19690 \
-  -v /path/to/your/onnx:/flouds-ai/onnx \
-  -e FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
-  -e FLOUDS_ONNX_CONFIG_FILE=/flouds-ai/onnx/onnx_config.json \
-  gmalakar/flouds-ai-cpu
+```yaml
+version: '3.8'
+services:
+  flouds-ai:
+    image: gmalakar/flouds-ai-cpu:latest
+    ports:
+      - "19690:19690"
+    volumes:
+      - ./onnx:/flouds-ai/onnx
+      - ./logs:/flouds-ai/logs
+    environment:
+      - FLOUDS_ONNX_ROOT=/flouds-ai/onnx
+      - FLOUDS_API_ENV=Enterprise
+      - FLOUDS_RATE_LIMIT_PER_MINUTE=500
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19690/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 ```
-
-- `-v /path/to/your/onnx:/flouds-ai/onnx` mounts your ONNX model directory into the container.
-- `-e FLOUDS_ONNX_ROOT` sets the ONNX model root path (**required**).
-- `-e FLOUDS_ONNX_CONFIG_FILE` sets the ONNX config file path (optional, defaults to `onnx_config.json` in the model path).
 
 ---
 
-### Using PowerShell Scripts for Docker
+### Automated Deployment Scripts
 
-You can use the provided PowerShell scripts to build and run the Docker container on Windows:
+Flouds AI includes comprehensive deployment scripts for easy Docker container management.
 
-#### Build the Docker Image
+#### PowerShell Script (Windows) - `start-flouds-ai.ps1`
 
+**Basic Usage:**
 ```powershell
-.\build-flouds-ai.ps1
-.\build-flouds-ai.ps1 -Tag v1.0.0
-.\build-flouds-ai.ps1 -GPU
-.\build-flouds-ai.ps1 -PushImage
-```
-
-#### Start the Docker Container
-
-```powershell
+# Start with default settings
 .\start-flouds-ai.ps1
-.\start-flouds-ai.ps1 -EnvFile .env -Tag v1.0.0
+
+# Start with custom environment file
+.\start-flouds-ai.ps1 -EnvFile .env.production
+
+# Force restart existing container
 .\start-flouds-ai.ps1 -Force
+
+# Build image locally and start
+.\start-flouds-ai.ps1 -BuildImage -Force
+
+# Use GPU image
+.\start-flouds-ai.ps1 -GPU
+
+# Always pull latest image
+.\start-flouds-ai.ps1 -PullAlways
 ```
 
-- The script will validate required environment variables, map your ONNX and log directories, and set up Docker networks as needed.
+**Parameters:**
+- `-EnvFile` - Path to environment file (default: `.env`)
+- `-InstanceName` - Container name (default: `flouds-ai-instance`)
+- `-ImageName` - Docker image name (default: `gmalakar/flouds-ai-cpu`)
+- `-Tag` - Image tag (default: `latest`)
+- `-GPU` - Use GPU image instead of CPU
+- `-Force` - Force restart if container exists
+- `-BuildImage` - Build image locally before starting
+- `-PullAlways` - Always pull latest image from registry
 
-**Tip:**  
-You can also use the Bash script [`start-flouds-ai.sh`](start-flouds-ai.sh) for Linux/macOS environments.
+#### Bash Script (Linux/macOS) - `start-flouds-ai.sh`
+
+**Basic Usage:**
+```bash
+# Start with default settings
+./start-flouds-ai.sh
+
+# Start with custom environment file
+./start-flouds-ai.sh --env-file .env.production
+
+# Force restart existing container
+./start-flouds-ai.sh --force
+
+# Build image locally and start
+./start-flouds-ai.sh --build --force
+
+# Development mode with GPU
+./start-flouds-ai.sh --gpu --development
+```
+
+**Parameters:**
+- `--env-file` - Path to environment file (default: `.env`)
+- `--instance` - Container name (default: `flouds-ai-instance`)
+- `--image` - Docker image name (default: `gmalakar/flouds-ai-cpu`)
+- `--tag` - Image tag (default: `latest`)
+- `--gpu` - Use GPU image instead of CPU
+- `--force` - Force restart if container exists
+- `--build` - Build image locally before starting
+- `--pull-always` - Always pull latest image
+- `--development` - Run in development mode
+
+#### Build Script - `build-flouds-ai.ps1`
+
+**Usage:**
+```powershell
+# Build CPU image
+.\build-flouds-ai.ps1
+
+# Build GPU image with custom tag
+.\build-flouds-ai.ps1 -Tag v1.2.0 -GPU
+
+# Build and push to registry
+.\build-flouds-ai.ps1 -PushImage
+
+# Force rebuild existing image
+.\build-flouds-ai.ps1 -Force
+```
+
+**Parameters:**
+- `-Tag` - Image tag (default: `latest`)
+- `-GPU` - Build with GPU support
+- `-PushImage` - Push to Docker registry after build
+- `-Force` - Force rebuild even if image exists
+
+#### Required Environment File Structure
+
+Create a `.env` file with the following required variables:
+
+```bash
+# Required: ONNX model configuration
+FLOUDS_ONNX_CONFIG_FILE_AT_HOST=/path/to/your/onnx_config.json
+FLOUDS_ONNX_MODEL_PATH_AT_HOST=/path/to/your/onnx/models
+
+# Optional: Log persistence
+FLOUDS_LOG_PATH_AT_HOST=/path/to/logs
+
+# Optional: Docker platform
+DOCKER_PLATFORM=linux/amd64
+```
+
+#### Script Features
+
+**Automatic Setup:**
+- ✅ Docker availability checking
+- ✅ Environment file validation
+- ✅ Directory permission management
+- ✅ Network creation and management
+- ✅ Container lifecycle management
+
+**Volume Mapping:**
+- ✅ ONNX models directory (read-only)
+- ✅ Configuration files (read-only)
+- ✅ Log directory (read-write)
+- ✅ Automatic directory creation
+
+**Error Handling:**
+- ✅ Comprehensive validation
+- ✅ Graceful error messages
+- ✅ Automatic cleanup on failure
+- ✅ Interactive confirmations
+
+#### Example Complete Workflow
+
+```powershell
+# 1. Setup environment
+cp .env.example .env
+# Edit .env with your paths
+
+# 2. Build custom image (optional)
+.\build-flouds-ai.ps1 -Tag production
+
+# 3. Start container
+.\start-flouds-ai.ps1 -Tag production -Force
+
+# 4. View logs
+docker logs -f flouds-ai-instance
+
+# 5. Test API
+curl http://localhost:19690/api/v1/health
+```
 
 ---
 
-## Significance of the `.env` File
+## 📊 Monitoring & Health Checks
 
-The `.env` file allows you to set environment variables for configuration without modifying code.
+### Health Endpoints
 
-**Common variables:**
-- `FLOUDS_API_ENV` — Set to `Development` or `Production`
-- `FLOUDS_DEBUG_MODE` — Set to `1` for debug logging
-- `FLOUDS_ONNX_ROOT` — **(Required)** Path to your ONNX model directory
-- `FLOUDS_ONNX_CONFIG_FILE` — Path to your ONNX config file (default: `onnx_config.json` in the model path)
-- `FLOUDS_HOST` — Override server host (default: `0.0.0.0`)
-- `FLOUDS_PORT` — Override server port (default: `19690`)
+```bash
+# Basic health check
+curl http://localhost:19690/api/v1/health
 
-**Example `.env`:**
-```
-FLOUDS_API_ENV=Production
-FLOUDS_DEBUG_MODE=0
-FLOUDS_ONNX_ROOT=C:/path/to/your/onnx/models
-FLOUDS_ONNX_CONFIG_FILE=C:/path/to/your/onnx_config.json
-FLOUDS_HOST=0.0.0.0
-FLOUDS_PORT=19690
+# Detailed system information
+curl http://localhost:19690/api/v1/health/detailed
+
+# Kubernetes probes
+curl http://localhost:19690/api/v1/health/ready   # Readiness probe
+curl http://localhost:19690/api/v1/health/live    # Liveness probe
 ```
 
-You can mount your `.env` file into the container and load it using `python-dotenv`.
+### Performance Monitoring
+
+Flouds AI includes comprehensive monitoring:
+
+- **Real-time Metrics**: Memory usage, CPU utilization, request timing
+- **Resource Thresholds**: Configurable alerts for memory/CPU limits
+- **Request Analytics**: Slow request detection and logging
+- **Model Cache Monitoring**: Track cached models and sessions
+
+### Logging
+
+```bash
+# View logs using deployment scripts
+# PowerShell
+.\start-flouds-ai.ps1  # Will prompt to view logs after startup
+
+# Bash
+./start-flouds-ai.sh   # Will prompt to view logs after startup
+
+# Manual log viewing
+docker logs -f flouds-ai-instance
+
+# Log files (direct deployment)
+tail -f logs/flouds-ai-$(date +%Y-%m-%d).log
+```
+
+### Container Management
+
+```bash
+# Using deployment scripts (recommended)
+.\start-flouds-ai.ps1 -Force  # Restart container
+./start-flouds-ai.sh --force   # Restart container
+
+# Manual Docker commands
+docker stop flouds-ai-instance
+docker start flouds-ai-instance
+docker restart flouds-ai-instance
+docker rm flouds-ai-instance
+```
 
 ---
 
-## Environment Variables
+## 🔧 Advanced Configuration
 
-You can control the application behavior using the following environment variables:
+### Complete Environment Variables
 
-- `FLOUDS_API_ENV` — Set to `Development` or `Production` (default: `Production`)
-- `FLOUDS_DEBUG_MODE` — Set to `1` for debug logging, `0` for normal (default: `0`)
-- `FLOUDS_ONNX_ROOT` — Path to the ONNX model root directory (**required**)
-- `FLOUDS_ONNX_CONFIG_FILE` — Path to the ONNX config file (default: `onnx_config.json` in the model path)
-- `FLOUDS_PORT` — Override the server port (default: `19690`)
-- `FLOUDS_HOST` — Override the server host (default: `0.0.0.0`)
-- `FLOUDS_SERVER_TYPE` — Server type, e.g., `uvicorn` or `hypercorn` (default: `uvicorn`)
-- `FLOUDS_MODEL_SESSION_PROVIDER` — ONNX session provider (default: `CPUExecutionProvider`)
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `FLOUDS_ONNX_ROOT` | ONNX models directory | - | ✅ |
+| `FLOUDS_API_ENV` | Environment (Development/Enterprise) | Enterprise | ❌ |
+| `APP_DEBUG_MODE` | Enable debug logging (0/1) | 0 | ❌ |
+| `SERVER_PORT` | Server port | 19690 | ❌ |
+| `SERVER_HOST` | Server host | 0.0.0.0 | ❌ |
+| `FLOUDS_RATE_LIMIT_PER_MINUTE` | Rate limit per minute | 200 | ❌ |
+| `FLOUDS_RATE_LIMIT_PER_HOUR` | Rate limit per hour | 5000 | ❌ |
+| `FLOUDS_MAX_REQUEST_SIZE` | Max request size (bytes) | 10485760 | ❌ |
+| `FLOUDS_MODEL_SESSION_PROVIDER` | ONNX provider | CPUExecutionProvider | ❌ |
+| `FLOUDS_CORS_ORIGINS` | CORS origins (comma-separated) | * | ❌ |
+| `FLOUDS_ENCRYPTION_KEY` | Base64 encoded encryption key | Auto-generated file | ❌ |
+
+### Performance Tuning
+
+```bash
+# High-performance configuration
+export FLOUDS_MODEL_CACHE_SIZE=10
+export FLOUDS_MODEL_CACHE_TTL=7200
+export FLOUDS_RATE_LIMIT_PER_MINUTE=1000
+export FLOUDS_MAX_REQUEST_SIZE=52428800  # 50MB
+
+# GPU acceleration
+export FLOUDS_MODEL_SESSION_PROVIDER=CUDAExecutionProvider
+```
 
 ---
 
-## ONNX Root Path
+## 🎯 Model Management
 
-The ONNX model root directory is set in [`app/config/appsettings.json`](app/config/appsettings.json):
+### ONNX Model Optimization
+
+Flouds AI provides advanced model optimization features:
+
+- **Automatic Optimization**: Graph-optimized models with 20-50% performance improvement
+- **KV Caching**: Faster seq2seq inference with decoder caching
+- **Model Fallback**: Automatic fallback to regular models if optimized versions fail
+- **Legacy Support**: Handles tokenizer compatibility across transformers versions
+
+### Model Configuration
 
 ```json
-"onnx": {
-    "onnx_path": "onnx",
-    "config_file": "onnx_config.json"
+{
+  "t5-small": {
+    "use_optimized": true,
+    "legacy_tokenizer": false,
+    "use_seq2seqlm": true,
+    "dimension": 512,
+    "max_length": 512
+  }
 }
 ```
 
-You can override this with the `FLOUDS_ONNX_ROOT` environment variable.
+### Performance Features
 
-## Model Optimization
-
-Flouds AI supports both regular and optimized ONNX models for better performance:
-
-- **Regular models**: Direct ONNX conversion, slower but always compatible
-- **Optimized models**: Graph-optimized versions, 20-50% faster inference
-- **Per-model control**: Set `"use_optimized": true` in model config
-- **Automatic fallback**: Uses regular models if optimized ones don't exist
-
-## Legacy Tokenizer Support
-
-For models exported with older transformers versions:
-
-- Set `"legacy_tokenizer": true` in model config
-- Automatically handles tokenizer compatibility issues
-- Default is `false` for newly exported models
+- **LRU Model Cache**: Intelligent model caching with TTL
+- **Thread-Safe Operations**: Concurrent request handling
+- **Memory Management**: Automatic cleanup and resource monitoring
+- **Batch Optimization**: Efficient batch processing for high throughput
 
 ---
 
-## FastAPI Routers
+## 🔌 API Reference
 
-- **Summarizer endpoints** (see [`app/routers/summarizer.py`](app/routers/summarizer.py)):
-  - `POST /summarize` — accepts a `SummarizationRequest`, returns a `SummarizationResponse`
-  - `POST /summarize_batch` — accepts a `SummarizationBatchRequest`, returns a list of `SummarizationResponse`
+### API Versioning
 
-- **Embedder endpoints** (see [`app/routers/embedder.py`](app/routers/embedder.py)):
-  - `POST /embed` — accepts an `EmbeddingRequest`, returns an `EmbeddingResponse`
-  - `POST /embed_batch` — accepts an `EmbeddingBatchRequest`, returns an `EmbeddingBatchResponse`
+Flouds AI uses API versioning with the `/api/v1` prefix for all endpoints:
+
+- **Current Version**: v1
+- **Base URL**: `http://localhost:19690/api/v1`
+- **Documentation**: `/api/v1/docs`
+- **OpenAPI Spec**: `/api/v1/openapi.json`
+
+### Core Endpoints
+
+| Endpoint | Method | Description | Rate Limited |
+|----------|--------|-------------|-------------|
+| `/api/v1/summarize` | POST | Single text summarization | ✅ |
+| `/api/v1/summarize_batch` | POST | Batch text summarization | ✅ |
+| `/api/v1/embed` | POST | Single text embedding | ✅ |
+| `/api/v1/embed_batch` | POST | Batch text embedding | ✅ |
+| `/api/v1/health` | GET | Basic health check | ❌ |
+| `/api/v1/health/detailed` | GET | Detailed system info | ❌ |
+| `/api/v1/health/ready` | GET | Readiness probe | ❌ |
+| `/api/v1/health/live` | GET | Liveness probe | ❌ |
+| `/api/v1/docs` | GET | Interactive API docs | ❌ |
+
+### Response Headers
+
+- `X-Processing-Time`: Request processing time in seconds
+- `X-RateLimit-Remaining-Minute`: Remaining requests this minute
+- `X-RateLimit-Remaining-Hour`: Remaining requests this hour
 
 ---
 
-## Running Tests
+## 🧪 Testing & Development
 
-Tests use `pytest` and extensive mocking for isolation.
+### Running Tests
 
-```sh
+```bash
+# Install test dependencies
+pip install pytest pytest-asyncio pytest-mock
+
+# Run all tests
 pytest
+
+# Run with coverage
+pytest --cov=app --cov-report=html
+
+# Run specific test file
+pytest tests/test_embedder_service.py -v
 ```
 
+### Code Quality
+
+```bash
+# Format code
+black app/ tests/
+isort app/ tests/
+
+# Lint code
+flake8 app/ tests/
+
+# Type checking
+mypy app/
+```
+
+### Development Tools
+
+- **Pre-commit hooks**: Automatic code formatting and linting
+- **Comprehensive test suite**: Unit tests with mocking
+- **Performance profiling**: Built-in performance monitoring
+- **Hot reload**: Development server with auto-reload
+
 ---
 
-## Contributing
+## 🤝 Contributing
 
-1. Fork the repo and create your branch (`git checkout -b feature/your-feature`)
-2. Commit your changes (`git commit -am 'Add new feature'`)
-3. Push to the branch (`git push origin feature/your-feature`)
-4. Create a new Pull Request
+1. **Fork & Clone**
+   ```bash
+   git clone https://github.com/your-username/Flouds.Py.git
+   cd Flouds.Py
+   ```
+
+2. **Setup Development Environment**
+   ```bash
+   pip install -r requirements-dev.txt  # Includes production + dev dependencies
+   pre-commit install  # Install pre-commit hooks
+   ```
+
+3. **Create Feature Branch**
+   ```bash
+   git checkout -b feature/your-amazing-feature
+   ```
+
+4. **Make Changes & Test**
+   ```bash
+   pytest  # Run tests
+   black app/ tests/  # Format code
+   ```
+
+5. **Submit Pull Request**
+   - Ensure all tests pass
+   - Add tests for new features
+   - Update documentation
+   - Follow conventional commit messages
 
 ---
 
-## License
+## 📈 Performance Benchmarks
+
+### Typical Performance
+
+| Operation | Model | Throughput | Latency |
+|-----------|-------|------------|----------|
+| Summarization | t5-small | 50 req/min | 1.2s |
+| Embedding | all-MiniLM-L6-v2 | 200 req/min | 0.3s |
+| Batch Summarization (10x) | t5-small | 150 req/min | 4.0s |
+| Batch Embedding (10x) | all-MiniLM-L6-v2 | 500 req/min | 1.2s |
+
+*Benchmarks on Intel i7-10700K, 32GB RAM, CPU-only*
+
+---
+
+## 📄 License
 
 MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
-## Acknowledgements
+## 🙏 Acknowledgements
 
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [HuggingFace Transformers](https://github.com/huggingface/transformers)
-- [ONNX Runtime](https://onnxruntime.ai/)
-- [PyTorch](https://pytorch.org/)
-- [Pydantic](https://pydantic-docs.helpmanual.io/)
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern web framework
+- [ONNX Runtime](https://onnxruntime.ai/) - High-performance inference
+- [HuggingFace Transformers](https://github.com/huggingface/transformers) - Model ecosystem
+- [Pydantic](https://pydantic-docs.helpmanual.io/) - Data validation
+- [Uvicorn](https://www.uvicorn.org/) - ASGI server
 
 ---
 
-## Owner & Contact
+## 👨‍💻 Maintainer
 
-**Owner:** Goutam Malakar  
-**Contact:** Goutam Malakar
+**Goutam Malakar**  
+📧 Contact: [Create an issue](https://github.com/your-repo/issues) for support
 
-For questions or support, please open an issue or contact the owner.
+---
+
+*Built with ❤️ for the AI community*

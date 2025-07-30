@@ -4,9 +4,10 @@ ARG GPU=false
 
 ENV PYTHONUNBUFFERED=1 \
     FLOUDS_API_ENV=Production \
-    FLOUDS_DEBUG_MODE=0 \
+    APP_DEBUG_MODE=0 \
     FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
-    FLOUDS_LOG_PATH=/flouds-ai/logs
+    FLOUDS_LOG_PATH=/flouds-ai/logs \
+    FLOUDS_CLIENTS_DB=/flouds-ai/tinydb/clients.db
 
 WORKDIR /flouds-ai
 
@@ -35,12 +36,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY app ./app
 
 # Create user and directories
-RUN mkdir -p $FLOUDS_ONNX_ROOT $FLOUDS_LOG_PATH \
-    && chmod 777 $FLOUDS_LOG_PATH
+RUN mkdir -p $FLOUDS_ONNX_ROOT $FLOUDS_LOG_PATH $FLOUDS_CLIENTS_DB \
+    && chmod 777 $FLOUDS_LOG_PATH $FLOUDS_CLIENTS_DB
 
 # Add health check
 HEALTHCHECK --interval=60s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:19690/health || exit 1
+    CMD curl -f http://localhost:19690/api/v1/health || exit 1
 
 EXPOSE 19690
 

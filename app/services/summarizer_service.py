@@ -24,6 +24,7 @@ from app.models.summarization_request import (
 from app.models.summarization_response import SummarizationResponse
 from app.modules.concurrent_dict import ConcurrentDict
 from app.services.base_nlp_service import BaseNLPService
+from app.utils.batch_limiter import BatchLimiter
 
 logger = get_logger("summarizer_service")
 
@@ -44,7 +45,9 @@ class TextSummarizer(BaseNLPService):
     @staticmethod
     def _load_special_tokens(special_tokens_path: str) -> Set[str]:
         """Load special tokens from JSON file."""
+        logger.debug(f"Loading special tokens from: {special_tokens_path}")
         if not os.path.exists(special_tokens_path):
+            logger.warning(f"Special tokens file not found: {special_tokens_path}")
             return set()
 
         try:
@@ -57,19 +60,40 @@ class TextSummarizer(BaseNLPService):
                     tokens.add(data[key]["content"])
 
             if "additional_special_tokens" in data:
-                tokens.update(data["additional_special_tokens"])
+                if isinstance(data["additional_special_tokens"], list):
+                    tokens.update(data["additional_special_tokens"])
+                elif isinstance(data["additional_special_tokens"], dict):
+                    tokens.update(data["additional_special_tokens"].values())
 
+            logger.debug(f"Loaded special tokens: {tokens}")
             return tokens
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in special tokens file: {e}")
+            return set()
         except Exception as e:
             logger.error(f"Failed to load special tokens: {e}")
             return set()
 
     @staticmethod
     def _get_decoder_session(decoder_model_path: str) -> Optional[ort.InferenceSession]:
-        """Get cached ONNX decoder session with error handling."""
+        """Get cached ONNX decoder session with error handling and provider support."""
         try:
+            from app.app_init import APP_SETTINGS
+
+            provider = APP_SETTINGS.server.session_provider or "CPUExecutionProvider"
+            available_providers = ort.get_available_providers()
+            if provider not in available_providers:
+                logger.warning(
+                    f"Provider {provider} not available for decoder, using CPUExecutionProvider"
+                )
+                provider = "CPUExecutionProvider"
+            cache_key = f"{decoder_model_path}#{provider}"
+            logger.debug(
+                f"Creating decoder session for {decoder_model_path} with provider {provider}"
+            )
             return TextSummarizer._decoder_sessions.get_or_add(
-                decoder_model_path, lambda: ort.InferenceSession(decoder_model_path)
+                cache_key,
+                lambda: ort.InferenceSession(decoder_model_path, providers=[provider]),
             )
         except Exception as e:
             logger.error(f"Failed to create decoder session: {e}")
@@ -87,6 +111,7 @@ class TextSummarizer(BaseNLPService):
     def get_model(model_to_use_path: str) -> Optional[ORTModelForSeq2SeqLM]:
         """Get cached ONNX model with error handling."""
         try:
+            logger.debug(f"Loading model from path: {model_to_use_path}")
             return TextSummarizer._models.get_or_add(
                 model_to_use_path,
                 lambda: ORTModelForSeq2SeqLM.from_pretrained(
@@ -98,9 +123,20 @@ class TextSummarizer(BaseNLPService):
             return None
 
     @staticmethod
+    def clear_model_cache():
+        """Clear model/session/special token caches (for testing/reloading)."""
+        logger.info("Clearing model/session/special token caches.")
+        TextSummarizer._models.clear()
+        TextSummarizer._decoder_sessions.clear()
+        TextSummarizer._special_tokens.clear()
+
+    @staticmethod
     def summarize(request: SummarizationRequest) -> SummarizationResponse:
         """Summarize single text."""
         start_time = time.time()
+        logger.debug(
+            f"Summarizing text for model: {request.model}, input: {request.input[:100]}"
+        )
         response = SummarizationResponse(
             success=True,
             message="Summarization generated successfully",
@@ -112,7 +148,6 @@ class TextSummarizer(BaseNLPService):
             import threading
             import time as time_module
 
-            # Use threading timer for cross-platform timeout
             timeout = getattr(request, "timeout", 60)
             timeout_occurred = [False]
 
@@ -154,12 +189,19 @@ class TextSummarizer(BaseNLPService):
 
         try:
             model_config = TextSummarizer._get_model_config(model_to_use)
+            if not model_config:
+                result.success = False
+                result.message = f"Failed to load config for model: {model_to_use}"
+                logger.error(result.message)
+                return result
+
             model_to_use_path = os.path.join(
                 TextSummarizer._root_path,
                 "models",
                 model_config.summarization_task or "s2s",
                 model_to_use,
             )
+            logger.debug(f"Using model path: {model_to_use_path}")
 
             use_legacy = getattr(model_config, "legacy_tokenizer", False)
             tokenizer = TextSummarizer._get_tokenizer_threadsafe(
@@ -168,6 +210,7 @@ class TextSummarizer(BaseNLPService):
             if not tokenizer:
                 result.success = False
                 result.message = f"Failed to load tokenizer: {model_to_use_path}"
+                logger.error(result.message)
                 return result
 
             if getattr(model_config, "use_seq2seqlm", False):
@@ -177,13 +220,13 @@ class TextSummarizer(BaseNLPService):
                     result.message = (
                         f"Failed to load Seq2SeqLM model: {model_to_use_path}"
                     )
+                    logger.error(result.message)
                     return result
 
                 result = TextSummarizer._summarize_seq2seq(
                     model, tokenizer, model_config, request
                 )
             else:
-                # Choose optimized or regular models based on flag
                 use_optimized = getattr(model_config, "use_optimized", False)
                 if use_optimized:
                     encoder_filename = getattr(
@@ -206,6 +249,9 @@ class TextSummarizer(BaseNLPService):
 
                 encoder_model_path = os.path.join(model_to_use_path, encoder_filename)
                 decoder_model_path = os.path.join(model_to_use_path, decoder_filename)
+                logger.debug(
+                    f"Encoder path: {encoder_model_path}, Decoder path: {decoder_model_path}"
+                )
 
                 encoder_session = TextSummarizer._get_encoder_session(
                     encoder_model_path
@@ -217,6 +263,7 @@ class TextSummarizer(BaseNLPService):
                 if not encoder_session or not decoder_session:
                     result.success = False
                     result.message = "Failed to load ONNX sessions"
+                    logger.error(result.message)
                     return result
 
                 special_tokens_path = os.path.join(
@@ -271,6 +318,18 @@ class TextSummarizer(BaseNLPService):
             if getattr(model_config, "early_stopping", False):
                 generate_kwargs["early_stopping"] = True
 
+            # Additional generation parameters (improvement)
+            for param in [
+                "repetition_penalty",
+                "length_penalty",
+                "top_k",
+                "top_p",
+                "no_repeat_ngram_size",
+            ]:
+                value = getattr(model_config, param, None)
+                if value is not None:
+                    generate_kwargs[param] = value
+
             # Temperature handling
             temperature = request.temperature or getattr(
                 model_config, "temperature", 0.0
@@ -279,19 +338,23 @@ class TextSummarizer(BaseNLPService):
                 generate_kwargs["temperature"] = temperature
                 generate_kwargs["do_sample"] = True
 
+            logger.debug(f"Generation parameters: {generate_kwargs}")
+
             # Tokenize input
             input_text = TextSummarizer._prepend_text(
                 request.input, getattr(model_config, "prepend_text", None)
             )
+            logger.debug(f"Input text for summarization: {input_text[:100]}")
             inputs = tokenizer(input_text, return_tensors="pt")
 
             # Generate summary
             summary_ids = model.generate(**inputs, **generate_kwargs)
+            logger.debug(f"Generated token IDs: {summary_ids.tolist()}")
             summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True).strip()
             summary = TextSummarizer._capitalize_sentences(summary)
             result.summary = summary
             if not summary:
-                logger.warning("Empty summary generated")
+                logger.warning(f"Empty summary generated for input: {input_text[:100]}")
 
         except Exception as e:
             logger.exception("Seq2SeqLM summarization failed")
@@ -345,23 +408,29 @@ class TextSummarizer(BaseNLPService):
             input_text = TextSummarizer._prepend_text(
                 request.input, getattr(model_config, "prepend_text", None)
             )
+            logger.debug(f"Input text for ONNX summarization: {input_text[:100]}")
             inputs = tokenizer(
                 input_text, return_tensors="np", truncation=True, max_length=max_length
             )
 
-            # Prepare encoder inputs
+            # Prepare encoder inputs with correct data types
             input_names = model_config.inputnames
             onnx_inputs = {
-                getattr(input_names, "input", "input_ids"): inputs["input_ids"]
+                getattr(input_names, "input", "input_ids"): inputs["input_ids"].astype(
+                    np.int64
+                )
             }
 
             if "attention_mask" in inputs:
                 onnx_inputs[getattr(input_names, "mask", "attention_mask")] = inputs[
                     "attention_mask"
-                ]
+                ].astype(np.int64)
 
             # Run encoder
             encoder_outputs = encoder_session.run(None, onnx_inputs)
+            logger.debug(
+                f"Encoder outputs shapes: {[arr.shape for arr in encoder_outputs]}"
+            )
 
             # Prepare decoder inputs
             decoder_input_names = model_config.decoder_inputnames
@@ -396,7 +465,7 @@ class TextSummarizer(BaseNLPService):
                 if "attention_mask" in inputs:
                     decoder_inputs[
                         getattr(decoder_input_names, "mask", "encoder_attention_mask")
-                    ] = inputs["attention_mask"]
+                    ] = inputs["attention_mask"].astype(np.int64)
 
                 try:
                     decoder_outputs = decoder_session.run(None, decoder_inputs)
@@ -406,6 +475,7 @@ class TextSummarizer(BaseNLPService):
 
                 # Get logits and apply temperature
                 logits_arr = decoder_outputs[0]
+                logger.debug(f"Decoder output shape: {logits_arr.shape}")
                 if logits_arr.ndim == 3:
                     logits = logits_arr[:, -1, :][0]  # (batch, seq, vocab)
                 elif logits_arr.ndim == 2:
@@ -438,10 +508,15 @@ class TextSummarizer(BaseNLPService):
 
             # Decode summary
             if summary_ids:
+                logger.debug(f"Generated token IDs: {summary_ids}")
                 summary = tokenizer.decode(summary_ids, skip_special_tokens=True)
                 summary = TextSummarizer._remove_special_tokens(summary, special_tokens)
                 summary = TextSummarizer._capitalize_sentences(summary)
                 result.summary = summary
+                if not summary:
+                    logger.warning(
+                        f"Empty summary generated for input: {input_text[:100]}"
+                    )
             else:
                 logger.warning("No valid tokens generated")
                 result.summary = ""
@@ -456,8 +531,17 @@ class TextSummarizer(BaseNLPService):
     @staticmethod
     def _remove_special_tokens(text: str, special_tokens: Set[str]) -> str:
         """Remove special tokens from text."""
+        import re
+
+        removed = []
         for token in special_tokens:
-            text = text.replace(token, "")
+            if token in text:
+                removed.append(token)
+                text = text.replace(token, " ")
+        if removed:
+            logger.debug(f"Removed special tokens: {removed}")
+        # Clean up extra spaces
+        text = re.sub(r"\s+", " ", text)
         return text.strip()
 
     @staticmethod
@@ -465,28 +549,27 @@ class TextSummarizer(BaseNLPService):
         """Capitalize the first word of each sentence."""
         if not text:
             return text
-
         import re
 
-        # Split on sentence endings, keep the delimiter
         sentences = re.split(r"([.!?]\s*)", text)
         result = []
-
         for i, part in enumerate(sentences):
-            if i % 2 == 0 and part.strip():  # Text parts (not delimiters)
+            if i % 2 == 0 and part.strip():
                 part = part.strip()
                 if part:
                     part = part[0].upper() + part[1:] if len(part) > 1 else part.upper()
             result.append(part)
-
         return "".join(result).strip()
 
     @staticmethod
     async def summarize_batch_async(
         request: SummarizationBatchRequest,
     ) -> SummarizationResponse:
-        """Asynchronous batch summarization."""
+        """Asynchronous batch summarization with partial success reporting."""
         start_time = time.time()
+        logger.debug(
+            f"Batch summarization for model: {request.model}, batch size: {len(request.inputs)}"
+        )
         response = SummarizationResponse(
             success=True,
             message="Batch summarization generated successfully",
@@ -495,6 +578,9 @@ class TextSummarizer(BaseNLPService):
         )
 
         try:
+            # Validate batch size
+            BatchLimiter.validate_batch_size(request.inputs, max_size=20)
+
             loop = asyncio.get_event_loop()
             tasks = [
                 loop.run_in_executor(
@@ -509,14 +595,16 @@ class TextSummarizer(BaseNLPService):
                 for text in request.inputs
             ]
 
-            results = await asyncio.gather(*tasks)
-            for result in results:
-                if result.success:
-                    response.results.append(result.summary)
-                else:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for idx, result in enumerate(results):
+                if isinstance(result, Exception) or (result and not result.success):
+                    logger.error(
+                        f"Error in input {idx}: {getattr(result, 'message', str(result))}"
+                    )
                     response.success = False
-                    response.message = result.message
-                    break
+                    response.message = f"Error in input {idx}: {getattr(result, 'message', str(result))}"
+                else:
+                    response.results.append(result.summary)
 
         except Exception as e:
             response.success = False

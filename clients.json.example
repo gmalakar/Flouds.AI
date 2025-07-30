@@ -1,0 +1,19 @@
+{
+  "clients": [
+    {
+      "client_id": "admin_user",
+      "client_secret": "gAAAAABh...",
+      "type": "admin"
+    },
+    {
+      "client_id": "api_client_1",
+      "client_secret": "gAAAAABh...",
+      "type": "api_user"
+    },
+    {
+      "client_id": "service_app",
+      "client_secret": "gAAAAABh...",
+      "type": "api_user"
+    }
+  ]
+}

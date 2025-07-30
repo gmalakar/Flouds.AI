@@ -27,45 +27,176 @@ class ConfigLoader:
         """
         data = ConfigLoader._load_config_data("appsettings.json", True)
         ConfigLoader.__appsettings = AppSettings(**data)
-        # set isproduction
-        ConfigLoader.__appsettings.app.is_production = (
-            os.getenv("FLOUDS_API_ENV", "Production").lower() == "production"
-        )
+        # Set production mode
+        ConfigLoader.__appsettings.app.is_production = os.getenv(
+            "FLOUDS_API_ENV", "Enterprise"
+        ).lower() in ["production", "enterprise"]
         # set ONNX_ROOT
+        # ONNX paths (allow None for development)
         ConfigLoader.__appsettings.onnx.onnx_path = os.getenv(
             "FLOUDS_ONNX_ROOT", ConfigLoader.__appsettings.onnx.onnx_path
         )
-        if not ConfigLoader.__appsettings.onnx.onnx_path:
-            logger.error(
-                f"ONNX model path is not set. Please set it in appsettings.json or via the FLOUDS_ONNX_ROOT environment variable and restart application."
-            )
-            sys.exit(1)
         ConfigLoader.__appsettings.onnx.config_file = os.getenv(
             "FLOUDS_ONNX_CONFIG_FILE", ConfigLoader.__appsettings.onnx.config_file
         )
-        if not ConfigLoader.__appsettings.onnx.config_file:
-            logger.error(
-                "ONNX config file is not set. Please set it in appsettings.json or via the FLOUDS_ONNX_CONFIG_FILE environment variable and restart application."
-            )
-            sys.exit(1)
+
+        # Only require ONNX paths in production
+        if ConfigLoader.__appsettings.app.is_production:
+            if not ConfigLoader.__appsettings.onnx.onnx_path:
+                logger.error(
+                    "ONNX model path is required in production. Set FLOUDS_ONNX_ROOT environment variable."
+                )
+                sys.exit(1)
+            if not ConfigLoader.__appsettings.onnx.config_file:
+                logger.error(
+                    "ONNX config file is required in production. Set FLOUDS_ONNX_CONFIG_FILE environment variable."
+                )
+                sys.exit(1)
         ConfigLoader.__appsettings.server.port = int(
-            os.getenv("FLOUDS_PORT", ConfigLoader.__appsettings.server.port)
+            os.getenv("SERVER_PORT", ConfigLoader.__appsettings.server.port)
         )
         ConfigLoader.__appsettings.server.host = os.getenv(
-            "FLOUDS_HOST", ConfigLoader.__appsettings.server.host
-        )
-        ConfigLoader.__appsettings.server.type = os.getenv(
-            "FLOUDS_SERVER_TYPE", ConfigLoader.__appsettings.server.type
+            "SERVER_HOST", ConfigLoader.__appsettings.server.host
         )
         ConfigLoader.__appsettings.server.session_provider = os.getenv(
             "FLOUDS_MODEL_SESSION_PROVIDER",
             ConfigLoader.__appsettings.server.session_provider,
         )
-        ConfigLoader.__appsettings.app.debug = (
-            os.getenv("FLOUDS_DEBUG_MODE", "0") == "1"
+        ConfigLoader.__appsettings.app.debug = os.getenv("APP_DEBUG_MODE", "0") == "1"
+
+        # Load additional environment variables
+        ConfigLoader.__appsettings.logging.level = os.getenv(
+            "FLOUDS_LOG_LEVEL", ConfigLoader.__appsettings.logging.level
         )
+        ConfigLoader.__appsettings.rate_limiting.enabled = (
+            os.getenv("FLOUDS_RATE_LIMIT_ENABLED", "true").lower() == "true"
+        )
+        ConfigLoader.__appsettings.rate_limiting.requests_per_minute = int(
+            os.getenv(
+                "FLOUDS_RATE_LIMIT_PER_MINUTE",
+                ConfigLoader.__appsettings.rate_limiting.requests_per_minute,
+            )
+        )
+        ConfigLoader.__appsettings.rate_limiting.requests_per_hour = int(
+            os.getenv(
+                "FLOUDS_RATE_LIMIT_PER_HOUR",
+                ConfigLoader.__appsettings.rate_limiting.requests_per_hour,
+            )
+        )
+        ConfigLoader.__appsettings.onnx.model_cache_size = int(
+            os.getenv(
+                "FLOUDS_MODEL_CACHE_SIZE",
+                ConfigLoader.__appsettings.onnx.model_cache_size,
+            )
+        )
+        ConfigLoader.__appsettings.onnx.model_cache_ttl = int(
+            os.getenv(
+                "FLOUDS_MODEL_CACHE_TTL",
+                ConfigLoader.__appsettings.onnx.model_cache_ttl,
+            )
+        )
+        ConfigLoader.__appsettings.app.max_request_size = int(
+            os.getenv(
+                "FLOUDS_MAX_REQUEST_SIZE",
+                ConfigLoader.__appsettings.app.max_request_size,
+            )
+        )
+        ConfigLoader.__appsettings.app.request_timeout = int(
+            os.getenv(
+                "FLOUDS_REQUEST_TIMEOUT", ConfigLoader.__appsettings.app.request_timeout
+            )
+        )
+
+        # Parse CORS origins from environment
+        cors_origins = os.getenv("FLOUDS_CORS_ORIGINS")
+        if cors_origins:
+            ConfigLoader.__appsettings.app.cors_origins = [
+                origin.strip() for origin in cors_origins.split(",")
+            ]
+
+        # Security settings
+        ConfigLoader.__appsettings.security.enabled = (
+            os.getenv("FLOUDS_SECURITY_ENABLED", "false").lower() == "true"
+        )
+
+        # Clients database path
+        ConfigLoader.__appsettings.security.clients_db_path = os.getenv(
+            "FLOUDS_CLIENTS_DB", ConfigLoader.__appsettings.security.clients_db_path
+        )
+
+        # Validate and create critical paths
+        ConfigLoader._validate_paths()
+
         # logger.debug("Loaded AppSettings: %s", ConfigLoader.__appsettings)
         return ConfigLoader.__appsettings
+
+    @staticmethod
+    def _validate_paths():
+        """Validate and create critical directories."""
+        settings = ConfigLoader.__appsettings
+
+        # Only validate ONNX paths in production
+        if settings.app.is_production:
+            # Validate ONNX root path
+            if settings.onnx.onnx_path:
+                if not os.path.exists(settings.onnx.onnx_path):
+                    logger.error(
+                        f"ONNX root path does not exist: {settings.onnx.onnx_path}"
+                    )
+                    sys.exit(1)
+                if not os.path.isdir(settings.onnx.onnx_path):
+                    logger.error(
+                        f"ONNX root path is not a directory: {settings.onnx.onnx_path}"
+                    )
+                    sys.exit(1)
+                logger.info(f"Validated ONNX root path: {settings.onnx.onnx_path}")
+
+            # Validate ONNX config file
+            if settings.onnx.config_file:
+                if not os.path.exists(settings.onnx.config_file):
+                    logger.error(
+                        f"ONNX config file does not exist: {settings.onnx.config_file}"
+                    )
+                    sys.exit(1)
+                if not os.path.isfile(settings.onnx.config_file):
+                    logger.error(
+                        f"ONNX config file is not a file: {settings.onnx.config_file}"
+                    )
+                    sys.exit(1)
+                logger.info(f"Validated ONNX config file: {settings.onnx.config_file}")
+        else:
+            logger.info("Development mode: Skipping ONNX path validation")
+
+        # Create and validate clients database directory
+        if settings.security.clients_db_path:
+            db_dir = os.path.dirname(os.path.abspath(settings.security.clients_db_path))
+            if db_dir and not os.path.exists(db_dir):
+                try:
+                    os.makedirs(db_dir, exist_ok=True)
+                    logger.info(f"Created clients database directory: {db_dir}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to create clients database directory {db_dir}: {e}"
+                    )
+                    sys.exit(1)
+            logger.info(
+                f"Validated clients database path: {settings.security.clients_db_path}"
+            )
+
+        # Create log directory if specified
+        log_path = os.getenv("FLOUDS_LOG_PATH")
+        if log_path:
+            if not os.path.exists(log_path):
+                try:
+                    os.makedirs(log_path, exist_ok=True)
+                    logger.info(f"Created log directory: {log_path}")
+                except Exception as e:
+                    logger.error(f"Failed to create log directory {log_path}: {e}")
+                    sys.exit(1)
+            elif not os.path.isdir(log_path):
+                logger.error(f"Log path is not a directory: {log_path}")
+                sys.exit(1)
+            logger.info(f"Validated log directory: {log_path}")
 
     @staticmethod
     def get_onnx_config(key: str) -> OnnxConfig:

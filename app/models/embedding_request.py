@@ -18,7 +18,7 @@ class EmbeddingBaseRequest(BaseRequest):
         description="The dimension to which the embedding will be projected. Must be greater than 0. Defaults to None.",
     )
     join_chunks: bool = Field(
-        True,
+        False,
         description="Whether to join the chunks of the embedding into a single string. Defaults to True.",
     )
     join_by_pooling_strategy: str = Field(

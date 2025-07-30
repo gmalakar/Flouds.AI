@@ -12,6 +12,7 @@ import time
 import unicodedata
 from typing import Any, List
 
+import nltk
 import numpy as np
 from pydantic import BaseModel, Field
 
@@ -20,12 +21,13 @@ from app.models.embedded_chunk import EmbededChunk
 from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
 from app.models.embedding_response import EmbeddingBatchResponse, EmbeddingResponse
 from app.services.base_nlp_service import BaseNLPService
+from app.utils.batch_limiter import BatchLimiter
 
 logger = get_logger("embedder_service")
 
 
 class _EmbeddingResults(BaseModel):
-    EmbeddingResults: list[EmbededChunk]
+    EmbeddingResults: List[EmbededChunk]  # Use List for Python <3.9 compatibility
     message: str
     success: bool = Field(default=True)
 
@@ -34,13 +36,17 @@ class SentenceTransformer(BaseNLPService):
     """Static class for sentence embedding using ONNX models."""
 
     @staticmethod
-    def _merge_vectors(chunks: list[EmbededChunk], method: str = "mean") -> list[float]:
+    def _merge_vectors(chunks: List[EmbededChunk], method: str = "mean") -> List[float]:
         """Merge embedding vectors using mean or max pooling."""
         vectors = [
             np.array(chunk.vector) for chunk in chunks if hasattr(chunk, "vector")
         ]
         if not vectors:
             return []
+
+        # Validate pooling method
+        if method not in ["mean", "max"]:
+            method = "mean"
 
         stacked = np.stack(vectors)
         merged = (
@@ -90,6 +96,10 @@ class SentenceTransformer(BaseNLPService):
             )
         elif strategy == "max":
             return embedding.max(axis=tuple(range(embedding.ndim - 1)))
+        elif strategy == "first":
+            return embedding[0]
+        elif strategy == "last":
+            return embedding[-1]
         else:  # mean
             return embedding.mean(axis=tuple(range(embedding.ndim - 1)))
 
@@ -128,10 +138,11 @@ class SentenceTransformer(BaseNLPService):
     def _chunk_by_sentences(
         text: str, tokenizer: Any, max_tokens: int, overlap: int = 1
     ) -> List[str]:
-        """Sentence-based chunking with overlap (your original logic)."""
-        logger.debug("Splitting text into overlapping sentence chunks.")
+        """Sentence-based chunking with overlap using nltk.sent_tokenize."""
+        logger.debug("Splitting text into overlapping sentence chunks (NLTK).")
 
-        sentences = [s.strip() for s in text.split(".") if s.strip()]
+        # Use NLTK for robust sentence splitting
+        sentences = [s.strip() for s in nltk.sent_tokenize(text) if s.strip()]
         chunks: List[str] = []
         i = 0
 
@@ -141,7 +152,11 @@ class SentenceTransformer(BaseNLPService):
 
             while j < len(sentences):
                 candidate = " ".join(chunk_sentences + [sentences[j]])
-                tokens = tokenizer.encode(candidate)
+                try:
+                    tokens = tokenizer.encode(candidate)
+                except Exception as e:
+                    logger.error(f"Tokenizer error in sentence chunking: {e}")
+                    break
 
                 if len(tokens) < max_tokens:
                     chunk_sentences.append(sentences[j])
@@ -150,7 +165,7 @@ class SentenceTransformer(BaseNLPService):
                     break
 
             if chunk_sentences:
-                chunks.append(". ".join(chunk_sentences) + ".")
+                chunks.append(" ".join(chunk_sentences))
 
             # Move forward with overlap
             if j == i:  # Single sentence too long
@@ -165,10 +180,14 @@ class SentenceTransformer(BaseNLPService):
     def _chunk_by_paragraphs(
         text: str, tokenizer: Any, max_tokens: int, overlap: int = 0
     ) -> List[str]:
-        """Paragraph-based chunking."""
+        """Paragraph-based chunking with overlap and robust splitting."""
         logger.debug("Splitting text into paragraph chunks.")
 
-        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        # Split paragraphs by double newline, fallback to single newline if needed
+        paragraphs = [p.strip() for p in re.split(r"\n{2,}|\r{2,}", text) if p.strip()]
+        if len(paragraphs) == 1:
+            paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+
         chunks: List[str] = []
         i = 0
 
@@ -178,7 +197,11 @@ class SentenceTransformer(BaseNLPService):
 
             while j < len(paragraphs):
                 candidate = "\n\n".join(chunk_paragraphs + [paragraphs[j]])
-                tokens = tokenizer.encode(candidate)
+                try:
+                    tokens = tokenizer.encode(candidate)
+                except Exception as e:
+                    logger.error(f"Tokenizer error in paragraph chunking: {e}")
+                    break
 
                 if len(tokens) < max_tokens:
                     chunk_paragraphs.append(paragraphs[j])
@@ -218,8 +241,12 @@ class SentenceTransformer(BaseNLPService):
             chunk = text[start:end]
 
             # Validate and adjust token count
-            while len(tokenizer.encode(chunk)) > chunk_size and len(chunk) > 10:
-                chunk = chunk[: int(len(chunk) * 0.9)]
+            try:
+                while len(tokenizer.encode(chunk)) > chunk_size and len(chunk) > 10:
+                    chunk = chunk[: int(len(chunk) * 0.9)]
+            except Exception as e:
+                logger.error(f"Tokenizer error in fixed chunking: {e}")
+                break
 
             if chunk.strip():
                 chunks.append(chunk.strip())
@@ -316,7 +343,11 @@ class SentenceTransformer(BaseNLPService):
             embedding = SentenceTransformer._pooling(embedding, pooling_strategy)
 
             # Normalize if required
-            if getattr(model_config, "normalize", True):
+            normalize = getattr(model_config, "normalize", True)
+            # Allow per-request override for normalization
+            if "normalize" in kwargs:
+                normalize = kwargs["normalize"]
+            if normalize:
                 norm = np.linalg.norm(embedding)
                 if norm > 0:
                     embedding = embedding / norm
@@ -395,7 +426,7 @@ class SentenceTransformer(BaseNLPService):
     async def embed_batch_async(
         requests: EmbeddingBatchRequest, **kwargs: Any
     ) -> EmbeddingBatchResponse:
-        """Asynchronous batch embedding."""
+        """Asynchronous batch embedding with partial success reporting."""
         start_time = time.time()
         response = EmbeddingBatchResponse(
             success=True,
@@ -406,6 +437,9 @@ class SentenceTransformer(BaseNLPService):
         )
 
         try:
+            # Validate batch size
+            BatchLimiter.validate_batch_size(requests.inputs, max_size=50)
+
             loop = asyncio.get_event_loop()
             tasks = [
                 loop.run_in_executor(
@@ -424,14 +458,13 @@ class SentenceTransformer(BaseNLPService):
                 for input_text in requests.inputs
             ]
 
-            results = await asyncio.gather(*tasks)
-            for result in results:
-                if result and result.success:
-                    response.results.extend(result.EmbeddingResults)
-                else:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for idx, result in enumerate(results):
+                if isinstance(result, Exception) or (result and not result.success):
                     response.success = False
-                    response.message = getattr(result, "message", "Unknown error")
-                    break
+                    response.message = f"Error in input {idx}: {getattr(result, 'message', str(result))}"
+                else:
+                    response.results.extend(result.EmbeddingResults)
 
         except Exception as e:
             response.success = False
@@ -446,7 +479,7 @@ class SentenceTransformer(BaseNLPService):
         text: str,
         model: str,
         projected_dimension: int,
-        join_chunks: bool = True,
+        join_chunks: bool = False,
         join_by_pooling_strategy: str = None,
         output_large_text_upon_join: bool = False,
         **kwargs: Any,
@@ -527,7 +560,7 @@ class SentenceTransformer(BaseNLPService):
                 pooling_strategy = join_by_pooling_strategy or getattr(
                     model_config, "pooling_strategy", "mean"
                 )
-                if pooling_strategy not in ["mean", "max"]:
+                if pooling_strategy not in ["mean", "max", "first", "last"]:
                     pooling_strategy = "mean"
 
                 merged_vector = SentenceTransformer._merge_vectors(

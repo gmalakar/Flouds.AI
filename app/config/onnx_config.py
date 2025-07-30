@@ -64,5 +64,5 @@ class OnnxConfig(BaseModel):
     legacy_tokenizer: bool = Field(
         default=False
     )  # Use legacy tokenizer for older models
-    lowercase: bool = Field(default=True)  # Convert text to lowercase
-    remove_emojis: bool = Field(default=True)  # Remove emojis and non-ASCII characters
+    lowercase: bool = Field(default=False)  # Convert text to lowercase
+    remove_emojis: bool = Field(default=False)  # Remove emojis and non-ASCII characters

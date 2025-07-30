@@ -247,6 +247,14 @@ if ($envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
     Write-Warning "FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
 }
 
+# Check and set permissions for TinyDB directory
+if ($envVars.ContainsKey("FLOUDS_TINYDB_PATH_AT_HOST")) {
+    $tinydbPath = $envVars["FLOUDS_TINYDB_PATH_AT_HOST"]
+    Set-DirectoryPermissions -Path $tinydbPath -Description "TinyDB"
+} else {
+    Write-Warning "FLOUDS_TINYDB_PATH_AT_HOST not set. Client database will not be persisted to host."
+}
+
 if ($BuildImage) {
     Write-StepHeader "Building Docker image"
     Write-Host "Building $fullImageName..." -ForegroundColor Yellow
@@ -288,33 +296,47 @@ $dockerArgs += @(
     "--network", $aiNetwork,
     "-p", "19690:19690",
     "-e", "FLOUDS_API_ENV=Production",
-    "-e", "FLOUDS_DEBUG_MODE=0"
+    "-e", "APP_DEBUG_MODE=0"
 )
 
 # ONNX config file mapping
 if ($envVars.ContainsKey("FLOUDS_ONNX_CONFIG_FILE_AT_HOST")) {
     $dockerConfigPath = "$workingDir/app/config/onnx_config.json"
-    Write-Host "Mapping ONNX config: $configPath  $dockerConfigPath"
+    Write-Host "Mapping ONNX config: $configPath -> $dockerConfigPath"
     $dockerArgs += "-v"
     $dockerArgs += "${configPath}:${dockerConfigPath}:ro"
+    $dockerArgs += "-e"
+    $dockerArgs += "FLOUDS_ONNX_CONFIG_FILE=$dockerConfigPath"
 }
 
 # ONNX model directory mapping
 if ($envVars.ContainsKey("FLOUDS_ONNX_MODEL_PATH_AT_HOST")) {
     $dockerOnnxPath = "$workingDir/onnx"
-    Write-Host "Mapping ONNX models: $modelPath  $dockerOnnxPath"
+    Write-Host "Mapping ONNX models: $modelPath -> $dockerOnnxPath"
     $dockerArgs += "-v"
     $dockerArgs += "${modelPath}:${dockerOnnxPath}:ro"
+    $dockerArgs += "-e"
+    $dockerArgs += "FLOUDS_ONNX_ROOT=$dockerOnnxPath"
 }
 
 # Log directory mapping
 if ($envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
     $dockerLogPath = "$workingDir/logs"
-    Write-Host "Mapping logs: $logPath  $dockerLogPath"
+    Write-Host "Mapping logs: $logPath -> $dockerLogPath"
     $dockerArgs += "-v"
     $dockerArgs += "${logPath}:${dockerLogPath}:rw"
     $dockerArgs += "-e"
     $dockerArgs += "FLOUDS_LOG_PATH=$dockerLogPath"
+}
+
+# TinyDB directory mapping
+if ($envVars.ContainsKey("FLOUDS_TINYDB_PATH_AT_HOST")) {
+    $dockerTinydbPath = "$workingDir/tinydb"
+    Write-Host "Mapping TinyDB: $tinydbPath -> $dockerTinydbPath"
+    $dockerArgs += "-v"
+    $dockerArgs += "${tinydbPath}:${dockerTinydbPath}:rw"
+    $dockerArgs += "-e"
+    $dockerArgs += "FLOUDS_CLIENTS_DB=$dockerTinydbPath/clients.db"
 }
 
 # Add platform flag if specified
