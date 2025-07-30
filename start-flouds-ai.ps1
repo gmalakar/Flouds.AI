@@ -294,10 +294,16 @@ if ($PullAlways) {
 $dockerArgs += @(
     "--name", $InstanceName,
     "--network", $aiNetwork,
-    "-p", "19690:19690",
-    "-e", "FLOUDS_API_ENV=Production",
-    "-e", "APP_DEBUG_MODE=0"
+    "-p", "19690:19690"
 )
+
+# Load all environment variables from .env file
+foreach ($key in $envVars.Keys) {
+    if ($key -notmatch "_AT_HOST$") {
+        $dockerArgs += "-e"
+        $dockerArgs += "$key=$($envVars[$key])"
+    }
+}
 
 # ONNX config file mapping
 if ($envVars.ContainsKey("FLOUDS_ONNX_CONFIG_FILE_AT_HOST")) {

@@ -272,13 +272,25 @@ DOCKER_ARGS+=(
     "-p" "19690:19690"
 )
 
-# Set environment based on development flag
+# Load all environment variables from .env file
+while IFS='=' read -r key value; do
+    # Skip comments and empty lines
+    [[ $key =~ ^#.*$ ]] && continue
+    [[ -z $key ]] && continue
+    
+    # Skip _AT_HOST variables as they are for host path mapping
+    [[ $key =~ .*_AT_HOST$ ]] && continue
+    
+    # Remove quotes from value
+    value=$(echo "$value" | sed 's/^"\(.*\)"$/\1/' | sed "s/^'\(.*\)'$/\1/")
+    
+    DOCKER_ARGS+=("-e" "$key=$value")
+done < "$ENV_FILE"
+
+# Override environment based on development flag
 if [[ "$DEVELOPMENT" == true ]]; then
     DOCKER_ARGS+=("-e" "FLOUDS_API_ENV=Development")
-    DOCKER_ARGS+=("-e" "FLOUDS_DEBUG_MODE=1")
-else
-    DOCKER_ARGS+=("-e" "FLOUDS_API_ENV=Production")
-    DOCKER_ARGS+=("-e" "FLOUDS_DEBUG_MODE=0")
+    DOCKER_ARGS+=("-e" "APP_DEBUG_MODE=1")
 fi
 
 # ONNX config file mapping
