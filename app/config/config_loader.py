@@ -62,14 +62,23 @@ class ConfigLoader:
             "FLOUDS_MODEL_SESSION_PROVIDER",
             ConfigLoader.__appsettings.server.session_provider,
         )
-        ConfigLoader.__appsettings.app.debug = os.getenv("APP_DEBUG_MODE", "0") == "1"
+        ConfigLoader.__appsettings.app.debug = (
+            os.getenv(
+                "APP_DEBUG_MODE", "1" if ConfigLoader.__appsettings.app.debug else "0"
+            )
+            == "1"
+        )
 
         # Load additional environment variables
         ConfigLoader.__appsettings.logging.level = os.getenv(
             "FLOUDS_LOG_LEVEL", ConfigLoader.__appsettings.logging.level
         )
         ConfigLoader.__appsettings.rate_limiting.enabled = (
-            os.getenv("FLOUDS_RATE_LIMIT_ENABLED", "true").lower() == "true"
+            os.getenv(
+                "FLOUDS_RATE_LIMIT_ENABLED",
+                str(ConfigLoader.__appsettings.rate_limiting.enabled),
+            ).lower()
+            == "true"
         )
         ConfigLoader.__appsettings.rate_limiting.requests_per_minute = int(
             os.getenv(
@@ -116,7 +125,32 @@ class ConfigLoader:
 
         # Security settings
         ConfigLoader.__appsettings.security.enabled = (
-            os.getenv("FLOUDS_SECURITY_ENABLED", "false").lower() == "true"
+            os.getenv(
+                "FLOUDS_SECURITY_ENABLED",
+                str(ConfigLoader.__appsettings.security.enabled),
+            ).lower()
+            == "true"
+        )
+
+        # Monitoring settings
+        ConfigLoader.__appsettings.monitoring.enable_metrics = (
+            os.getenv(
+                "FLOUDS_ENABLE_METRICS",
+                str(ConfigLoader.__appsettings.monitoring.enable_metrics),
+            ).lower()
+            == "true"
+        )
+        ConfigLoader.__appsettings.monitoring.memory_threshold_mb = int(
+            os.getenv(
+                "FLOUDS_MEMORY_THRESHOLD_MB",
+                ConfigLoader.__appsettings.monitoring.memory_threshold_mb,
+            )
+        )
+        ConfigLoader.__appsettings.monitoring.cpu_threshold_percent = int(
+            os.getenv(
+                "FLOUDS_CPU_THRESHOLD_PERCENT",
+                ConfigLoader.__appsettings.monitoring.cpu_threshold_percent,
+            )
         )
 
         # Clients database path

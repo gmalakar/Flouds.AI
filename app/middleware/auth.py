@@ -4,13 +4,14 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from app.app_init import APP_SETTINGS
 from app.logger import get_logger
+from app.models.base_response import BaseResponse
 from app.utils.key_manager import key_manager
 
 logger = get_logger("auth")
@@ -23,7 +24,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app):
         super().__init__(app)
-        self.enabled = getattr(APP_SETTINGS.security, "enabled", False)
+        self.enabled = APP_SETTINGS.security.enabled
 
         # Get tokens from key manager
         self.valid_keys = set(key_manager.get_all_tokens())
@@ -67,26 +68,37 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Check if any API keys are configured
         if not self.valid_keys:
             logger.error("Authentication enabled but no API keys configured")
-            raise HTTPException(
+            error_response = BaseResponse(
+                success=False, message="Authentication misconfigured", model="auth"
+            )
+            return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Authentication misconfigured",
+                content=error_response.model_dump(),
             )
 
         # Check Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header:
             logger.warning(f"Missing Authorization header for {request.url.path}")
-            raise HTTPException(
+            error_response = BaseResponse(
+                success=False, message="Missing Authorization header", model="auth"
+            )
+            return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing Authorization header",
+                content=error_response.model_dump(),
             )
 
         # Validate Bearer token
         if not auth_header.startswith("Bearer "):
             logger.warning(f"Invalid Authorization format for {request.url.path}")
-            raise HTTPException(
+            error_response = BaseResponse(
+                success=False,
+                message="Invalid Authorization format. Use 'Bearer <token>'",
+                model="auth",
+            )
+            return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid Authorization format. Use 'Bearer <token>'",
+                content=error_response.model_dump(),
             )
 
         token = auth_header[7:].strip()  # Remove "Bearer " prefix and trim
@@ -94,9 +106,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Validate token is not empty
         if not token:
             logger.warning(f"Empty token provided for {request.url.path}")
-            raise HTTPException(
+            error_response = BaseResponse(
+                success=False, message="Empty authorization token", model="auth"
+            )
+            return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Empty authorization token",
+                content=error_response.model_dump(),
             )
 
         # Authenticate client using client_id|client_secret format
@@ -109,8 +124,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
         else:
             logger.warning(f"Invalid token attempt for {request.url.path}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+            error_response = BaseResponse(
+                success=False, message="Invalid token", model="auth"
+            )
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content=error_response.model_dump(),
             )
 
         return await call_next(request)
