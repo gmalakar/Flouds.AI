@@ -6,11 +6,20 @@
 
 import base64
 import os
-from typing import Dict, List, Optional
+from functools import lru_cache
+from typing import Dict, List, Optional, Set
 
 from cryptography.fernet import Fernet
 
+from app.exceptions import (
+    DatabaseConnectionError,
+    DatabaseCorruptionError,
+    DecryptionError,
+    EncryptionKeyError,
+)
 from app.logger import get_logger
+from app.utils.log_sanitizer import sanitize_for_log
+from app.utils.path_validator import validate_safe_path
 from tinydb import Query, TinyDB
 
 logger = get_logger("key_manager")
@@ -27,6 +36,11 @@ class KeyManager:
     """Manages client credentials using TinyDB with encryption."""
 
     def __init__(self, db_path: str = None):
+        self.db = None
+        self.clients = {}
+        self._token_cache: Set[str] = set()  # Cache for valid tokens
+        self._admin_cache: Set[str] = set()  # Cache for admin client IDs
+
         try:
             from app.app_init import APP_SETTINGS
 
@@ -45,26 +59,45 @@ class KeyManager:
                 self.db = TinyDB(self.db_path)
                 logger.info(f"Using clients database: {self.db_path}")
                 self.clients_table = self.db.table("clients")
+            except (OSError, PermissionError) as db_error:
+                if self.db:
+                    self.db.close()
+                    self.db = None
+                logger.error(f"Database access error: {db_error}")
+                raise DatabaseConnectionError(f"Cannot access database: {db_error}")
             except Exception as db_error:
-                logger.error(f"Failed to initialize database: {db_error}")
+                if self.db:
+                    self.db.close()
+                    self.db = None
+                logger.error(f"Database corruption detected: {db_error}")
                 # Try to create a new database file
                 if os.path.exists(self.db_path):
                     backup_path = f"{self.db_path}.backup"
                     os.rename(self.db_path, backup_path)
                     logger.info(f"Backed up corrupted database to {backup_path}")
-                self.db = TinyDB(self.db_path)
-                self.clients_table = self.db.table("clients")
-                logger.info(f"Created new database: {self.db_path}")
+                try:
+                    self.db = TinyDB(self.db_path)
+                    self.clients_table = self.db.table("clients")
+                    logger.info(f"Created new database: {self.db_path}")
+                except Exception as recovery_error:
+                    raise DatabaseCorruptionError(
+                        f"Cannot recover database: {recovery_error}"
+                    )
 
             self.encryption_key = self._get_or_create_encryption_key()
             self.fernet = Fernet(self.encryption_key)
-            self.clients: Dict[str, Client] = {}
             self.load_clients()
-        except Exception as init_error:
-            logger.error(f"Critical error initializing KeyManager: {init_error}")
-            # Initialize with minimal working state
-            self.clients = {}
+        except (DatabaseConnectionError, DatabaseCorruptionError):
+            if self.db:
+                self.db.close()
             raise
+        except Exception as init_error:
+            if self.db:
+                self.db.close()
+            logger.error(f"Critical error initializing KeyManager: {init_error}")
+            raise DatabaseConnectionError(
+                f"KeyManager initialization failed: {init_error}"
+            )
 
     def _get_or_create_encryption_key(self) -> bytes:
         """Get or create encryption key from environment or file."""
@@ -75,41 +108,60 @@ class KeyManager:
         key_dir = os.path.dirname(os.path.abspath(self.db_path))
         key_file = os.path.join(key_dir, ".encryption_key")
         if os.path.exists(key_file):
-            with open(key_file, "rb") as f:
+            from app.utils.path_validator import safe_open
+
+            with safe_open(key_file, key_dir, "rb") as f:
                 return f.read()
 
         # Generate new key
         key = Fernet.generate_key()
         os.makedirs(key_dir, exist_ok=True)
-        with open(key_file, "wb") as f:
+        from app.utils.path_validator import safe_open
+
+        with safe_open(key_file, key_dir, "wb") as f:
             f.write(key)
         logger.info(f"Generated new encryption key at {key_file}")
         return key
 
+    @lru_cache(maxsize=1000)
+    def _parse_token(self, token: str) -> Optional[tuple[str, str]]:
+        """Parse and cache token parsing results."""
+        if "|" not in token:
+            return None
+        try:
+            client_id, client_secret = token.split("|", 1)
+            return (client_id, client_secret)
+        except (ValueError, IndexError):
+            return None
+
     def authenticate_client(self, token: str) -> Optional[Client]:
         """Authenticate client using client_id|client_secret format."""
         try:
-            if "|" not in token:
+            # Use cached token parsing
+            parsed = self._parse_token(token)
+            if not parsed:
                 return None
 
-            client_id, client_secret = token.split("|", 1)
+            client_id, client_secret = parsed
             client = self.clients.get(client_id)
 
             if client and client.client_secret == client_secret:
                 return client
             return None
+        except (ValueError, TypeError) as e:
+            logger.error("Invalid token format: %s", str(e))
+            return None
         except Exception as e:
-            logger.error(f"Authentication error: {e}")
+            logger.error("Authentication error: %s", str(e))
             return None
 
     def is_admin(self, client_id: str) -> bool:
-        """Check if client is admin."""
-        client = self.clients.get(client_id)
-        return client and client.client_type == "admin"
+        """Check if client is admin using cache."""
+        return client_id in self._admin_cache
 
-    def get_all_tokens(self) -> List[str]:
+    def get_all_tokens(self) -> Set[str]:
         """Get all valid tokens in client_id|client_secret format."""
-        return [f"{c.client_id}|{c.client_secret}" for c in self.clients.values()]
+        return self._token_cache.copy()
 
     def add_client(
         self, client_id: str, client_secret: str, client_type: str = "api_user"
@@ -133,10 +185,37 @@ class KeyManager:
             # Update in-memory cache
             self.clients[client_id] = Client(client_id, client_secret, client_type)
 
-            logger.info(f"Added/updated client: {client_id} ({client_type})")
+            # Update token and admin caches
+            token = f"{client_id}|{client_secret}"
+            self._token_cache.add(token)
+            if client_type == "admin":
+                self._admin_cache.add(client_id)
+
+            # Clear LRU cache to ensure fresh parsing
+            self._parse_token.cache_clear()
+
+            logger.info(
+                "Added/updated client: %s (%s)",
+                sanitize_for_log(client_id),
+                sanitize_for_log(client_type),
+            )
             return True
+        except (PermissionError, OSError) as e:
+            logger.error(
+                "Database access error for client %s: %s",
+                sanitize_for_log(client_id),
+                str(e),
+            )
+            return False
+        except (ValueError, TypeError) as e:
+            logger.error(
+                "Invalid client data for %s: %s", sanitize_for_log(client_id), str(e)
+            )
+            return False
         except Exception as e:
-            logger.error(f"Failed to add client {client_id}: {e}")
+            logger.error(
+                "Failed to add client %s: %s", sanitize_for_log(client_id), str(e)
+            )
             return False
 
     def remove_client(self, client_id: str) -> bool:
@@ -146,12 +225,30 @@ class KeyManager:
             result = self.clients_table.remove(ClientQuery.client_id == client_id)
 
             if result:
-                self.clients.pop(client_id, None)
+                # Remove from caches
+                removed_client = self.clients.pop(client_id, None)
+                if removed_client:
+                    token = f"{client_id}|{removed_client.client_secret}"
+                    self._token_cache.discard(token)
+                    self._admin_cache.discard(client_id)
+
+                # Clear LRU cache
+                self._parse_token.cache_clear()
+
                 logger.info(f"Removed client: {client_id}")
                 return True
             return False
+        except (PermissionError, OSError) as e:
+            logger.error(
+                "Database access error removing client %s: %s",
+                sanitize_for_log(client_id),
+                str(e),
+            )
+            return False
         except Exception as e:
-            logger.error(f"Failed to remove client {client_id}: {e}")
+            logger.error(
+                "Failed to remove client %s: %s", sanitize_for_log(client_id), str(e)
+            )
             return False
 
     def load_clients(self):
@@ -180,13 +277,36 @@ class KeyManager:
                     client_type = client_data.get("type", "api_user")
 
                     # Decrypt secret
-                    client_secret = self.fernet.decrypt(
-                        encrypted_secret.encode()
-                    ).decode()
+                    try:
+                        client_secret = self.fernet.decrypt(
+                            encrypted_secret.encode()
+                        ).decode()
+                    except Exception as decrypt_error:
+                        logger.error(
+                            f"Failed to decrypt client secret for {client_id}: {decrypt_error}"
+                        )
+                        raise DecryptionError(
+                            f"Cannot decrypt client credentials: {decrypt_error}"
+                        )
 
-                    self.clients[client_id] = Client(
-                        client_id, client_secret, client_type
+                    client = Client(client_id, client_secret, client_type)
+                    self.clients[client_id] = client
+
+                    # Update caches
+                    token = f"{client_id}|{client_secret}"
+                    self._token_cache.add(token)
+                    if client_type == "admin":
+                        self._admin_cache.add(client_id)
+                except DecryptionError:
+                    logger.error(
+                        f"Decryption failed for client {client_data.get('client_id', 'unknown')}"
                     )
+                    continue
+                except (KeyError, ValueError) as client_error:
+                    logger.error(
+                        f"Invalid client data for {client_data.get('client_id', 'unknown')}: {client_error}"
+                    )
+                    continue
                 except Exception as client_error:
                     logger.error(
                         f"Failed to load client {client_data.get('client_id', 'unknown')}: {client_error}"
@@ -194,10 +314,35 @@ class KeyManager:
                     continue
 
             logger.info(f"Loaded {len(self.clients)} clients from {self.db_path}")
-        except Exception as e:
-            logger.error(f"Failed to load clients: {e}")
-            # Initialize empty clients dict on error
+        except (FileNotFoundError, PermissionError) as e:
+            logger.error("Database file access error: %s", str(e))
             self.clients = {}
+        except (DecryptionError, DatabaseCorruptionError) as e:
+            logger.error("Database/encryption error loading clients: %s", str(e))
+            self.clients = {}
+            self._token_cache.clear()
+            self._admin_cache.clear()
+            raise
+        except Exception as e:
+            logger.error("Failed to load clients: %s", str(e))
+            self.clients = {}
+            self._token_cache.clear()
+            self._admin_cache.clear()
+
+    def close(self):
+        """Close database connection and clear caches."""
+        if self.db:
+            self.db.close()
+            self.db = None
+        self._token_cache.clear()
+        self._admin_cache.clear()
+        self._parse_token.cache_clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
 
 # Global instance
@@ -212,10 +357,10 @@ def _ensure_admin_exists():
     )
 
     if not admin_exists:
-        import secrets
+        from secrets import token_urlsafe
 
         admin_id = "admin"
-        admin_secret = secrets.token_urlsafe(32)
+        admin_secret = token_urlsafe(32)
 
         if key_manager.add_client(admin_id, admin_secret, "admin"):
             # Log to console
@@ -230,8 +375,10 @@ def _ensure_admin_exists():
                 import os
                 from datetime import datetime
 
+                from app.utils.path_validator import safe_open
+
                 creds_file = "admin_credentials.txt"
-                with open(creds_file, "w", encoding="utf-8") as f:
+                with safe_open(creds_file, os.getcwd(), "w", encoding="utf-8") as f:
                     f.write(f"Flouds AI Admin Credentials\n")
                     f.write(f"Generated: {datetime.now().isoformat()}\n")
                     f.write(f"\n")

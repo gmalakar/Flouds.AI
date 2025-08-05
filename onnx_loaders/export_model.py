@@ -18,6 +18,14 @@
 
 import argparse
 import os
+import warnings
+
+# Suppress warnings during ONNX export
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings(
+    "ignore", message=".*torch.tensor results are registered as constants.*"
+)
 
 from export_model_to_onnx import export_and_optimize_onnx
 
@@ -58,20 +66,37 @@ if __name__ == "__main__":
         "--onnx_path",
         help="Path to ONNX output directory (default: ../onnx or ONNX_PATH env var)",
     )
+    parser.add_argument(
+        "--framework",
+        type=str,
+        default=None,
+        help="Framework to use for ONNX export (e.g., pt, tf).",
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Force re-export even if ONNX files exist"
+    )
     args = parser.parse_args()
 
     # Check for ONNX path: parameter > env variable > default
     onnx_path = args.onnx_path or os.getenv("ONNX_PATH", "../onnx")
     print(f"Using ONNX path: {os.path.abspath(onnx_path)}")
 
-    export_and_optimize_onnx(
+    export_args = dict(
         model_name=args.model_name,
         model_for=args.model_for,
         optimize=args.optimize,
         optimization_level=args.optimization_level,
-        task=args.task,
         use_t5_encoder=args.use_t5_encoder,
         use_cache=args.use_cache,
         model_folder=args.model_folder,
         onnx_path=onnx_path,
+        force=args.force,
     )
+    # Only add 'task' if not feature extraction and task is set
+    if args.model_for != "fe" and args.task:
+        export_args["task"] = args.task
+    # Add framework if specified
+    if args.framework:
+        export_args["framework"] = args.framework
+
+    export_and_optimize_onnx(**export_args)

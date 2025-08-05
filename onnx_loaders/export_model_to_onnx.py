@@ -9,9 +9,19 @@ import glob
 import logging
 import os
 import pathlib
+import warnings
 
-import onnx
-import onnxruntime as ort
+# Set ONNX opset version to 14 to support scaled_dot_product_attention
+os.environ["ONNX_OPSET_VERSION"] = "14"
+
+try:
+    from torch.onnx._internal.registration import OnnxExporterWarning
+
+    warnings.filterwarnings("ignore", category=OnnxExporterWarning)
+except ImportError:
+    pass
+
+from onnxruntime import InferenceSession
 from optimum.onnxruntime import (
     ORTModelForFeatureExtraction,
     ORTModelForSeq2SeqLM,
@@ -20,6 +30,16 @@ from optimum.onnxruntime import (
 )
 from optimum.onnxruntime.configuration import OptimizationConfig
 from transformers import AutoTokenizer, T5EncoderModel, pipeline
+
+from onnx import checker, load
+
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*Symbolic function.*already registered.*")
+warnings.filterwarnings(
+    "ignore", message=".*were not initialized from the model checkpoint.*"
+)
+warnings.filterwarnings("ignore", message=".*are newly initialized.*")
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +54,8 @@ def export_and_optimize_onnx(
     use_cache: bool = False,
     model_folder: str = None,
     onnx_path: str = "../onnx",
+    framework: str = None,
+    force: bool = False,
 ):
     """
     Export and optionally optimize a HuggingFace model to ONNX format.
@@ -65,7 +87,7 @@ def export_and_optimize_onnx(
     _model_path = None
     _output_dir = None
 
-    def _getTaskName(model_for: str, task_type: str):
+    def _get_task_name(model_for: str, task_type: str):
         """
         Returns the ONNX export task name.
         If task_type is provided and not 'none', use it.
@@ -91,14 +113,14 @@ def export_and_optimize_onnx(
 
         logger.info(f"Verifying model at {model_path}...")
         try:
-            onnx_model = onnx.load(model_path)
+            onnx_model = load(model_path)
             try:
-                onnx.checker.check_model(onnx_model)
+                checker.check_model(onnx_model)
                 logger.info("✅ ONNX model validation passed")
             except MemoryError:
                 logger.warning("⚠️ Skipping onnx.checker.check_model due to MemoryError")
 
-            session2 = ort.InferenceSession(model_path)
+            session2 = InferenceSession(model_path)
             logger.info("Model inputs: %s", [inp.name for inp in session2.get_inputs()])
             logger.info(
                 "Model outputs: %s", [out.name for out in session2.get_outputs()]
@@ -113,7 +135,7 @@ def export_and_optimize_onnx(
             return False
 
     # --- Export logic ---
-    _model_task_type = _getTaskName(model_for, task)
+    _model_task_type = _get_task_name(model_for, task)
     if not model_folder:
         model_folder = model_name.split("/")[-1] if "/" in model_name else model_name
 
@@ -137,16 +159,33 @@ def export_and_optimize_onnx(
         _model_path = os.path.join(_output_dir, "model.onnx")
         _has_decoder = False
     elif _model_for in ["s2s", "seq2seq-lm"]:
+        # Check if ONNX files already exist
+        encoder_exists = os.path.exists(os.path.join(_output_dir, "encoder_model.onnx"))
+        decoder_exists = os.path.exists(os.path.join(_output_dir, "decoder_model.onnx"))
+
         _export_args = {
-            "export": True,
-            "task": _model_task_type,
+            "export": force or not (encoder_exists and decoder_exists),
             "use_cache": use_cache,
         }
         _onnx_name = "encoder_model.onnx"
         _decoder_onnx_name = "decoder_model.onnx"
-        logger.info(
-            f"Exporting seq2seq model {model_name} for task_type {_model_task_type} and use_cache {use_cache}..."
-        )
+
+        if force:
+            logger.info(f"Force re-exporting seq2seq model {model_name}...")
+        elif encoder_exists and decoder_exists:
+            logger.info(f"Using existing ONNX files for {model_name}")
+        else:
+            logger.info(
+                f"Exporting seq2seq model {model_name} for task_type {_model_task_type} and use_cache {use_cache}..."
+            )
+        # Set opset version for export
+        os.environ["TORCH_ONNX_OPSET_VERSION"] = "14"
+        # Disable scaled_dot_product_attention for ONNX export compatibility
+        import torch
+
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
         model = ORTModelForSeq2SeqLM.from_pretrained(model_name, **_export_args)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model.save_pretrained(_output_dir)
@@ -164,12 +203,19 @@ def export_and_optimize_onnx(
     elif _model_for in ["sc", "sequence-classification"]:
         _export_args = {
             "export": True,
-            "task": _model_task_type,
             "use_cache": use_cache,
         }
         logger.info(
             f"Exporting sequence classification model {model_name} for task_type {_model_task_type} and use_cache {use_cache}..."
         )
+        # Set opset version for export
+        os.environ["TORCH_ONNX_OPSET_VERSION"] = "14"
+        # Disable scaled_dot_product_attention for ONNX export compatibility
+        import torch
+
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
         model = ORTModelForSequenceClassification.from_pretrained(
             model_name, **_export_args
         )
@@ -180,10 +226,18 @@ def export_and_optimize_onnx(
         _has_decoder = False
         _model_path = os.path.join(_output_dir, "model.onnx")
     else:
-        _export_args = {"export": True, "task": _model_task_type}
-        logger.info(
-            f"Exporting feature extraction model {model_name} for task_type {_model_task_type}..."
-        )
+        from optimum.exporters.onnx import OnnxConfig
+
+        _export_args = {"export": True}  # Do NOT include 'task' for feature extraction!
+        logger.info(f"Exporting feature extraction model {model_name}...")
+        # Set opset version for export
+        os.environ["TORCH_ONNX_OPSET_VERSION"] = "14"
+        # Disable scaled_dot_product_attention for ONNX export compatibility
+        import torch
+
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
         model = ORTModelForFeatureExtraction.from_pretrained(model_name, **_export_args)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model.save_pretrained(_output_dir)
@@ -197,6 +251,47 @@ def export_and_optimize_onnx(
     # Verify model
     _verify_model(_model_path)
 
+    # Clean up memory before optimization
+    if optimize:
+        logger.info("Cleaning up memory before optimization...")
+        if "model" in locals():
+            del model
+        if "tokenizer" in locals():
+            del tokenizer
+
+        # Aggressive memory cleanup
+        import torch
+
+        gc.collect()
+        gc.collect()  # Run twice for better cleanup
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+        # Force system memory cleanup
+        try:
+            import ctypes
+
+            if os.name == "nt":
+                ctypes.windll.kernel32.SetProcessWorkingSetSize(-1, -1, -1)
+        except (ImportError, AttributeError, OSError):
+            pass
+
+        logger.info("Memory cleanup completed")
+
+        # Check available memory
+        import psutil
+
+        available_memory_mb = psutil.virtual_memory().available / (1024 * 1024)
+        logger.info(f"Available memory: {available_memory_mb:.1f} MB")
+
+        if available_memory_mb < 500:  # Less than 500MB available
+            logger.warning(
+                f"Insufficient memory ({available_memory_mb:.1f} MB) for optimization. Skipping optimization."
+            )
+            return
+
     # Optimize model if required
     def _optimize_model():
         if optimize:
@@ -207,16 +302,14 @@ def export_and_optimize_onnx(
                 # Optimize main model
                 if _model_for in ["s2s", "seq2seq-lm"]:
                     model = ORTModelForSeq2SeqLM.from_pretrained(
-                        _output_dir, file_name=_onnx_name, use_cache=False
+                        _output_dir, use_cache=False
                     )
                 elif _model_for in ["sc", "sequence-classification"]:
                     model = ORTModelForSequenceClassification.from_pretrained(
-                        _output_dir, file_name="model.onnx"
+                        _output_dir
                     )
                 else:
-                    model = ORTModelForFeatureExtraction.from_pretrained(
-                        _output_dir, file_name="model.onnx"
-                    )
+                    model = ORTModelForFeatureExtraction.from_pretrained(_output_dir)
                 optimizer = ORTOptimizer.from_pretrained(model)
                 optimizer.optimize(
                     save_dir=pathlib.Path(_model_path).parent,
@@ -226,8 +319,38 @@ def export_and_optimize_onnx(
                 del model
                 gc.collect()
             except Exception as e:
-                logger.warning(f"⚠️ Optimization failed: {e}")
-                logger.info("📦 Using unoptimized model (still functional)")
+                logger.warning(
+                    f"⚠️ Optimization failed with level {optimization_level}: {e}"
+                )
+                if optimization_level > 0:
+                    logger.info("🔄 Trying with basic optimization (level 0)...")
+                    try:
+                        optimization_config = OptimizationConfig(optimization_level=0)
+                        if _model_for in ["s2s", "seq2seq-lm"]:
+                            model = ORTModelForSeq2SeqLM.from_pretrained(
+                                _output_dir, use_cache=False
+                            )
+                        elif _model_for in ["sc", "sequence-classification"]:
+                            model = ORTModelForSequenceClassification.from_pretrained(
+                                _output_dir
+                            )
+                        else:
+                            model = ORTModelForFeatureExtraction.from_pretrained(
+                                _output_dir
+                            )
+                        optimizer = ORTOptimizer.from_pretrained(model)
+                        optimizer.optimize(
+                            save_dir=pathlib.Path(_model_path).parent,
+                            optimization_config=optimization_config,
+                        )
+                        logger.info(f"✅ Basic optimization successful")
+                        del model
+                        gc.collect()
+                    except Exception as e2:
+                        logger.warning(f"⚠️ Basic optimization also failed: {e2}")
+                        logger.info("📦 Using unoptimized model (still functional)")
+                else:
+                    logger.info("📦 Using unoptimized model (still functional)")
 
             # Optimize decoder if present
             if _has_decoder:
@@ -238,7 +361,7 @@ def export_and_optimize_onnx(
                 _verify_model(decoder_model_path)
                 try:
                     decoder_model = ORTModelForSeq2SeqLM.from_pretrained(
-                        _output_dir, file_name=_decoder_onnx_name, use_cache=False
+                        _output_dir, use_cache=False
                     )
                     decoder_optimizer = ORTOptimizer.from_pretrained(decoder_model)
                     optimized_decoder_model = decoder_optimizer.optimize(

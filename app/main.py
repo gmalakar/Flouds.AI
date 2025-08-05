@@ -4,20 +4,29 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
+import os
 import signal
 import sys
+import warnings
 
-import uvicorn
-from fastapi import FastAPI
+# Suppress PyTorch ONNX warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 
 from app.app_init import APP_SETTINGS
+from app.exceptions import FloudsBaseException
 from app.logger import get_logger
 from app.middleware.auth import AuthMiddleware
+from app.middleware.path_security import PathSecurityMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_validation import RequestValidationMiddleware
 from app.routers import admin, embedder, health, summarizer
+from app.utils.error_handler import ErrorHandler
+from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("main")
 
@@ -30,11 +39,53 @@ app = FastAPI(
     redoc_url="/api/v1/redoc",
 )
 
+
+# Global exception handlers
+@app.exception_handler(FloudsBaseException)
+async def flouds_exception_handler(request: Request, exc: FloudsBaseException):
+    """Handle custom Flouds exceptions."""
+    status_code = ErrorHandler.get_http_status(exc)
+    logger.warning(
+        "Flouds exception in %s: %s",
+        sanitize_for_log(str(request.url)),
+        sanitize_for_log(exc.message),
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "success": False,
+            "message": exc.message,
+            "error_code": exc.error_code,
+            "detail": exc.message,
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle unexpected exceptions."""
+    error_response = ErrorHandler.handle_exception(
+        exc, f"request to {request.url}", include_traceback=True
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "message": "Internal server error",
+            "error_code": "INTERNAL_ERROR",
+            "detail": "An unexpected error occurred",
+        },
+    )
+
+
 # Add security middleware
 if APP_SETTINGS.app.is_production:
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=["*"]  # Configure based on your deployment
     )
+
+# Add path security middleware (first for early detection)
+app.add_middleware(PathSecurityMiddleware)
 
 # Add authentication middleware
 app.add_middleware(AuthMiddleware)
@@ -58,6 +109,8 @@ if APP_SETTINGS.rate_limiting.enabled:
         requests_per_minute=APP_SETTINGS.rate_limiting.requests_per_minute,
         requests_per_hour=APP_SETTINGS.rate_limiting.requests_per_hour,
     )
+
+# Include routers
 app.include_router(
     summarizer.router, prefix="/api/v1/summarizer", tags=["Text Summarization"]
 )
@@ -82,9 +135,20 @@ def api_v1_root() -> dict:
     return {"message": "Flouds AI API v1", "version": "v1", "docs": "/api/v1/docs"}
 
 
+def cleanup_handlers():
+    """Clean up logger handlers."""
+    import logging
+
+    for handler in logging.root.handlers[:]:
+        handler.close()
+        logging.root.removeHandler(handler)
+    logging.shutdown()
+
+
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
     logger.info(f"Received signal {signum}, shutting down gracefully...")
+    cleanup_handlers()
     sys.exit(0)
 
 
@@ -97,17 +161,21 @@ def run_server():
         f"Starting uvicorn server on {APP_SETTINGS.server.host}:{APP_SETTINGS.server.port}"
     )
 
+    import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host=APP_SETTINGS.server.host,
         port=APP_SETTINGS.server.port,
         workers=None,
         reload=not APP_SETTINGS.app.is_production,
-        log_level="info" if not APP_SETTINGS.app.debug else "debug",
+        log_level="debug" if os.getenv("APP_DEBUG_MODE", "0") == "1" else "info",
         access_log=True,
         timeout_keep_alive=APP_SETTINGS.server.keepalive_timeout,
         timeout_graceful_shutdown=APP_SETTINGS.server.graceful_timeout,
     )
+
+    logger.info("Flouds AI server stopped")
 
 
 if __name__ == "__main__":

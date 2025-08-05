@@ -4,8 +4,8 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-import secrets
 import string
+from secrets import choice, token_urlsafe
 from typing import Optional
 
 
@@ -19,7 +19,7 @@ def generate_api_token(length: int = 32) -> str:
         Secure random token string
     """
     alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
+    return "".join(choice(alphabet) for _ in range(length))
 
 
 def generate_uuid_token() -> str:

@@ -4,18 +4,27 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-import asyncio
 import json
 import os
 import time
+from asyncio import TimeoutError as AsyncTimeoutError
+from asyncio import gather, get_event_loop, run
 from typing import Any, Dict, Optional, Set
 
 import numpy as np
 import onnxruntime as ort
+from numpy import ndarray
 from optimum.onnxruntime import ORTModelForSeq2SeqLM
 from pydantic import BaseModel, Field
 
 from app.config.onnx_config import OnnxConfig
+from app.exceptions import (
+    InferenceError,
+    ModelLoadError,
+    ModelNotFoundError,
+    ProcessingTimeoutError,
+    TokenizerError,
+)
 from app.logger import get_logger
 from app.models.summarization_request import (
     SummarizationBatchRequest,
@@ -25,8 +34,18 @@ from app.models.summarization_response import SummarizationResponse
 from app.modules.concurrent_dict import ConcurrentDict
 from app.services.base_nlp_service import BaseNLPService
 from app.utils.batch_limiter import BatchLimiter
+from app.utils.error_handler import ErrorHandler, handle_errors
+from app.utils.log_sanitizer import sanitize_for_log
+from app.utils.path_validator import validate_safe_path
 
 logger = get_logger("summarizer_service")
+
+# Constants
+DEFAULT_MODEL = "t5-small"
+DEFAULT_TIMEOUT = 60
+DEFAULT_MAX_LENGTH = 128
+DEFAULT_BATCH_SIZE = 20
+DEFAULT_VOCAB_SIZE = 32000
 
 
 class SummaryResults(BaseModel):
@@ -51,7 +70,11 @@ class TextSummarizer(BaseNLPService):
             return set()
 
         try:
-            with open(special_tokens_path, "r", encoding="utf-8") as f:
+            from app.utils.path_validator import safe_open
+
+            with safe_open(
+                special_tokens_path, TextSummarizer._root_path, "r", encoding="utf-8"
+            ) as f:
                 data = json.load(f)
 
             tokens = set()
@@ -64,8 +87,6 @@ class TextSummarizer(BaseNLPService):
                     tokens.update(data["additional_special_tokens"])
                 elif isinstance(data["additional_special_tokens"], dict):
                     tokens.update(data["additional_special_tokens"].values())
-
-            logger.debug(f"Loaded special tokens: {tokens}")
             return tokens
         except json.JSONDecodeError as e:
             logger.error(f"JSON decode error in special tokens file: {e}")
@@ -118,9 +139,10 @@ class TextSummarizer(BaseNLPService):
                     model_to_use_path, use_cache=False
                 ),
             )
+        except FileNotFoundError:
+            raise ModelNotFoundError(f"Model not found: {model_to_use_path}")
         except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            return None
+            raise ModelLoadError(f"Failed to load model: {e}")
 
     @staticmethod
     def clear_model_cache():
@@ -131,24 +153,26 @@ class TextSummarizer(BaseNLPService):
         TextSummarizer._special_tokens.clear()
 
     @staticmethod
+    @handle_errors(context="summarization", include_traceback=True)
     def summarize(request: SummarizationRequest) -> SummarizationResponse:
         """Summarize single text."""
         start_time = time.time()
         logger.debug(
-            f"Summarizing text for model: {request.model}, input: {request.input[:100]}"
+            "Summarizing text for model: %s, input: %s",
+            sanitize_for_log(request.model),
+            sanitize_for_log(request.input[:100]),
         )
         response = SummarizationResponse(
             success=True,
             message="Summarization generated successfully",
-            model=request.model or "t5-small",
+            model=request.model or DEFAULT_MODEL,
             results=[],
         )
 
         try:
             import threading
-            import time as time_module
 
-            timeout = getattr(request, "timeout", 60)
+            timeout = getattr(request, "timeout", DEFAULT_TIMEOUT)
             timeout_occurred = [False]
 
             def timeout_handler():
@@ -160,11 +184,9 @@ class TextSummarizer(BaseNLPService):
             try:
                 result = TextSummarizer._summarize_local(request)
                 if timeout_occurred[0]:
-                    response.success = False
-                    response.message = (
+                    raise ProcessingTimeoutError(
                         f"Summarization timed out after {timeout} seconds"
                     )
-                    logger.warning(f"Summarization timeout for model: {request.model}")
                 elif result.success:
                     response.results.append(result.summary)
                     response.message = result.message
@@ -173,10 +195,6 @@ class TextSummarizer(BaseNLPService):
                     response.message = result.message
             finally:
                 timer.cancel()
-        except Exception as e:
-            response.success = False
-            response.message = f"Error generating summarization: {str(e)}"
-            logger.exception("Unexpected error during summarization")
         finally:
             response.time_taken = time.time() - start_time
             return response
@@ -184,109 +202,151 @@ class TextSummarizer(BaseNLPService):
     @staticmethod
     def _summarize_local(request: SummarizationRequest) -> SummaryResults:
         """Core summarization logic."""
-        model_to_use = request.model or "t5-small"
-        result = SummaryResults(summary="", message="", success=True)
+        model_to_use = request.model or DEFAULT_MODEL
 
         try:
             model_config = TextSummarizer._get_model_config(model_to_use)
             if not model_config:
-                result.success = False
-                result.message = f"Failed to load config for model: {model_to_use}"
-                logger.error(result.message)
-                return result
+                raise ModelLoadError(f"Failed to load config for model: {model_to_use}")
 
-            model_to_use_path = os.path.join(
+            model_path, tokenizer = TextSummarizer._prepare_model_resources(
+                model_config, model_to_use
+            )
+
+            if getattr(model_config, "use_seq2seqlm", False):
+                return TextSummarizer._run_seq2seq_summarization(
+                    model_path, tokenizer, model_config, request
+                )
+            else:
+                return TextSummarizer._run_onnx_summarization(
+                    model_path, tokenizer, model_config, request
+                )
+
+        except FileNotFoundError:
+            raise ModelNotFoundError("Model files not accessible")
+        except OSError as e:
+            raise ModelLoadError(f"System error accessing model: {e}")
+        except (ValueError, KeyError) as e:
+            raise InferenceError(f"Invalid model configuration: {e}")
+        except Exception as e:
+            raise InferenceError(f"Error generating summarization: {e}")
+
+    @staticmethod
+    def _prepare_model_resources(
+        model_config: OnnxConfig, model_name: str
+    ) -> tuple[str, Any]:
+        """Prepare model path and tokenizer."""
+        model_path = validate_safe_path(
+            os.path.join(
                 TextSummarizer._root_path,
                 "models",
                 model_config.summarization_task or "s2s",
-                model_to_use,
-            )
-            logger.debug(f"Using model path: {model_to_use_path}")
+                model_name,
+            ),
+            TextSummarizer._root_path,
+        )
+        logger.debug(f"Using model path: {model_path}")
 
-            use_legacy = getattr(model_config, "legacy_tokenizer", False)
-            tokenizer = TextSummarizer._get_tokenizer_threadsafe(
-                model_to_use_path, use_legacy
-            )
-            if not tokenizer:
-                result.success = False
-                result.message = f"Failed to load tokenizer: {model_to_use_path}"
-                logger.error(result.message)
-                return result
+        use_legacy = getattr(model_config, "legacy_tokenizer", False)
+        tokenizer = TextSummarizer._get_tokenizer_threadsafe(model_path, use_legacy)
+        if not tokenizer:
+            raise TokenizerError(f"Failed to load tokenizer: {model_path}")
 
-            if getattr(model_config, "use_seq2seqlm", False):
-                model = TextSummarizer.get_model(model_to_use_path)
-                if not model:
-                    result.success = False
-                    result.message = (
-                        f"Failed to load Seq2SeqLM model: {model_to_use_path}"
-                    )
-                    logger.error(result.message)
-                    return result
+        return model_path, tokenizer
 
-                result = TextSummarizer._summarize_seq2seq(
-                    model, tokenizer, model_config, request
+    @staticmethod
+    def _run_seq2seq_summarization(
+        model_path: str,
+        tokenizer: Any,
+        model_config: OnnxConfig,
+        request: SummarizationRequest,
+    ) -> SummaryResults:
+        """Run Seq2SeqLM summarization."""
+        model = TextSummarizer.get_model(model_path)
+        if not model:
+            raise ModelLoadError(f"Failed to load Seq2SeqLM model: {model_path}")
+
+        return TextSummarizer._summarize_seq2seq(
+            model, tokenizer, model_config, request
+        )
+
+    @staticmethod
+    def _run_onnx_summarization(
+        model_path: str,
+        tokenizer: Any,
+        model_config: OnnxConfig,
+        request: SummarizationRequest,
+    ) -> SummaryResults:
+        """Run ONNX encoder/decoder summarization."""
+        encoder_path, decoder_path = TextSummarizer._get_model_file_paths(
+            model_path, model_config
+        )
+
+        encoder_session = TextSummarizer._get_encoder_session(encoder_path)
+        decoder_session = TextSummarizer._get_decoder_session(decoder_path)
+
+        if not encoder_session or not decoder_session:
+            raise ModelLoadError("Failed to load ONNX sessions")
+
+        special_tokens_path = validate_safe_path(
+            os.path.join(
+                model_path,
+                model_config.special_tokens_map_path or "special_tokens_map.json",
+            ),
+            TextSummarizer._root_path,
+        )
+        special_tokens = TextSummarizer._get_special_tokens(special_tokens_path)
+
+        return TextSummarizer._summarize_onnx(
+            encoder_session,
+            decoder_session,
+            tokenizer,
+            special_tokens,
+            model_config,
+            request,
+        )
+
+    @staticmethod
+    def _get_model_file_paths(
+        model_path: str, model_config: OnnxConfig
+    ) -> tuple[str, str]:
+        """Get encoder and decoder model file paths."""
+        encoder_filename = TextSummarizer._get_model_filename(model_config, "encoder")
+        decoder_filename = TextSummarizer._get_model_filename(model_config, "decoder")
+
+        encoder_path = validate_safe_path(
+            os.path.join(model_path, encoder_filename), TextSummarizer._root_path
+        )
+        decoder_path = validate_safe_path(
+            os.path.join(model_path, decoder_filename), TextSummarizer._root_path
+        )
+
+        logger.debug(f"Encoder path: {encoder_path}, Decoder path: {decoder_path}")
+        return encoder_path, decoder_path
+
+    @staticmethod
+    def _get_model_filename(model_config: OnnxConfig, model_type: str) -> str:
+        """Get model filename based on type and optimization settings."""
+        use_optimized = getattr(model_config, "use_optimized", False)
+
+        if model_type == "encoder":
+            if use_optimized:
+                return getattr(
+                    model_config,
+                    "encoder_optimized_onnx_model",
+                    "encoder_model_optimized.onnx",
                 )
             else:
-                use_optimized = getattr(model_config, "use_optimized", False)
-                if use_optimized:
-                    encoder_filename = getattr(
-                        model_config,
-                        "encoder_optimized_onnx_model",
-                        "encoder_model_optimized.onnx",
-                    )
-                    decoder_filename = getattr(
-                        model_config,
-                        "decoder_optimized_onnx_model",
-                        "decoder_model_optimized.onnx",
-                    )
-                else:
-                    encoder_filename = (
-                        model_config.encoder_onnx_model or "encoder_model.onnx"
-                    )
-                    decoder_filename = (
-                        model_config.decoder_onnx_model or "decoder_model.onnx"
-                    )
-
-                encoder_model_path = os.path.join(model_to_use_path, encoder_filename)
-                decoder_model_path = os.path.join(model_to_use_path, decoder_filename)
-                logger.debug(
-                    f"Encoder path: {encoder_model_path}, Decoder path: {decoder_model_path}"
-                )
-
-                encoder_session = TextSummarizer._get_encoder_session(
-                    encoder_model_path
-                )
-                decoder_session = TextSummarizer._get_decoder_session(
-                    decoder_model_path
-                )
-
-                if not encoder_session or not decoder_session:
-                    result.success = False
-                    result.message = "Failed to load ONNX sessions"
-                    logger.error(result.message)
-                    return result
-
-                special_tokens_path = os.path.join(
-                    model_to_use_path,
-                    model_config.special_tokens_map_path or "special_tokens_map.json",
-                )
-                special_tokens = TextSummarizer._get_special_tokens(special_tokens_path)
-
-                result = TextSummarizer._summarize_onnx(
-                    encoder_session,
-                    decoder_session,
-                    tokenizer,
-                    special_tokens,
+                return model_config.encoder_onnx_model or "encoder_model.onnx"
+        else:  # decoder
+            if use_optimized:
+                return getattr(
                     model_config,
-                    request,
+                    "decoder_optimized_onnx_model",
+                    "decoder_model_optimized.onnx",
                 )
-
-        except Exception as e:
-            result.success = False
-            result.message = f"Error generating summarization: {str(e)}"
-            logger.exception("Unexpected error during summarization")
-
-        return result
+            else:
+                return model_config.decoder_onnx_model or "decoder_model.onnx"
 
     @staticmethod
     def _summarize_seq2seq(
@@ -296,72 +356,108 @@ class TextSummarizer(BaseNLPService):
         request: SummarizationRequest,
     ) -> SummaryResults:
         """Summarize using Seq2SeqLM model."""
-        result = SummaryResults(summary="", message="", success=True)
-
         try:
-            # Prepare generation parameters
-            generate_kwargs = {}
-
-            # Basic parameters
-            max_length = getattr(model_config, "max_length", 128)
-            if max_length:
-                generate_kwargs["max_length"] = max_length
-
-            min_length = getattr(model_config, "min_length", 0)
-            if min_length:
-                generate_kwargs["min_length"] = min_length
-
-            num_beams = getattr(model_config, "num_beams", 1)
-            if num_beams > 1:
-                generate_kwargs["num_beams"] = num_beams
-
-            if getattr(model_config, "early_stopping", False):
-                generate_kwargs["early_stopping"] = True
-
-            # Additional generation parameters (improvement)
-            for param in [
-                "repetition_penalty",
-                "length_penalty",
-                "top_k",
-                "top_p",
-                "no_repeat_ngram_size",
-            ]:
-                value = getattr(model_config, param, None)
-                if value is not None:
-                    generate_kwargs[param] = value
-
-            # Temperature handling
-            temperature = request.temperature or getattr(
-                model_config, "temperature", 0.0
+            generate_kwargs = TextSummarizer._build_generation_params(
+                model_config, request
             )
-            if temperature > 0.0:
-                generate_kwargs["temperature"] = temperature
-                generate_kwargs["do_sample"] = True
-
-            logger.debug(f"Generation parameters: {generate_kwargs}")
-
-            # Tokenize input
-            input_text = TextSummarizer._prepend_text(
-                request.input, getattr(model_config, "prepend_text", None)
-            )
-            logger.debug(f"Input text for summarization: {input_text[:100]}")
+            input_text = TextSummarizer._prepare_input_text(request, model_config)
             inputs = tokenizer(input_text, return_tensors="pt")
 
-            # Generate summary
             summary_ids = model.generate(**inputs, **generate_kwargs)
-            logger.debug(f"Generated token IDs: {summary_ids.tolist()}")
             summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True).strip()
             summary = TextSummarizer._capitalize_sentences(summary)
-            result.summary = summary
+
             if not summary:
                 logger.warning(f"Empty summary generated for input: {input_text[:100]}")
 
+            return SummaryResults(summary=summary, message="", success=True)
+
         except Exception as e:
             logger.exception("Seq2SeqLM summarization failed")
-            result.success = False
-            result.message = f"Error generating summarization: {str(e)}"
+            return SummaryResults(
+                summary="",
+                message=f"Error generating summarization: {str(e)}",
+                success=False,
+            )
 
-        return result
+    @staticmethod
+    def _build_generation_params(
+        model_config: OnnxConfig, request: SummarizationRequest
+    ) -> Dict[str, Any]:
+        """Build generation parameters for model."""
+        generate_kwargs = {}
+
+        # Basic parameters
+        TextSummarizer._add_basic_params(generate_kwargs, model_config)
+        TextSummarizer._add_beam_params(generate_kwargs, model_config)
+        TextSummarizer._add_optional_params(generate_kwargs, model_config)
+        TextSummarizer._add_temperature_params(generate_kwargs, model_config, request)
+
+        logger.debug(f"Generation parameters: {generate_kwargs}")
+        return generate_kwargs
+
+    @staticmethod
+    def _add_basic_params(
+        generate_kwargs: Dict[str, Any], model_config: OnnxConfig
+    ) -> None:
+        """Add basic generation parameters."""
+        for param, default in [("max_length", DEFAULT_MAX_LENGTH), ("min_length", 0)]:
+            value = getattr(model_config, param, default)
+            if value:
+                generate_kwargs[param] = value
+
+    @staticmethod
+    def _add_beam_params(
+        generate_kwargs: Dict[str, Any], model_config: OnnxConfig
+    ) -> None:
+        """Add beam search parameters."""
+        num_beams = getattr(model_config, "num_beams", 1)
+        if num_beams > 1:
+            generate_kwargs["num_beams"] = num_beams
+        if getattr(model_config, "early_stopping", False):
+            generate_kwargs["early_stopping"] = True
+
+    @staticmethod
+    def _add_optional_params(
+        generate_kwargs: Dict[str, Any], model_config: OnnxConfig
+    ) -> None:
+        """Add optional generation parameters."""
+        for param in [
+            "repetition_penalty",
+            "length_penalty",
+            "top_k",
+            "top_p",
+            "no_repeat_ngram_size",
+        ]:
+            value = getattr(model_config, param, None)
+            if value is not None:
+                generate_kwargs[param] = value
+
+    @staticmethod
+    def _add_temperature_params(
+        generate_kwargs: Dict[str, Any],
+        model_config: OnnxConfig,
+        request: SummarizationRequest,
+    ) -> None:
+        """Add temperature and sampling parameters."""
+        temperature = request.temperature or getattr(model_config, "temperature", 0.0)
+        if temperature > 0.0:
+            generate_kwargs["temperature"] = temperature
+            generate_kwargs["do_sample"] = True
+
+    @staticmethod
+    def _prepare_input_text(
+        request: SummarizationRequest, model_config: OnnxConfig
+    ) -> str:
+        """Prepare input text for summarization."""
+        input_text = TextSummarizer._prepend_text(
+            request.input, getattr(model_config, "prepend_text", None)
+        )
+        logger.debug(
+            "Input text for summarization: %s",
+            sanitize_for_log(str(input_text[:100])),
+        )
+        return input_text
 
     @staticmethod
     def _summarize_onnx(
@@ -373,173 +469,214 @@ class TextSummarizer(BaseNLPService):
         request: SummarizationRequest,
     ) -> SummaryResults:
         """Summarize using ONNX encoder/decoder sessions."""
-        result = SummaryResults(summary="", message="", success=True)
-
         try:
-            # Get token IDs from config or tokenizer
-            pad_token_id = getattr(
-                model_config, "pad_token_id", getattr(tokenizer, "pad_token_id", 0)
-            )
-            eos_token_id = getattr(
-                model_config, "eos_token_id", getattr(tokenizer, "eos_token_id", 1)
-            )
-            max_length = getattr(model_config, "max_length", 128)
+            token_config = TextSummarizer._get_token_config(model_config, tokenizer)
+            input_text = TextSummarizer._prepare_input_text(request, model_config)
 
-            # Get decoder start token properly
-            decoder_start_token_id = getattr(
-                model_config, "decoder_start_token_id", None
-            )
-            if decoder_start_token_id is None:
-                # Use tokenizer's decoder start token if available
-                if (
-                    hasattr(tokenizer, "decoder_start_token_id")
-                    and tokenizer.decoder_start_token_id is not None
-                ):
-                    decoder_start_token_id = tokenizer.decoder_start_token_id
-                elif (
-                    hasattr(tokenizer, "bos_token_id")
-                    and tokenizer.bos_token_id is not None
-                ):
-                    decoder_start_token_id = tokenizer.bos_token_id
-                else:
-                    decoder_start_token_id = pad_token_id
-
-            # Tokenize input
-            input_text = TextSummarizer._prepend_text(
-                request.input, getattr(model_config, "prepend_text", None)
-            )
-            logger.debug(f"Input text for ONNX summarization: {input_text[:100]}")
+            # Tokenize and run encoder
             inputs = tokenizer(
-                input_text, return_tensors="np", truncation=True, max_length=max_length
+                input_text,
+                return_tensors="np",
+                truncation=True,
+                max_length=token_config["max_length"],
+            )
+            encoder_outputs = TextSummarizer._run_encoder(
+                encoder_session, inputs, model_config
             )
 
-            # Prepare encoder inputs with correct data types
-            input_names = model_config.inputnames
-            onnx_inputs = {
-                getattr(input_names, "input", "input_ids"): inputs["input_ids"].astype(
-                    np.int64
-                )
-            }
-
-            if "attention_mask" in inputs:
-                onnx_inputs[getattr(input_names, "mask", "attention_mask")] = inputs[
-                    "attention_mask"
-                ].astype(np.int64)
-
-            # Run encoder
-            encoder_outputs = encoder_session.run(None, onnx_inputs)
-            logger.debug(
-                f"Encoder outputs shapes: {[arr.shape for arr in encoder_outputs]}"
+            # Generate tokens
+            summary_ids = TextSummarizer._generate_tokens(
+                decoder_session,
+                encoder_outputs,
+                inputs,
+                token_config,
+                model_config,
+                request,
             )
 
-            # Prepare decoder inputs
-            decoder_input_names = model_config.decoder_inputnames
-            decoder_input_ids = np.array([[decoder_start_token_id]], dtype=np.int64)
-
-            # Generate tokens with proper logits handling
-            temperature = request.temperature or getattr(
-                model_config, "temperature", 0.0
+            # Decode and process summary
+            summary = TextSummarizer._decode_summary(
+                summary_ids, tokenizer, special_tokens, input_text
             )
-            summary_ids = []
-
-            # Add step timeout for ONNX generation
-            step_start = time.time()
-            step_timeout = (
-                getattr(request, "timeout", 60) / max_length
-            )  # Distribute timeout across steps
-
-            for step in range(max_length):
-                # Check step timeout
-                if time.time() - step_start > step_timeout * (step + 1):
-                    logger.warning(f"ONNX generation step timeout at step {step}")
-                    break
-                decoder_inputs = {
-                    getattr(
-                        decoder_input_names, "encoder_output", "encoder_hidden_states"
-                    ): encoder_outputs[0],
-                    getattr(
-                        decoder_input_names, "input", "input_ids"
-                    ): decoder_input_ids,
-                }
-
-                if "attention_mask" in inputs:
-                    decoder_inputs[
-                        getattr(decoder_input_names, "mask", "encoder_attention_mask")
-                    ] = inputs["attention_mask"].astype(np.int64)
-
-                try:
-                    decoder_outputs = decoder_session.run(None, decoder_inputs)
-                except Exception as e:
-                    logger.error(f"Decoder inference error: {e}")
-                    break
-
-                # Get logits and apply temperature
-                logits_arr = decoder_outputs[0]
-                logger.debug(f"Decoder output shape: {logits_arr.shape}")
-                if logits_arr.ndim == 3:
-                    logits = logits_arr[:, -1, :][0]  # (batch, seq, vocab)
-                elif logits_arr.ndim == 2:
-                    logits = logits_arr[-1, :]  # (seq, vocab)
-                else:
-                    logits = logits_arr  # (vocab,)
-
-                if temperature > 0.0:
-                    probs = TextSummarizer._softmax(logits / temperature)
-                    next_token_id = int(np.random.choice(len(probs), p=probs))
-                else:
-                    next_token_id = int(np.argmax(logits))
-
-                # Validate token ID
-                vocab_size = getattr(tokenizer, "vocab_size", 32000)
-                if next_token_id < 0 or next_token_id >= vocab_size:
-                    logger.warning(f"Invalid token ID generated: {next_token_id}")
-                    break
-
-                summary_ids.append(next_token_id)
-
-                if next_token_id == eos_token_id:
-                    logger.debug("EOS token reached")
-                    break
-
-                # Update decoder input for next iteration
-                decoder_input_ids = np.concatenate(
-                    [decoder_input_ids, [[next_token_id]]], axis=1
-                )
-
-            # Decode summary
-            if summary_ids:
-                logger.debug(f"Generated token IDs: {summary_ids}")
-                summary = tokenizer.decode(summary_ids, skip_special_tokens=True)
-                summary = TextSummarizer._remove_special_tokens(summary, special_tokens)
-                summary = TextSummarizer._capitalize_sentences(summary)
-                result.summary = summary
-                if not summary:
-                    logger.warning(
-                        f"Empty summary generated for input: {input_text[:100]}"
-                    )
-            else:
-                logger.warning("No valid tokens generated")
-                result.summary = ""
+            return SummaryResults(summary=summary, message="", success=True)
 
         except Exception as e:
             logger.exception("ONNX summarization failed")
-            result.success = False
-            result.message = f"Error generating summarization: {str(e)}"
+            return SummaryResults(
+                summary="",
+                message=f"Error generating summarization: {str(e)}",
+                success=False,
+            )
 
-        return result
+    @staticmethod
+    def _get_token_config(model_config: OnnxConfig, tokenizer: Any) -> Dict[str, int]:
+        """Get token configuration for ONNX inference."""
+        pad_token_id = getattr(
+            model_config, "pad_token_id", getattr(tokenizer, "pad_token_id", 0)
+        )
+        eos_token_id = getattr(
+            model_config, "eos_token_id", getattr(tokenizer, "eos_token_id", 1)
+        )
+        max_length = getattr(model_config, "max_length", DEFAULT_MAX_LENGTH)
+
+        # Get decoder start token
+        decoder_start_token_id = (
+            getattr(model_config, "decoder_start_token_id", None)
+            or getattr(tokenizer, "decoder_start_token_id", None)
+            or getattr(tokenizer, "bos_token_id", None)
+            or pad_token_id
+        )
+
+        return {
+            "pad_token_id": pad_token_id,
+            "eos_token_id": eos_token_id,
+            "decoder_start_token_id": decoder_start_token_id,
+            "max_length": max_length,
+        }
+
+    @staticmethod
+    def _run_encoder(
+        encoder_session: ort.InferenceSession, inputs: Dict, model_config: OnnxConfig
+    ) -> Any:
+        """Run encoder inference."""
+        input_names = model_config.inputnames
+        onnx_inputs = {
+            getattr(input_names, "input", "input_ids"): inputs["input_ids"].astype(
+                np.int64
+            )
+        }
+
+        if "attention_mask" in inputs:
+            onnx_inputs[getattr(input_names, "mask", "attention_mask")] = inputs[
+                "attention_mask"
+            ].astype(np.int64)
+
+        return encoder_session.run(None, onnx_inputs)
+
+    @staticmethod
+    def _generate_tokens(
+        decoder_session: ort.InferenceSession,
+        encoder_outputs: Any,
+        inputs: Dict,
+        token_config: Dict[str, int],
+        model_config: OnnxConfig,
+        request: SummarizationRequest,
+    ) -> list[int]:
+        """Generate tokens using decoder."""
+        decoder_input_names = model_config.decoder_inputnames
+        decoder_input_ids = np.array(
+            [[token_config["decoder_start_token_id"]]], dtype=np.int64
+        )
+        temperature = request.temperature or getattr(model_config, "temperature", 0.0)
+        summary_ids = []
+
+        step_start = time.time()
+        step_timeout = (
+            getattr(request, "timeout", DEFAULT_TIMEOUT) / token_config["max_length"]
+        )
+
+        for step in range(token_config["max_length"]):
+            if time.time() - step_start > step_timeout * (step + 1):
+                logger.warning(f"ONNX generation step timeout at step {step}")
+                break
+
+            decoder_inputs = {
+                getattr(
+                    decoder_input_names, "encoder_output", "encoder_hidden_states"
+                ): encoder_outputs[0],
+                getattr(decoder_input_names, "input", "input_ids"): decoder_input_ids,
+            }
+
+            if "attention_mask" in inputs:
+                decoder_inputs[
+                    getattr(decoder_input_names, "mask", "encoder_attention_mask")
+                ] = inputs["attention_mask"].astype(np.int64)
+
+            try:
+                decoder_outputs = decoder_session.run(None, decoder_inputs)
+            except Exception as e:
+                logger.error(f"Decoder inference error: {e}")
+                break
+
+            next_token_id = TextSummarizer._sample_next_token(
+                decoder_outputs[0], temperature
+            )
+
+            # Validate token ID
+            vocab_size = getattr(model_config, "vocab_size", DEFAULT_VOCAB_SIZE)
+            if next_token_id < 0 or next_token_id >= vocab_size:
+                logger.warning(f"Invalid token ID generated: {next_token_id}")
+                break
+
+            summary_ids.append(next_token_id)
+
+            if next_token_id == token_config["eos_token_id"]:
+                logger.debug("EOS token reached")
+                break
+
+            decoder_input_ids = np.concatenate(
+                [decoder_input_ids, [[next_token_id]]], axis=1
+            )
+
+        return summary_ids
+
+    @staticmethod
+    def _sample_next_token(logits_arr: ndarray, temperature: float) -> int:
+        """Sample next token from logits."""
+        if logits_arr.ndim == 3:
+            logits = logits_arr[:, -1, :][0]
+        elif logits_arr.ndim == 2:
+            logits = logits_arr[-1, :]
+        else:
+            logits = logits_arr
+
+        if temperature > 0.0:
+            probs = TextSummarizer._softmax(logits / temperature)
+            return int(np.random.choice(len(probs), p=probs))
+        else:
+            return int(np.argmax(logits))
+
+    @staticmethod
+    def _decode_summary(
+        summary_ids: list[int],
+        tokenizer: Any,
+        special_tokens: Set[str],
+        input_text: str,
+    ) -> str:
+        """Decode and process summary."""
+        if not summary_ids:
+            logger.warning("No valid tokens generated")
+            return ""
+
+        summary = tokenizer.decode(summary_ids, skip_special_tokens=True)
+        summary = TextSummarizer._remove_special_tokens(summary, special_tokens)
+        summary = TextSummarizer._capitalize_sentences(summary)
+
+        if not summary:
+            logger.warning(f"Empty summary generated for input: {input_text[:100]}")
+
+        return summary
 
     @staticmethod
     def _remove_special_tokens(text: str, special_tokens: Set[str]) -> str:
-        """Remove special tokens from text."""
+        """Remove special tokens from text using regex for batch removal."""
         import re
 
-        removed = []
-        for token in special_tokens:
-            if token in text:
-                removed.append(token)
-                text = text.replace(token, " ")
-        if removed:
-            logger.debug(f"Removed special tokens: {removed}")
+        if not special_tokens or not text:
+            return text
+
+        # Escape special regex characters and create pattern
+        escaped_tokens = [re.escape(token) for token in special_tokens if token]
+        if not escaped_tokens:
+            return text
+
+        pattern = "|".join(escaped_tokens)
+        original_text = text
+        text = re.sub(pattern, " ", text)
+
+        if text != original_text:
+            logger.debug(f"Removed special tokens using pattern: {pattern}")
+
         # Clean up extra spaces
         text = re.sub(r"\s+", " ", text)
         return text.strip()
@@ -568,7 +705,9 @@ class TextSummarizer(BaseNLPService):
         """Asynchronous batch summarization with partial success reporting."""
         start_time = time.time()
         logger.debug(
-            f"Batch summarization for model: {request.model}, batch size: {len(request.inputs)}"
+            "Batch summarization for model: %s, batch size: %d",
+            sanitize_for_log(request.model),
+            len(request.inputs),
         )
         response = SummarizationResponse(
             success=True,
@@ -579,23 +718,30 @@ class TextSummarizer(BaseNLPService):
 
         try:
             # Validate batch size
-            BatchLimiter.validate_batch_size(request.inputs, max_size=20)
+            BatchLimiter.validate_batch_size(
+                request.inputs, max_size=DEFAULT_BATCH_SIZE
+            )
 
-            loop = asyncio.get_event_loop()
-            tasks = [
-                loop.run_in_executor(
-                    None,
-                    TextSummarizer._summarize_local,
-                    SummarizationRequest(
-                        model=request.model,
-                        input=text,
-                        temperature=getattr(request, "temperature", None),
-                    ),
-                )
-                for text in request.inputs
-            ]
+            loop = get_event_loop()
+            try:
+                tasks = [
+                    loop.run_in_executor(
+                        None,
+                        TextSummarizer._summarize_local,
+                        SummarizationRequest(
+                            model=request.model,
+                            input=text,
+                            temperature=getattr(request, "temperature", None),
+                        ),
+                    )
+                    for text in request.inputs
+                ]
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+                results = await gather(*tasks, return_exceptions=True)
+            finally:
+                # Don't close the running event loop - it's managed by FastAPI
+                pass
+
             for idx, result in enumerate(results):
                 if isinstance(result, Exception) or (result and not result.success):
                     logger.error(
@@ -606,6 +752,14 @@ class TextSummarizer(BaseNLPService):
                 else:
                     response.results.append(result.summary)
 
+        except (ValueError, TypeError) as e:
+            response.success = False
+            response.message = "Invalid batch request parameters"
+            logger.error("Batch validation error: %s", str(e))
+        except (AsyncTimeoutError, TimeoutError) as e:
+            response.success = False
+            response.message = "Batch summarization timed out"
+            logger.error("Batch timeout: %s", str(e))
         except Exception as e:
             response.success = False
             response.message = f"Error generating summarization: {str(e)}"
@@ -617,6 +771,4 @@ class TextSummarizer(BaseNLPService):
     @classmethod
     def summarize_batch(cls, request):
         """Backward compatibility for tests."""
-        import asyncio
-
-        return asyncio.run(cls.summarize_batch_async(request))
+        return run(cls.summarize_batch_async(request))

@@ -6,7 +6,9 @@
 
 from typing import Iterator, List, TypeVar
 
+from app.exceptions import BatchSizeError
 from app.logger import get_logger
+from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("batch_limiter")
 
@@ -21,7 +23,9 @@ class BatchLimiter:
         """Split large batch into smaller chunks."""
         if len(items) > max_batch_size:
             logger.warning(
-                f"Large batch size {len(items)} split into chunks of {max_batch_size}"
+                "Large batch size %d split into chunks of %d",
+                len(items),
+                max_batch_size,
             )
 
         for i in range(0, len(items), max_batch_size):
@@ -31,7 +35,7 @@ class BatchLimiter:
     def validate_batch_size(items: List[T], max_size: int = 50) -> None:
         """Validate batch size doesn't exceed limits."""
         if len(items) > max_size:
-            raise ValueError(f"Batch size {len(items)} exceeds maximum {max_size}")
+            raise BatchSizeError(f"Batch size {len(items)} exceeds maximum {max_size}")
 
     @staticmethod
     def estimate_memory_usage(items: List[str], avg_tokens_per_item: int = 100) -> int:

@@ -6,13 +6,16 @@
 
 import time
 from collections import defaultdict, deque
-from typing import Deque, Dict
+from typing import Deque, Dict, Tuple
 
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from app.exceptions import RateLimitExceededError
 from app.logger import get_logger
+from app.utils.log_sanitizer import sanitize_for_log
+from app.utils.performance_tracker import perf_tracker
 
 logger = get_logger("rate_limit")
 
@@ -26,13 +29,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         requests_per_minute: int = 60,
         requests_per_hour: int = 1000,
         cleanup_interval: int = 300,
+        max_deque_size: int = 2000,
     ):
         super().__init__(app)
         self.requests_per_minute = requests_per_minute
         self.requests_per_hour = requests_per_hour
+        self.max_deque_size = max_deque_size
 
-        # Store request timestamps per IP
-        self.request_history: Dict[str, Deque[float]] = defaultdict(deque)
+        # Store request timestamps per IP with size limits
+        self.request_history: Dict[str, Deque[float]] = defaultdict(
+            lambda: deque(maxlen=self.max_deque_size)
+        )
 
         # Cleanup interval
         self.last_cleanup = time.time()
@@ -50,7 +57,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return real_ip
 
         # Fallback to client host
-        return request.client.host if request.client else "unknown"
+        try:
+            return request.client.host if request.client else "unknown"
+        except AttributeError:
+            return "unknown"
 
     def cleanup_old_requests(self) -> None:
         """Remove old request records to prevent memory leaks."""
@@ -60,50 +70,68 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return
 
         cutoff_time = current_time - 3600  # 1 hour ago
+        ips_to_remove = []
 
-        for ip, timestamps in list(self.request_history.items()):
+        # Batch cleanup operations
+        for ip, timestamps in self.request_history.items():
             # Remove timestamps older than 1 hour
             while timestamps and timestamps[0] < cutoff_time:
                 timestamps.popleft()
 
-            # Remove empty entries
+            # Mark empty entries for removal
             if not timestamps:
-                del self.request_history[ip]
+                ips_to_remove.append(ip)
+
+        # Remove empty entries in batch
+        for ip in ips_to_remove:
+            del self.request_history[ip]
 
         self.last_cleanup = current_time
-        logger.debug(
-            f"Cleaned up rate limit history, {len(self.request_history)} IPs remaining"
-        )
+        if ips_to_remove:
+            logger.debug(
+                f"Cleaned up {len(ips_to_remove)} empty IPs, {len(self.request_history)} IPs remaining"
+            )
 
-    def is_rate_limited(self, ip: str) -> tuple[bool, str]:
-        """Check if IP is rate limited."""
-        current_time = time.time()
+    def is_rate_limited(
+        self, ip: str, current_time: float
+    ) -> Tuple[bool, str, int, int]:
+        """Check if IP is rate limited. Returns (is_limited, message, minute_count, hour_count)."""
         timestamps = self.request_history[ip]
 
-        # Remove old timestamps
-        minute_ago = current_time - 60
+        # Remove old timestamps in one pass
         hour_ago = current_time - 3600
-
         while timestamps and timestamps[0] < hour_ago:
             timestamps.popleft()
 
-        # Count requests in last minute and hour
-        minute_requests = sum(1 for t in timestamps if t > minute_ago)
-        hour_requests = len(timestamps)
+        # Count requests efficiently using binary search approach
+        minute_ago = current_time - 60
+        hour_count = len(timestamps)
 
-        if minute_requests >= self.requests_per_minute:
+        # Count minute requests by iterating from the end (most recent)
+        minute_count = 0
+        for i in range(len(timestamps) - 1, -1, -1):
+            if timestamps[i] > minute_ago:
+                minute_count += 1
+            else:
+                break
+
+        if minute_count >= self.requests_per_minute:
             return (
                 True,
-                f"Rate limit exceeded: {minute_requests}/{self.requests_per_minute} requests per minute",
+                f"Rate limit exceeded: {minute_count}/{self.requests_per_minute} requests per minute",
+                minute_count,
+                hour_count,
             )
 
-        if hour_requests >= self.requests_per_hour:
+        if hour_count >= self.requests_per_hour:
             return (
                 True,
-                f"Rate limit exceeded: {hour_requests}/{self.requests_per_hour} requests per hour",
+                f"Rate limit exceeded: {hour_count}/{self.requests_per_hour} requests per hour",
+                minute_count,
+                hour_count,
             )
 
-        return False, ""
+        return False, "", minute_count, hour_count
 
     async def dispatch(self, request: Request, call_next) -> Response:
         """Process request with rate limiting."""
@@ -122,47 +150,50 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ):
             return await call_next(request)
 
-        # Periodic cleanup
-        self.cleanup_old_requests()
+        # Periodic cleanup (only if needed) with performance tracking
+        if time.time() - self.last_cleanup >= self.cleanup_interval:
+            with perf_tracker.track("rate_limit_cleanup"):
+                self.cleanup_old_requests()
 
-        # Get client IP
+        # Get client IP and current time once
         client_ip = self.get_client_ip(request)
+        current_time = time.time()
 
-        # Check rate limit
-        is_limited, message = self.is_rate_limited(client_ip)
-
-        if is_limited:
-            logger.warning(f"Rate limit exceeded for IP {client_ip}: {message}")
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "success": False,
-                    "error_code": "RATE_LIMIT_EXCEEDED",
-                    "message": message,
-                    "retry_after_seconds": 60,
-                    "timestamp": current_time,
-                },
+        # Check rate limit with optimized counting and performance tracking
+        with perf_tracker.track("rate_limit_check"):
+            is_limited, message, minute_count, hour_count = self.is_rate_limited(
+                client_ip, current_time
             )
 
+        if is_limited:
+            logger.warning(
+                "Rate limit exceeded for IP %s: %s",
+                sanitize_for_log(client_ip),
+                sanitize_for_log(message),
+            )
+            raise RateLimitExceededError(message)
+
         # Record this request
-        current_time = time.time()
-        self.request_history[client_ip].append(current_time)
+        timestamps = self.request_history[client_ip]
+        timestamps.append(current_time)
+
+        # Ensure deque doesn't exceed size limit
+        if len(timestamps) > self.max_deque_size:
+            timestamps.popleft()
 
         # Process request
         response = await call_next(request)
 
-        # Add rate limit headers
-        timestamps = self.request_history[client_ip]
-        minute_ago = current_time - 60
-        minute_requests = sum(1 for t in timestamps if t > minute_ago)
-
+        # Add rate limit headers using pre-calculated counts
         response.headers["X-RateLimit-Limit-Minute"] = str(self.requests_per_minute)
         response.headers["X-RateLimit-Remaining-Minute"] = str(
-            max(0, self.requests_per_minute - minute_requests)
+            max(
+                0, self.requests_per_minute - minute_count - 1
+            )  # -1 for current request
         )
         response.headers["X-RateLimit-Limit-Hour"] = str(self.requests_per_hour)
         response.headers["X-RateLimit-Remaining-Hour"] = str(
-            max(0, self.requests_per_hour - len(timestamps))
+            max(0, self.requests_per_hour - hour_count - 1)  # -1 for current request
         )
 
         return response

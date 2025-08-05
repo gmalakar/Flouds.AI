@@ -11,7 +11,9 @@ from typing import Any, Dict, Optional
 
 import psutil
 
+from app.exceptions import InsufficientMemoryError, ResourceException
 from app.logger import get_logger
+from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("performance_monitor")
 
@@ -36,9 +38,15 @@ class PerformanceMonitor:
                 "cpu": {"percent": cpu_percent, "count": psutil.cpu_count()},
                 "timestamp": time.time(),
             }
-        except Exception as e:
-            logger.error(f"Failed to get system metrics: {e}")
+        except (PermissionError, OSError) as e:
+            logger.error("System access denied for metrics: %s", str(e))
             return {}
+        except (AttributeError, ImportError) as e:
+            logger.error("System monitoring unavailable: %s", str(e))
+            return {}
+        except Exception as e:
+            logger.error("Failed to get system metrics: %s", str(e))
+            raise ResourceException(f"System metrics collection failed: {e}")
 
     @staticmethod
     @contextmanager
@@ -57,9 +65,10 @@ class PerformanceMonitor:
             memory_delta = end_memory - start_memory
 
             logger.info(
-                f"Performance [{operation_name}]: "
-                f"Duration={duration:.3f}s, "
-                f"Memory_Delta={memory_delta:.2f}MB"
+                "Performance [%s]: Duration=%.3fs, Memory_Delta=%.2fMB",
+                sanitize_for_log(operation_name),
+                duration,
+                memory_delta,
             )
 
     @staticmethod
@@ -107,6 +116,9 @@ class PerformanceMonitor:
                 "cpu_exceeded": cpu_exceeded,
                 "healthy": not (memory_exceeded or cpu_exceeded),
             }
-        except Exception as e:
-            logger.error(f"Failed to check resource thresholds: {e}")
+        except (PermissionError, OSError) as e:
+            logger.error("System access denied for threshold check: %s", str(e))
             return {"memory_exceeded": False, "cpu_exceeded": False, "healthy": True}
+        except Exception as e:
+            logger.error("Failed to check resource thresholds: %s", str(e))
+            raise InsufficientMemoryError(f"Resource threshold check failed: {e}")
