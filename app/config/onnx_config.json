@@ -10,9 +10,11 @@
         "legacy_tokenizer": false,
         "lowercase": false,
         "remove_emojis": false,
+        "force_pooling": true,        
         "inputnames": {
             "input": "input_ids",
-            "mask": "attention_mask"
+            "mask": "attention_mask",
+            "tokentype": "token_type_ids"
         },
         "outputnames": {
             "output": "last_hidden_state"
@@ -31,6 +33,7 @@
         "chunk_overlap": 1,
         "lowercase": false,
         "remove_emojis": false,
+        "force_pooling": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask"
@@ -52,6 +55,7 @@
         "chunk_overlap": 0,
         "lowercase": false,
         "remove_emojis": false,
+        "force_pooling": false,
         "inputnames": {
             "input": "input_ids",
             "position": "position_ids",
@@ -73,6 +77,7 @@
         "legacy_tokenizer": true,
         "lowercase": false,
         "remove_emojis": false,
+        "force_pooling": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask",
@@ -98,6 +103,7 @@
         "legacy_tokenizer": true,
         "lowercase": false,
         "remove_emojis": false,
+        "force_pooling": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask"
@@ -132,6 +138,7 @@
         "chunk_overlap": 0,
         "lowercase": false,
         "remove_emojis": false,
+        "force_pooling": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask"
@@ -166,6 +173,7 @@
         "chunk_overlap": 1,
         "lowercase": false,
         "remove_emojis": false,
+        "force_pooling": false,
         "inputnames": {
             "input": "input_ids",
             "mask": "attention_mask"
@@ -186,5 +194,27 @@
         "early_stopping": true,
         "use_seq2seqlm": true,
         "prepend_text": ""
+    },
+    "all-mpnet-base-v2": {
+        "dimension": 768,
+        "max_length": 384,
+        "embedder_task": "fe",
+        "normalize": true,
+        "pooling_strategy": "mean",
+        "chunk_logic": "sentence",
+        "chunk_overlap": 1,
+        "legacy_tokenizer": false,
+        "lowercase": true,
+        "remove_emojis": true,
+        "force_pooling": true,
+        "inputnames": {
+            "input": "input_ids",
+            "mask": "attention_mask"
+        },
+        "outputnames": {
+            "output": "last_hidden_state"
+        },
+        "encoder_onnx_model": "model.onnx",
+        "use_optimized": false
     }
 }

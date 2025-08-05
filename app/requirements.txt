@@ -1,6 +1,7 @@
 # Core FastAPI and server
-fastapi>=0.104.1
+fastapi>=0.116.1
 uvicorn[standard]>=0.24.0
+python-multipart>=0.0.7
 
 # ML and ONNX dependencies (strict for compatibility)
 optimum[onnxruntime]>=1.16.0,<1.18.0
@@ -10,7 +11,7 @@ numpy>=1.24.4,<2.0.0
 
 # Data validation and processing
 pydantic>=2.5.0
-nltk>=3.7
+nltk>=3.9
 
 # System monitoring
 psutil>=5.9.6
@@ -19,7 +20,7 @@ psutil>=5.9.6
 python-dotenv>=1.0.0
 
 # Cryptography for key encryption
-cryptography>=41.0.0
+cryptography>=42.0.0
 
 # Lightweight database
 tinydb>=4.8.0

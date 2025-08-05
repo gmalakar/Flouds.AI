@@ -39,13 +39,6 @@ class OnnxConfigSection(BaseModel):
     enable_optimizations: bool = Field(default=True)
 
 
-class LoggingConfig(BaseModel):
-    level: str = Field(default="INFO")
-    max_file_size: int = Field(default=10485760)
-    backup_count: int = Field(default=5)
-    format: str = Field(default="%(asctime)s %(levelname)s %(name)s: %(message)s")
-
-
 class RateLimitConfig(BaseModel):
     enabled: bool = Field(default=True)
     requests_per_minute: int = Field(default=200)
@@ -68,7 +61,7 @@ class AppSettings(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     onnx: OnnxConfigSection = Field(default_factory=OnnxConfigSection)
-    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+
     rate_limiting: RateLimitConfig = Field(default_factory=RateLimitConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)

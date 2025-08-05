@@ -8,20 +8,25 @@ import os
 import threading
 from typing import Any, Optional
 
-import numpy as np
 import onnxruntime as ort
+from numpy import ndarray
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
 from app.app_init import APP_SETTINGS
 from app.config.config_loader import ConfigLoader
+from app.exceptions import InvalidConfigError, ModelLoadError, TokenizerError
 from app.logger import get_logger
 from app.modules.concurrent_dict import ConcurrentDict
-from app.utils.model_cache import LRUModelCache
+from app.utils.log_sanitizer import sanitize_for_log
+from app.utils.simple_cache import SimpleCache
 
 logger = get_logger("base_nlp_service")
 
 # Thread-local storage for tokenizers
 _tokenizer_local = threading.local()
+
+# Model configuration cache
+_model_config_cache = SimpleCache(max_size=50)
 
 
 class BaseNLPService:
@@ -32,11 +37,13 @@ class BaseNLPService:
 
     _root_path: str = APP_SETTINGS.onnx.onnx_path
     _encoder_sessions: ConcurrentDict = ConcurrentDict("_encoder_sessions")
-    _model_cache: LRUModelCache = LRUModelCache(max_size=5, ttl_seconds=3600)
+    _model_cache: SimpleCache = SimpleCache(max_size=5)
 
     @staticmethod
-    def _softmax(x: np.ndarray) -> np.ndarray:
+    def _softmax(x: ndarray) -> ndarray:
         """Numerically stable softmax."""
+        import numpy as np
+
         x = np.asarray(x)
         x_max = np.max(x, axis=-1, keepdims=True)
         e_x = np.exp(x - x_max)
@@ -53,20 +60,40 @@ class BaseNLPService:
     @staticmethod
     def _get_model_config(model_to_use: str) -> Any:
         """
-        Load ONNX model configuration.
-        Logs config path and errors if loading fails.
+        Load ONNX model configuration with caching.
         """
+        # Check cache first
+        cached_config = _model_config_cache.get(model_to_use)
+        if cached_config is not None:
+            return cached_config
+
         try:
             config = ConfigLoader.get_onnx_config(model_to_use)
             if not BaseNLPService._validate_model_config(config):
                 logger.error(
-                    f"Invalid config for model '{model_to_use}': missing required fields"
+                    "Invalid config for model '%s': missing required fields",
+                    sanitize_for_log(model_to_use),
                 )
                 return None
+
+            # Cache the valid config
+            _model_config_cache.put(model_to_use, config)
             return config
-        except Exception as e:
-            logger.error(f"Failed to load config for model '{model_to_use}': {e}")
+
+        except (KeyError, AttributeError) as e:
+            logger.error(
+                "Invalid config structure for model '%s': %s",
+                sanitize_for_log(model_to_use),
+                sanitize_for_log(str(e)),
+            )
             return None
+        except Exception as e:
+            logger.error(
+                "Failed to load config for model '%s': %s",
+                sanitize_for_log(model_to_use),
+                sanitize_for_log(str(e)),
+            )
+            raise InvalidConfigError(f"Cannot load model config: {e}")
 
     @staticmethod
     def _get_tokenizer_threadsafe(
@@ -85,37 +112,50 @@ class BaseNLPService:
                 if os.path.exists(tokenizer_path):
                     try:
                         if use_legacy:
-                            logger.debug(
-                                f"Loading legacy tokenizer from {tokenizer_path}"
-                            )
                             tokenizer = AutoTokenizer.from_pretrained(
                                 tokenizer_path, local_files_only=True, legacy=True
                             )
                         else:
-                            logger.debug(f"Loading tokenizer from {tokenizer_path}")
                             tokenizer = AutoTokenizer.from_pretrained(
                                 tokenizer_path, local_files_only=True
                             )
-                    except Exception as ex:
+                    except (OSError, ValueError) as ex:
                         logger.warning(
-                            f"Fallback to legacy tokenizer for {tokenizer_path}: {ex}"
+                            "Fallback to legacy tokenizer for %s: %s",
+                            sanitize_for_log(tokenizer_path),
+                            sanitize_for_log(str(ex)),
                         )
                         tokenizer = AutoTokenizer.from_pretrained(
                             tokenizer_path, local_files_only=True, legacy=True
                         )
+                    except Exception as ex:
+                        logger.error(
+                            "Failed to load tokenizer for %s: %s",
+                            sanitize_for_log(tokenizer_path),
+                            sanitize_for_log(str(ex)),
+                        )
+                        raise TokenizerError(f"Cannot load tokenizer: {ex}")
                 else:
-                    logger.debug(
-                        f"Loading tokenizer from HuggingFace Hub: {tokenizer_path}"
-                    )
                     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
                 _tokenizer_local.tokenizers[cache_key] = tokenizer
 
             return _tokenizer_local.tokenizers[cache_key]
 
-        except Exception as e:
-            logger.error(f"Failed to load tokenizer from {tokenizer_path}: {e}")
+        except (OSError, FileNotFoundError) as e:
+            logger.error(
+                "Tokenizer files not accessible at %s: %s",
+                sanitize_for_log(tokenizer_path),
+                sanitize_for_log(str(e)),
+            )
             return None
+        except Exception as e:
+            logger.error(
+                "Failed to load tokenizer from %s: %s",
+                sanitize_for_log(tokenizer_path),
+                sanitize_for_log(str(e)),
+            )
+            raise TokenizerError(f"Tokenizer loading failed: {e}")
 
     @staticmethod
     def _get_encoder_session(encoder_model_path: str) -> Optional[ort.InferenceSession]:
@@ -130,7 +170,8 @@ class BaseNLPService:
             available_providers = ort.get_available_providers()
             if provider not in available_providers:
                 logger.warning(
-                    f"Provider {provider} not available, using CPUExecutionProvider"
+                    "Provider %s not available, using CPUExecutionProvider",
+                    sanitize_for_log(provider),
                 )
                 provider = "CPUExecutionProvider"
 
@@ -140,9 +181,20 @@ class BaseNLPService:
                 cache_key,
                 lambda: ort.InferenceSession(encoder_model_path, providers=[provider]),
             )
-        except Exception as e:
-            logger.error(f"Failed to create ONNX session for {encoder_model_path}: {e}")
+        except (OSError, FileNotFoundError) as e:
+            logger.error(
+                "ONNX model file not accessible at %s: %s",
+                sanitize_for_log(encoder_model_path),
+                sanitize_for_log(str(e)),
+            )
             return None
+        except Exception as e:
+            logger.error(
+                "Failed to create ONNX session for %s: %s",
+                sanitize_for_log(encoder_model_path),
+                sanitize_for_log(str(e)),
+            )
+            raise ModelLoadError(f"ONNX session creation failed: {e}")
 
     @staticmethod
     def clear_encoder_sessions() -> None:
@@ -154,6 +206,21 @@ class BaseNLPService:
         """Clear thread-local tokenizer cache."""
         if hasattr(_tokenizer_local, "tokenizers"):
             _tokenizer_local.tokenizers.clear()
+
+    @staticmethod
+    def clear_model_config_cache() -> None:
+        """Clear model configuration cache."""
+        _model_config_cache.clear()
+        logger.info("Model configuration cache cleared")
+
+    @staticmethod
+    def get_cache_stats() -> dict:
+        """Get cache statistics for monitoring."""
+        return {
+            "encoder_sessions": BaseNLPService._encoder_sessions.size(),
+            "model_configs": _model_config_cache.size(),
+            "model_cache": BaseNLPService._model_cache.size(),
+        }
 
     @staticmethod
     def _prepend_text(text: str, prepend_text: Optional[str] = None) -> str:
@@ -180,10 +247,11 @@ class BaseNLPService:
         )
 
         for name, arr in zip(output_names, outputs):
-            logger.debug(f"ONNX output: {name}, shape: {arr.shape}, dtype: {arr.dtype}")
-            # Log a sample of output values for debugging
-            if arr.size > 0:
-                logger.debug(f"Sample values for {name}: {arr.flatten()[:5]}")
+            logger.debug(
+                "ONNX output %s: shape=%s",
+                sanitize_for_log(name),
+                sanitize_for_log(str(arr.shape)),
+            )
 
     @staticmethod
     def _is_logits_output(
@@ -210,3 +278,17 @@ class BaseNLPService:
         # Shape heuristic - likely vocab size
         arr = outputs[0]
         return arr.ndim >= 2 and arr.shape[-1] <= vocab_threshold
+
+    @staticmethod
+    def warm_up_cache(model_names: list[str]) -> None:
+        """Pre-load model configurations into cache."""
+        logger.info(f"Warming up cache for {len(model_names)} models")
+        for model_name in model_names:
+            try:
+                BaseNLPService._get_model_config(model_name)
+            except (InvalidConfigError, TokenizerError, ModelLoadError) as e:
+                logger.warning(f"Failed to warm up cache for {model_name}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error warming up cache for {model_name}: {e}")
+                raise InvalidConfigError(f"Cache warm-up failed: {e}")
+        logger.info("Cache warm-up completed")

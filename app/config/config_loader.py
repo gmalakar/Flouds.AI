@@ -7,17 +7,27 @@
 import json
 import os
 import sys
+import time
+from typing import Dict, Optional
 
 from app.config.appsettings import AppSettings
 from app.config.onnx_config import OnnxConfig
+from app.exceptions import (
+    CacheInvalidationError,
+    InvalidConfigError,
+    MissingConfigError,
+)
 from app.logger import get_logger
+from app.utils.log_sanitizer import sanitize_for_log
+from app.utils.path_validator import validate_safe_path
 
 logger = get_logger("config_loader")
 
 
 class ConfigLoader:
-    __onnx_config_cache = None
-    __appsettings = None
+    __onnx_config_cache: Optional[Dict[str, OnnxConfig]] = None
+    __config_file_mtime: Optional[float] = None
+    __appsettings: Optional[AppSettings] = None
 
     @staticmethod
     def get_app_settings() -> AppSettings:
@@ -69,10 +79,6 @@ class ConfigLoader:
             == "1"
         )
 
-        # Load additional environment variables
-        ConfigLoader.__appsettings.logging.level = os.getenv(
-            "FLOUDS_LOG_LEVEL", ConfigLoader.__appsettings.logging.level
-        )
         ConfigLoader.__appsettings.rate_limiting.enabled = (
             os.getenv(
                 "FLOUDS_RATE_LIMIT_ENABLED",
@@ -208,9 +214,18 @@ class ConfigLoader:
                 try:
                     os.makedirs(db_dir, exist_ok=True)
                     logger.info(f"Created clients database directory: {db_dir}")
+                except (OSError, PermissionError) as e:
+                    logger.error(
+                        "Failed to create clients database directory %s: %s",
+                        sanitize_for_log(db_dir),
+                        sanitize_for_log(str(e)),
+                    )
+                    sys.exit(1)
                 except Exception as e:
                     logger.error(
-                        f"Failed to create clients database directory {db_dir}: {e}"
+                        "Unexpected error creating clients database directory %s: %s",
+                        sanitize_for_log(db_dir),
+                        sanitize_for_log(str(e)),
                     )
                     sys.exit(1)
             logger.info(
@@ -224,8 +239,19 @@ class ConfigLoader:
                 try:
                     os.makedirs(log_path, exist_ok=True)
                     logger.info(f"Created log directory: {log_path}")
+                except (OSError, PermissionError) as e:
+                    logger.error(
+                        "Failed to create log directory %s: %s",
+                        sanitize_for_log(log_path),
+                        sanitize_for_log(str(e)),
+                    )
+                    sys.exit(1)
                 except Exception as e:
-                    logger.error(f"Failed to create log directory {log_path}: {e}")
+                    logger.error(
+                        "Unexpected error creating log directory %s: %s",
+                        sanitize_for_log(log_path),
+                        sanitize_for_log(str(e)),
+                    )
                     sys.exit(1)
             elif not os.path.isdir(log_path):
                 logger.error(f"Log path is not a directory: {log_path}")
@@ -235,22 +261,54 @@ class ConfigLoader:
     @staticmethod
     def get_onnx_config(key: str) -> OnnxConfig:
         """
-        Loads OnnxConfig from onnx_config.json and environment-specific override in the same folder.
-        Performs a deep merge for nested config sections.
-        Only loads from file if config is not in cache.
-        Returns the OnnxConfig for the specified key/model.
-        Raises KeyError if the key is not found.
+        Loads OnnxConfig with caching and automatic cache invalidation.
+        Cache is invalidated when config file is modified.
         """
+        config_file_name = ConfigLoader.__appsettings.onnx.config_file
+
+        # Check if cache needs refresh
+        if ConfigLoader._should_refresh_cache(config_file_name):
+            ConfigLoader._refresh_onnx_cache(config_file_name)
+
+        if key not in ConfigLoader.__onnx_config_cache:
+            raise MissingConfigError(
+                f"Model config '{key}' not found in onnx_config.json"
+            )
+        return ConfigLoader.__onnx_config_cache[key]
+
+    @staticmethod
+    def _should_refresh_cache(config_file_name: str) -> bool:
+        """Check if cache should be refreshed based on file modification time."""
         if ConfigLoader.__onnx_config_cache is None:
-            config_file_name = ConfigLoader.__appsettings.onnx.config_file
+            return True
+
+        try:
+            current_mtime = os.path.getmtime(config_file_name)
+            return ConfigLoader.__config_file_mtime != current_mtime
+        except (OSError, FileNotFoundError):
+            return True
+
+    @staticmethod
+    def _refresh_onnx_cache(config_file_name: str):
+        """Refresh the ONNX configuration cache."""
+        try:
             data = ConfigLoader._load_config_data(config_file_name)
             ConfigLoader.__onnx_config_cache = {
                 k: OnnxConfig(**v) for k, v in data.items()
             }
-
-        if key not in ConfigLoader.__onnx_config_cache:
-            raise KeyError(f"Model config '{key}' not found in onnx_config.json")
-        return ConfigLoader.__onnx_config_cache[key]
+            ConfigLoader.__config_file_mtime = os.path.getmtime(config_file_name)
+            logger.debug(
+                f"Refreshed ONNX config cache with {len(ConfigLoader.__onnx_config_cache)} models"
+            )
+        except (OSError, FileNotFoundError) as e:
+            logger.error(f"ONNX config file not accessible: {e}")
+            raise MissingConfigError(f"Cannot access ONNX config file: {e}")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Invalid ONNX config format: {e}")
+            raise InvalidConfigError(f"ONNX config file format error: {e}")
+        except Exception as e:
+            logger.error(f"Failed to refresh ONNX config cache: {e}")
+            raise CacheInvalidationError(f"Cannot refresh config cache: {e}")
 
     @staticmethod
     def _load_config_data(config_file_name: str, check_env_file: bool = False) -> dict:
@@ -259,9 +317,9 @@ class ConfigLoader:
         Performs a deep merge for nested config sections.
         """
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        base_path = os.path.join(base_dir, config_file_name)
+        config_path = os.path.join(base_dir, config_file_name)
 
-        logger.debug(f"Loading config from {base_path}")
+        logger.debug(f"Loading config from {config_file_name}")
 
         def deep_update(d, u):
             for k, v in u.items():
@@ -270,28 +328,54 @@ class ConfigLoader:
                 else:
                     d[k] = v
 
-        if not os.path.exists(base_path):
-            raise FileNotFoundError(f"Config file not found: {base_path}")
-
-        with open(base_path, "r", encoding="utf-8") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         # Merge environment-specific config if requested and it exists (deep merge)
         if check_env_file:
             env = os.getenv("FLOUDS_API_ENV", "Production")
             name, ext = os.path.splitext(config_file_name)
-            env_path = os.path.join(base_dir, f"{name}.{env.lower()}{ext}")
-            logger.debug(f"Loading config from {env_path}")
-            if os.path.exists(env_path):
+            env_file = f"{name}.{env.lower()}{ext}"
+            env_path = os.path.join(base_dir, env_file)
+            logger.debug(f"Loading config from {env_file}")
+            try:
                 with open(env_path, "r", encoding="utf-8") as f:
                     env_data = json.load(f)
                 deep_update(data, env_data)
-            else:
+            except (OSError, FileNotFoundError):
                 logger.warning(
-                    f"Environment-specific config file not found: {env_path}. Using base config."
+                    f"Environment-specific config file not found: {env_file}. Using base config."
                 )
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.error(f"Invalid environment config format in {env_file}: {e}")
+                raise InvalidConfigError(f"Environment config format error: {e}")
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error loading environment config {env_file}: {e}"
+                )
+                raise InvalidConfigError(f"Cannot load environment config: {e}")
 
         return data
+
+    @staticmethod
+    def clear_cache():
+        """Clear all configuration caches."""
+        ConfigLoader.__onnx_config_cache = None
+        ConfigLoader.__config_file_mtime = None
+        logger.info("Configuration cache cleared")
+
+    @staticmethod
+    def get_cache_stats() -> Dict[str, any]:
+        """Get cache statistics for monitoring."""
+        return {
+            "onnx_configs_cached": (
+                len(ConfigLoader.__onnx_config_cache)
+                if ConfigLoader.__onnx_config_cache
+                else 0
+            ),
+            "cache_file_mtime": ConfigLoader.__config_file_mtime,
+            "cache_loaded": ConfigLoader.__onnx_config_cache is not None,
+        }
 
 
 # Example usage:

@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-import threading
+from threading import RLock
 from typing import Any, Callable, Optional
 
 
@@ -15,7 +15,7 @@ class ConcurrentDict:
     """
 
     def __init__(self, created_for: Any = None):
-        self._lock = threading.Lock()
+        self._lock = RLock()
         self._dict = {}
         self._created_for = created_for
 
@@ -72,6 +72,20 @@ class ConcurrentDict:
         """
         with self._lock:
             return len(self._dict) == 0
+
+    def size(self) -> int:
+        """
+        Thread-safe get size of the dictionary.
+        """
+        with self._lock:
+            return len(self._dict)
+
+    def clear(self) -> None:
+        """
+        Thread-safe clear all items from the dictionary.
+        """
+        with self._lock:
+            self._dict.clear()
 
     @staticmethod
     def add_missing_from_other(

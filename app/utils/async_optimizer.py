@@ -4,11 +4,12 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-import asyncio
+from asyncio import Semaphore, gather, get_event_loop
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, List, TypeVar
 
 from app.logger import get_logger
+from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("async_optimizer")
 
@@ -39,20 +40,20 @@ class AsyncOptimizer:
             return []
 
         # Use semaphore to limit concurrent tasks
-        semaphore = asyncio.Semaphore(max_concurrent)
+        semaphore = Semaphore(max_concurrent)
         executor = cls.get_executor()
 
         async def process_item(item: T) -> Any:
             async with semaphore:
-                loop = asyncio.get_event_loop()
+                loop = get_event_loop()
                 return await loop.run_in_executor(executor, process_func, item)
 
         # Process all items concurrently with limits
         tasks = [process_item(item) for item in items]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await gather(*tasks, return_exceptions=True)
 
         logger.debug(
-            f"Processed {len(items)} items with {max_concurrent} max concurrent"
+            "Processed %d items with %d max concurrent", len(items), max_concurrent
         )
         return results
 

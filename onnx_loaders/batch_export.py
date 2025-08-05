@@ -7,9 +7,9 @@
 
 """Batch export multiple models to ONNX format."""
 
-import subprocess
 import sys
 from pathlib import Path
+from subprocess import CalledProcessError, TimeoutExpired, run
 
 # Model configurations: (model_for, model_name, optimize, task, use_cache, use_t5_encoder, model_folder)
 MODELS = [
@@ -68,8 +68,8 @@ def export_model(
     print(f"Command: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=1800
+        result = run(
+            cmd, capture_output=True, text=True, timeout=1800, check=False
         )  # 30 min timeout
 
         if result.returncode == 0:
@@ -81,8 +81,14 @@ def export_model(
             print(f"STDOUT: {result.stdout}")
             return False
 
-    except subprocess.TimeoutExpired:
+    except TimeoutExpired:
         print(f"⏰ {model_name} timed out after 30 minutes")
+        return False
+    except CalledProcessError as e:
+        print(f"💥 {model_name} process failed: {e}")
+        return False
+    except FileNotFoundError:
+        print(f"💥 {model_name} failed: Python or export script not found")
         return False
     except Exception as e:
         print(f"💥 {model_name} crashed: {e}")
