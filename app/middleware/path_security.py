@@ -101,46 +101,8 @@ class PathSecurityMiddleware(BaseHTTPMiddleware):
                         },
                     )
 
-            # Scan request body for POST/PUT requests
-            if request.method in ("POST", "PUT", "PATCH"):
-                try:
-                    # Read body once and store it
-                    body = await request.body()
-                    if body:
-                        # Try to parse as JSON
-                        try:
-                            json_data = json.loads(body.decode())
-                            if self._scan_value(json_data, "body"):
-                                return JSONResponse(
-                                    status_code=400,
-                                    content={
-                                        "success": False,
-                                        "message": "Suspicious path detected in request body",
-                                        "error_code": "PATH_TRAVERSAL_DETECTED",
-                                    },
-                                )
-                        except (json.JSONDecodeError, UnicodeDecodeError):
-                            # If not JSON, scan as string
-                            body_str = body.decode(errors="ignore")
-                            if self._scan_value(body_str, "body"):
-                                return JSONResponse(
-                                    status_code=400,
-                                    content={
-                                        "success": False,
-                                        "message": "Suspicious path detected in request body",
-                                        "error_code": "PATH_TRAVERSAL_DETECTED",
-                                    },
-                                )
-
-                        # Recreate request with body for downstream processing
-                        async def receive():
-                            return {"type": "http.request", "body": body}
-
-                        request._receive = receive
-
-                except Exception as e:
-                    logger.error("Error scanning request body: %s", str(e))
-                    # Continue processing if body scanning fails
+            # Skip body scanning to avoid middleware chain issues
+            # Body content will be validated at the application level
 
             return await call_next(request)
 
