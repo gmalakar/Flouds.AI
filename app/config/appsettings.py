@@ -50,6 +50,7 @@ class MonitoringConfig(BaseModel):
     enable_metrics: bool = Field(default=True)
     memory_threshold_mb: int = Field(default=1024)
     cpu_threshold_percent: int = Field(default=80)
+    cache_cleanup_max_age_seconds: int = Field(default=60)
 
 
 class SecurityConfig(BaseModel):

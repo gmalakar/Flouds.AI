@@ -52,7 +52,7 @@
         "normalize": true,
         "pooling_strategy": "mean",
         "chunk_logic": "paragraph",
-        "chunk_overlap": 0,
+        "chunk_overlap": 1,
         "lowercase": false,
         "remove_emojis": false,
         "force_pooling": false,
@@ -68,28 +68,28 @@
     },
     "sentence-t5-base": {
         "dimension": 768,
-        "max_length": 512,
+        "max_length": 256,
         "embedder_task": "fe",
         "normalize": true,
         "pooling_strategy": "mean",
         "chunk_logic": "sentence",
         "chunk_overlap": 0,
         "legacy_tokenizer": true,
+        "use_t5_encoder": true,
         "lowercase": false,
         "remove_emojis": false,
-        "force_pooling": false,
+        "force_pooling": true,
         "inputnames": {
+            "use_decoder_input": true,
             "input": "input_ids",
             "mask": "attention_mask",
-            "decoder_input_name": "decoder_input_ids",
-            "use_decoder_input": true
+            "decoder_input_name": "decoder_input_ids"
         },
         "outputnames": {
             "output": "last_hidden_state"
         },
         "encoder_onnx_model": "model.onnx",
-        "use_optimized": true,
-        "encoder_optimized_onnx_model": "model_optimized.onnx"
+        "use_optimized": false
     },
     "t5-small": {
         "dimension": 512,
@@ -215,6 +215,6 @@
             "output": "last_hidden_state"
         },
         "encoder_onnx_model": "model.onnx",
-        "use_optimized": false
+        "use_optimized": true
     }
 }

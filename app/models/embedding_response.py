@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import List
+from typing import Dict, List, Optional
 
 from pydantic import Field
 
@@ -20,6 +20,9 @@ class EmbeddingResponse(BaseResponse):
     results: List[EmbededChunk] = Field(
         ..., description="A list of embedding chunks for the input texts."
     )
+    used_parameters: Optional[Dict] = Field(
+        None, description="The actual parameters used for embedding generation."
+    )
 
 
 class EmbeddingBatchResponse(BaseResponse):
@@ -29,4 +32,7 @@ class EmbeddingBatchResponse(BaseResponse):
 
     results: List[EmbededChunk] = Field(
         ..., description="A list of embedding responses for the input texts."
+    )
+    used_parameters: Optional[Dict] = Field(
+        None, description="The actual parameters used for embedding generation."
     )

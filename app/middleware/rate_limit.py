@@ -8,11 +8,10 @@ import time
 from collections import defaultdict, deque
 from typing import Deque, Dict, Tuple
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
-from app.exceptions import RateLimitExceededError
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
 from app.utils.performance_tracker import perf_tracker
@@ -171,7 +170,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 sanitize_for_log(client_ip),
                 sanitize_for_log(message),
             )
-            raise RateLimitExceededError(message)
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "success": False,
+                    "message": message,
+                    "error_code": "RATE_LIMIT_EXCEEDED",
+                    "detail": message,
+                },
+                headers={
+                    "X-RateLimit-Limit-Minute": str(self.requests_per_minute),
+                    "X-RateLimit-Remaining-Minute": "0",
+                    "X-RateLimit-Limit-Hour": str(self.requests_per_hour),
+                    "X-RateLimit-Remaining-Hour": "0",
+                    "Retry-After": "60",
+                },
+            )
 
         # Record this request
         timestamps = self.request_history[client_ip]

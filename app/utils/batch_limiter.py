@@ -8,7 +8,6 @@ from typing import Iterator, List, TypeVar
 
 from app.exceptions import BatchSizeError
 from app.logger import get_logger
-from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("batch_limiter")
 
@@ -36,11 +35,3 @@ class BatchLimiter:
         """Validate batch size doesn't exceed limits."""
         if len(items) > max_size:
             raise BatchSizeError(f"Batch size {len(items)} exceeds maximum {max_size}")
-
-    @staticmethod
-    def estimate_memory_usage(items: List[str], avg_tokens_per_item: int = 100) -> int:
-        """Estimate memory usage in MB for text batch."""
-        total_tokens = len(items) * avg_tokens_per_item
-        # Rough estimate: 4 bytes per token for embeddings
-        memory_mb = (total_tokens * 4) / (1024 * 1024)
-        return int(memory_mb)

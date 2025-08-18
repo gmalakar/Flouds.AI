@@ -8,7 +8,7 @@
 
 import functools
 import traceback
-from typing import Any, Callable, Dict, Optional, Type, Union
+from typing import Any, Callable, Dict
 
 from app.exceptions import (
     AuthenticationException,
@@ -178,31 +178,3 @@ def handle_async_errors(
         return wrapper
 
     return decorator
-
-
-def safe_execute(
-    func: Callable,
-    default_value: Any = None,
-    context: str = "safe_execution",
-    log_errors: bool = True,
-) -> Any:
-    """Safely execute a function with error handling."""
-
-    try:
-        return func()
-    except Exception as e:
-        if log_errors:
-            ErrorHandler.handle_exception(e, context)
-        return default_value
-
-
-def validate_and_handle(
-    condition: bool,
-    exception_class: Type[FloudsBaseException],
-    message: str,
-    error_code: str = None,
-):
-    """Validate condition and raise appropriate exception if false."""
-
-    if not condition:
-        raise exception_class(message, error_code)

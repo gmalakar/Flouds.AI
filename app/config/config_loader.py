@@ -7,7 +7,6 @@
 import json
 import os
 import sys
-import time
 from typing import Dict, Optional
 
 from app.config.appsettings import AppSettings
@@ -19,7 +18,6 @@ from app.exceptions import (
 )
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
-from app.utils.path_validator import validate_safe_path
 
 logger = get_logger("config_loader")
 
@@ -159,6 +157,12 @@ class ConfigLoader:
             )
         )
 
+        ConfigLoader.__appsettings.monitoring.cache_cleanup_max_age_seconds = int(
+            os.getenv(
+                "FLOUDS_CACHE_CLEANUP_MAX_AGE_SECONDS",
+                ConfigLoader.__appsettings.monitoring.cache_cleanup_max_age_seconds,
+            )
+        )
         # Clients database path
         ConfigLoader.__appsettings.security.clients_db_path = os.getenv(
             "FLOUDS_CLIENTS_DB", ConfigLoader.__appsettings.security.clients_db_path

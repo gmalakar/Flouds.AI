@@ -5,7 +5,7 @@
 # =============================================================================
 
 # Removed asyncio imports to prevent hanging
-import functools
+
 import os
 import re
 import time
@@ -29,7 +29,6 @@ from app.models.embedding_response import EmbeddingBatchResponse, EmbeddingRespo
 from app.services.base_nlp_service import BaseNLPService
 from app.utils.batch_limiter import BatchLimiter
 from app.utils.chunking_strategies import ChunkingStrategies
-from app.utils.error_handler import ErrorHandler, handle_errors
 from app.utils.log_sanitizer import sanitize_for_log
 from app.utils.path_validator import validate_safe_path
 from app.utils.pooling_strategies import PoolingStrategies
@@ -55,6 +54,7 @@ class _ChunkEmbeddingResults(BaseModel):
     ]  # For chunk processing, this is a list of chunks
     message: str
     success: bool = Field(default=True)
+    used_parameters: dict = Field(default_factory=dict)
 
 
 class SentenceTransformer(BaseNLPService):
@@ -139,8 +139,16 @@ class SentenceTransformer(BaseNLPService):
                 **kwargs,
             )
 
+            logger.debug(
+                "Final embedding shape before flatten: %s", str(embedding.shape)
+            )
+            flattened = embedding.flatten()
+            logger.debug(
+                "Final embedding shape after flatten: %s", str(flattened.shape)
+            )
+
             return _EmbeddingResults(
-                EmbeddingResults=embedding.flatten().tolist(),
+                EmbeddingResults=flattened.tolist(),
                 message="Embedding generated successfully",
                 success=True,
             )
@@ -165,7 +173,7 @@ class SentenceTransformer(BaseNLPService):
     ) -> dict:
         """Prepare ONNX inputs for inference."""
         input_names = getattr(model_config, "inputnames", {})
-        max_length = getattr(input_names, "max_length", DEFAULT_MAX_LENGTH)
+        max_length = getattr(model_config, "max_length", DEFAULT_MAX_LENGTH)
 
         encoding = tokenizer(
             processed_text,
@@ -187,14 +195,14 @@ class SentenceTransformer(BaseNLPService):
 
         # Add optional inputs
         SentenceTransformer._add_optional_inputs(
-            inputs, input_names, session, input_ids.shape[1]
+            inputs, input_names, model_config, session, input_ids.shape[1]
         )
 
         return inputs
 
     @staticmethod
     def _add_optional_inputs(
-        inputs: dict, input_names: Any, session: Any, seq_len: int
+        inputs: dict, input_names: Any, model_config: Any, session: Any, seq_len: int
     ):
         """Add optional inputs like position_ids, token_type_ids, decoder_input_ids."""
         # Position IDs
@@ -204,16 +212,16 @@ class SentenceTransformer(BaseNLPService):
 
         # Token type IDs
         required_inputs = [inp.name for inp in session.get_inputs()]
-        tokentype_name = getattr(input_names, "tokentype", None)
-        if not tokentype_name:
-            tokentype_name = "token_type_ids"
+        tokentype_name = getattr(input_names, "tokentype", "token_type_ids")
         if tokentype_name in required_inputs:
             inputs[tokentype_name] = np.zeros((1, seq_len), dtype=np.int64)
 
         # Decoder input IDs
-        if getattr(input_names, "use_decoder_input", False):
+        use_decoder_input = getattr(input_names, "use_decoder_input", False)
+        if use_decoder_input:
+            decoder_names = getattr(model_config, "decoder_inputnames", input_names)
             decoder_input_name = getattr(
-                input_names, "decoder_input_name", "decoder_input_ids"
+                decoder_names, "decoder_input_name", "decoder_input_ids"
             )
             inputs[decoder_input_name] = np.zeros((1, seq_len), dtype=np.int64)
 
@@ -244,10 +252,15 @@ class SentenceTransformer(BaseNLPService):
             sanitize_for_log(str(embedding.shape)),
         )
 
+        logger.debug(
+            "Before pooling: strategy=%s, shape=%s",
+            sanitize_for_log(pooling_strategy),
+            sanitize_for_log(str(embedding.shape)),
+        )
         embedding = PoolingStrategies.apply(
             embedding, pooling_strategy, attention_mask, force_pooling
         )
-        logger.debug("Pooling result shape: %s", sanitize_for_log(str(embedding.shape)))
+        logger.debug("After pooling: shape=%s", sanitize_for_log(str(embedding.shape)))
 
         # Normalize
         normalize = kwargs.get("normalize", getattr(model_config, "normalize", True))
@@ -256,10 +269,41 @@ class SentenceTransformer(BaseNLPService):
             if norm > 0:
                 embedding = embedding / norm
 
-        # Project dimensions
-        if projected_dimension > 0 and embedding.shape[-1] != projected_dimension:
-            embedding = SentenceTransformer._project_embedding(
-                embedding, projected_dimension
+        # Project dimensions - only if explicitly requested
+        logger.debug(
+            "Before projection: shape=%s, dimension=%s",
+            str(embedding.shape),
+            str(projected_dimension),
+        )
+        if (
+            projected_dimension is not None
+            and projected_dimension > 0
+            and embedding.shape[-1] != projected_dimension
+        ):
+            logger.debug(
+                "Applying projection from %s to %s",
+                str(embedding.shape[-1]),
+                str(projected_dimension),
+            )
+            if embedding.ndim > 1:  # Multi-dimensional (seq_len, embedding_dim)
+                # Project each token embedding
+                projected_embeddings = []
+                for i in range(embedding.shape[0]):
+                    projected = SentenceTransformer._project_embedding(
+                        embedding[i], projected_dimension
+                    )
+                    projected_embeddings.append(projected)
+                embedding = np.stack(projected_embeddings)
+            else:  # Single vector
+                embedding = SentenceTransformer._project_embedding(
+                    embedding, projected_dimension
+                )
+            logger.debug("After projection: shape=%s", str(embedding.shape))
+        else:
+            logger.debug(
+                "Skipping projection: projected_dimension=%s, current_dim=%s",
+                str(projected_dimension),
+                str(embedding.shape[-1]),
             )
 
         return embedding
@@ -282,7 +326,6 @@ class SentenceTransformer(BaseNLPService):
         return SentenceTransformer._preprocess_text(text, True, False)[: max_tokens * 4]
 
     @staticmethod
-    @handle_errors(context="embedding", include_traceback=True)
     def embed_text(req: EmbeddingRequest, **kwargs: Any) -> EmbeddingResponse:
         """Main embedding function for single text."""
         start_time = time.time()
@@ -295,6 +338,21 @@ class SentenceTransformer(BaseNLPService):
         )
 
         try:
+            # Extract request parameters for config override
+            request_params = {
+                "pooling_strategy": getattr(req, "pooling_strategy", None),
+                "max_length": getattr(req, "max_length", None),
+                "chunk_logic": getattr(req, "chunk_logic", None),
+                "chunk_overlap": getattr(req, "chunk_overlap", None),
+                "chunk_size": getattr(req, "chunk_size", None),
+                "legacy_tokenizer": getattr(req, "legacy_tokenizer", None),
+                "normalize": getattr(req, "normalize", None),
+                "force_pooling": getattr(req, "force_pooling", None),
+                "lowercase": getattr(req, "lowercase", None),
+                "remove_emojis": getattr(req, "remove_emojis", None),
+                "use_optimized": getattr(req, "use_optimized", None),
+            }
+
             result = SentenceTransformer._embed_text_local(
                 text=req.input,
                 model=req.model,
@@ -302,11 +360,13 @@ class SentenceTransformer(BaseNLPService):
                 join_chunks=req.join_chunks,
                 join_by_pooling_strategy=req.join_by_pooling_strategy,
                 output_large_text_upon_join=req.output_large_text_upon_join,
+                request_params=request_params,
                 **kwargs,
             )
 
             if result.success:
                 response.results = result.EmbeddingResults
+                response.used_parameters = getattr(result, "used_parameters", {})
             else:
                 response.success = False
                 response.message = result.message
@@ -338,6 +398,21 @@ class SentenceTransformer(BaseNLPService):
             )
 
             for idx, input_text in enumerate(requests.inputs):
+                # Extract batch request parameters for config override
+                request_params = {
+                    "pooling_strategy": requests.pooling_strategy,
+                    "max_length": requests.max_length,
+                    "chunk_logic": requests.chunk_logic,
+                    "chunk_overlap": requests.chunk_overlap,
+                    "chunk_size": requests.chunk_size,
+                    "legacy_tokenizer": requests.legacy_tokenizer,
+                    "normalize": requests.normalize,
+                    "force_pooling": requests.force_pooling,
+                    "lowercase": requests.lowercase,
+                    "remove_emojis": requests.remove_emojis,
+                    "use_optimized": requests.use_optimized,
+                }
+
                 result = SentenceTransformer._embed_text_local(
                     text=input_text,
                     model=requests.model,
@@ -345,6 +420,7 @@ class SentenceTransformer(BaseNLPService):
                     join_chunks=requests.join_chunks,
                     join_by_pooling_strategy=requests.join_by_pooling_strategy,
                     output_large_text_upon_join=requests.output_large_text_upon_join,
+                    request_params=request_params,
                     **kwargs,
                 )
 
@@ -354,6 +430,10 @@ class SentenceTransformer(BaseNLPService):
                     break
                 else:
                     response.results.extend(result.EmbeddingResults)
+                    if idx == 0:  # Set used_parameters from first result
+                        response.used_parameters = getattr(
+                            result, "used_parameters", {}
+                        )
 
         except Exception as e:
             response.success = False
@@ -370,6 +450,7 @@ class SentenceTransformer(BaseNLPService):
         join_chunks: bool = False,
         join_by_pooling_strategy: str = None,
         output_large_text_upon_join: bool = False,
+        request_params: dict = None,
         **kwargs: Any,
     ) -> _ChunkEmbeddingResults:
         """Core embedding logic for text processing."""
@@ -377,6 +458,12 @@ class SentenceTransformer(BaseNLPService):
             model_config, tokenizer, session = (
                 SentenceTransformer._prepare_embedding_resources(model)
             )
+
+            # Override config with request parameters if provided
+            if request_params:
+                model_config = SentenceTransformer._override_config_with_request(
+                    model_config, request_params
+                )
             chunks = SentenceTransformer._prepare_text_chunks(
                 text, tokenizer, model_config
             )
@@ -397,11 +484,33 @@ class SentenceTransformer(BaseNLPService):
                     output_large_text_upon_join,
                 )
 
-            return _ChunkEmbeddingResults(
+            # Extract used parameters from final config
+            used_params = {
+                "pooling_strategy": getattr(model_config, "pooling_strategy", "mean"),
+                "projected_dimension": (
+                    projected_dimension
+                    if projected_dimension is not None
+                    else getattr(model_config, "dimension", None)
+                ),
+                "max_length": getattr(model_config, "max_length", 256),
+                "chunk_logic": getattr(model_config, "chunk_logic", "sentence"),
+                "chunk_overlap": getattr(model_config, "chunk_overlap", 1),
+                "chunk_size": getattr(model_config, "chunk_size", None),
+                "normalize": getattr(model_config, "normalize", True),
+                "force_pooling": getattr(model_config, "force_pooling", False),
+                "use_optimized": getattr(model_config, "use_optimized", False),
+                "legacy_tokenizer": getattr(model_config, "legacy_tokenizer", False),
+                "remove_emojis": getattr(model_config, "remove_emojis", False),
+                "lowercase": getattr(model_config, "lowercase", False),
+            }
+
+            result = _ChunkEmbeddingResults(
                 EmbeddingResults=chunk_results,
                 message="Embedding generated successfully",
                 success=True,
             )
+            result.used_parameters = used_params
+            return result
 
         except FileNotFoundError:
             raise ModelNotFoundError("Model files not accessible")
@@ -413,12 +522,61 @@ class SentenceTransformer(BaseNLPService):
             raise InferenceError(f"Error generating embedding: {e}")
 
     @staticmethod
+    def _override_config_with_request(model_config: Any, request_params: dict) -> Any:
+        """Use request parameters first, model config as fallback when parameters are None."""
+        override_fields = [
+            "pooling_strategy",
+            "max_length",
+            "chunk_logic",
+            "chunk_overlap",
+            "chunk_size",
+            "legacy_tokenizer",
+            "normalize",
+            "force_pooling",
+            "lowercase",
+            "remove_emojis",
+            "use_optimized",
+        ]
+
+        for field in override_fields:
+            if field in request_params:
+                if request_params[field] is not None:
+                    # Use request parameter
+                    setattr(model_config, field, request_params[field])
+                    logger.debug(
+                        f"Using request parameter for {field}: {request_params[field]}"
+                    )
+                # If request param is None, keep model config value (fallback)
+                else:
+                    logger.debug(
+                        f"Using model config fallback for {field}: {getattr(model_config, field, None)}"
+                    )
+
+        return model_config
+
+    @staticmethod
     def _prepare_embedding_resources(model: str) -> tuple[Any, Any, Any]:
         """Prepare model config, tokenizer, and session for embedding."""
-        model_config = SentenceTransformer._get_model_config(model)
+        original_config = SentenceTransformer._get_model_config(model)
+        # Create a copy to avoid modifying the cached instance
+        if hasattr(original_config, "model_copy"):
+            model_config = original_config.model_copy()
+        elif hasattr(original_config, "copy"):
+            # For objects with copy method
+            model_config = original_config.copy()
+        else:
+            # Fallback: create shallow copy using copy module
+            import copy
+
+            model_config = copy.copy(original_config)
         model_to_use_path = SentenceTransformer._get_model_path(model, model_config)
         tokenizer = SentenceTransformer._load_tokenizer(model_to_use_path, model_config)
         session = SentenceTransformer._load_session(model_to_use_path, model_config)
+
+        cache_stats = SentenceTransformer.get_cache_stats()
+        logger.info(
+            f"Cache sizes - Encoder sessions: {cache_stats['encoder_sessions']}, Model configs: {cache_stats['model_configs']}"
+        )
         return model_config, tokenizer, session
 
     @staticmethod
@@ -447,13 +605,36 @@ class SentenceTransformer(BaseNLPService):
 
     @staticmethod
     def _load_session(model_to_use_path: str, model_config: Any) -> Any:
-        """Load and validate ONNX session."""
+        """Load and validate ONNX session with fallback."""
         model_path = SentenceTransformer._get_embedding_model_path(
             model_to_use_path, model_config
         )
-        session = SentenceTransformer._get_encoder_session(model_path)
+
+        try:
+            session = SentenceTransformer._get_encoder_session(model_path)
+        except ModelLoadError as e:
+            # If optimized model fails, try fallback to regular model
+            use_optimized = getattr(model_config, "use_optimized", False)
+            if use_optimized and "optimized" in str(e).lower():
+                logger.warning(f"Optimized model failed: {e}, trying regular model")
+                # Get regular model path
+                regular_filename = (
+                    getattr(model_config, "encoder_onnx_model", None) or "model.onnx"
+                )
+                fallback_path = validate_safe_path(
+                    os.path.join(model_to_use_path, regular_filename),
+                    SentenceTransformer._root_path,
+                )
+                session = SentenceTransformer._get_encoder_session(fallback_path)
+            else:
+                raise e
+
         if not session:
             raise ModelLoadError(f"Failed to load ONNX session: {model_path}")
+
+        logger.info(
+            f"Encoder session cache size: {SentenceTransformer._encoder_sessions.size()}"
+        )
         return session
 
     @staticmethod
@@ -468,9 +649,13 @@ class SentenceTransformer(BaseNLPService):
         )
 
     @staticmethod
-    def _get_model_filename(model_config: Any, is_embedding: bool = True) -> str:
-        """Get model filename based on optimization settings."""
-        use_optimized = getattr(model_config, "use_optimized", False)
+    def _get_model_filename(
+        model_config: Any, is_embedding: bool = True, fallback_to_regular: bool = False
+    ) -> str:
+        """Get model filename based on optimization settings with fallback."""
+        use_optimized = (
+            getattr(model_config, "use_optimized", False) and not fallback_to_regular
+        )
 
         if is_embedding:
             if use_optimized:
@@ -493,9 +678,7 @@ class SentenceTransformer(BaseNLPService):
     @staticmethod
     def _prepare_text_chunks(text: str, tokenizer: Any, model_config: Any) -> List[str]:
         """Prepare text chunks for processing."""
-        max_tokens = getattr(
-            getattr(model_config, "inputnames", {}), "max_length", DEFAULT_MAX_LENGTH
-        )
+        max_tokens = getattr(model_config, "max_length", DEFAULT_MAX_LENGTH)
         return ChunkingStrategies.split_text_into_chunks(
             text, tokenizer, max_tokens, model_config
         )

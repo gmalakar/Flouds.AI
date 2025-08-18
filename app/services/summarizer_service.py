@@ -14,7 +14,11 @@ from typing import Any, Dict, Optional, Set
 import numpy as np
 import onnxruntime as ort
 from numpy import ndarray
-from optimum.onnxruntime import ORTModelForSeq2SeqLM
+
+try:
+    from optimum.onnxruntime import ORTModelForSeq2SeqLM
+except ImportError:
+    ORTModelForSeq2SeqLM = None
 from pydantic import BaseModel, Field
 
 from app.config.onnx_config import OnnxConfig
@@ -34,7 +38,6 @@ from app.models.summarization_response import SummarizationResponse
 from app.modules.concurrent_dict import ConcurrentDict
 from app.services.base_nlp_service import BaseNLPService
 from app.utils.batch_limiter import BatchLimiter
-from app.utils.error_handler import ErrorHandler, handle_errors
 from app.utils.log_sanitizer import sanitize_for_log
 from app.utils.path_validator import validate_safe_path
 
@@ -109,6 +112,17 @@ class TextSummarizer(BaseNLPService):
                 )
                 provider = "CPUExecutionProvider"
             cache_key = f"{decoder_model_path}#{provider}"
+
+            # First check if session is already cached
+            cached_session = TextSummarizer._decoder_sessions.get(cache_key)
+            if cached_session is not None:
+                return cached_session
+
+            # Session not in cache - check memory and clear if needed
+            from app.utils.cache_manager import CacheManager
+
+            CacheManager.check_and_clear_cache_if_needed()
+
             logger.debug(
                 f"Creating decoder session for {decoder_model_path} with provider {provider}"
             )
@@ -129,16 +143,36 @@ class TextSummarizer(BaseNLPService):
         )
 
     @staticmethod
-    def get_model(model_to_use_path: str) -> Optional[ORTModelForSeq2SeqLM]:
+    def get_model(model_to_use_path: str) -> Optional[Any]:
         """Get cached ONNX model with error handling."""
+        if ORTModelForSeq2SeqLM is None:
+            raise ModelLoadError("optimum[onnxruntime] not installed")
+
         try:
+            # First check if model is already cached
+            cached_model = TextSummarizer._models.get(model_to_use_path)
+            if cached_model is not None:
+                return cached_model
+
+            # Model not in cache - check memory and clear if needed
+            from app.utils.cache_manager import CacheManager
+
+            CacheManager.check_and_clear_cache_if_needed()
+
             logger.debug(f"Loading model from path: {model_to_use_path}")
-            return TextSummarizer._models.get_or_add(
+            model = TextSummarizer._models.get_or_add(
                 model_to_use_path,
                 lambda: ORTModelForSeq2SeqLM.from_pretrained(
                     model_to_use_path, use_cache=False
                 ),
             )
+            # Compatibility patch for newer transformers versions
+            if not hasattr(model, "_supports_cache_class"):
+                logger.debug("Applying compatibility patch for ORTModelForSeq2SeqLM")
+                model._supports_cache_class = False
+
+            logger.info(f"Model cache size: {TextSummarizer._models.size()}")
+            return model
         except FileNotFoundError:
             raise ModelNotFoundError(f"Model not found: {model_to_use_path}")
         except Exception as e:
@@ -153,7 +187,6 @@ class TextSummarizer(BaseNLPService):
         TextSummarizer._special_tokens.clear()
 
     @staticmethod
-    @handle_errors(context="summarization", include_traceback=True)
     def summarize(request: SummarizationRequest) -> SummarizationResponse:
         """Summarize single text."""
         start_time = time.time()
@@ -245,7 +278,7 @@ class TextSummarizer(BaseNLPService):
             ),
             TextSummarizer._root_path,
         )
-        logger.debug(f"Using model path: {model_path}")
+        logger.info(f"Using model path: {model_path}")
 
         use_legacy = getattr(model_config, "legacy_tokenizer", False)
         tokenizer = TextSummarizer._get_tokenizer_threadsafe(model_path, use_legacy)
@@ -262,6 +295,9 @@ class TextSummarizer(BaseNLPService):
         request: SummarizationRequest,
     ) -> SummaryResults:
         """Run Seq2SeqLM summarization."""
+        if ORTModelForSeq2SeqLM is None:
+            raise ModelLoadError("optimum[onnxruntime] not installed")
+
         model = TextSummarizer.get_model(model_path)
         if not model:
             raise ModelLoadError(f"Failed to load Seq2SeqLM model: {model_path}")
@@ -350,7 +386,7 @@ class TextSummarizer(BaseNLPService):
 
     @staticmethod
     def _summarize_seq2seq(
-        model: ORTModelForSeq2SeqLM,
+        model: Any,
         tokenizer: Any,
         model_config: OnnxConfig,
         request: SummarizationRequest,

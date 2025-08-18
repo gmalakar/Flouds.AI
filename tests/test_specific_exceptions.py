@@ -136,8 +136,6 @@ class TestSpecificExceptions:
 
     def test_exception_error_codes(self):
         """Test that exceptions have proper error codes."""
-        from app.exceptions import FloudsBaseException
-
         # Test default error code
         exc = DatabaseConnectionError("Test message")
         assert exc.error_code == "DatabaseConnectionError"

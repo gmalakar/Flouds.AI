@@ -6,15 +6,13 @@
 
 """Middleware for path security validation."""
 
-import json
 import re
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
-from app.exceptions import ResourceException
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
 

@@ -4,7 +4,6 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import List
 
 from fastapi import APIRouter, HTTPException
 

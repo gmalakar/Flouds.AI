@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from app.models.base_response import BaseResponse
 

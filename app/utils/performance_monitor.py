@@ -6,8 +6,7 @@
 
 import time
 from contextlib import contextmanager
-from functools import wraps
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import psutil
 
@@ -70,21 +69,6 @@ class PerformanceMonitor:
                 duration,
                 memory_delta,
             )
-
-    @staticmethod
-    def performance_decorator(operation_name: Optional[str] = None):
-        """Decorator to measure function performance."""
-
-        def decorator(func):
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                name = operation_name or f"{func.__module__}.{func.__name__}"
-                with PerformanceMonitor.measure_time(name):
-                    return func(*args, **kwargs)
-
-            return wrapper
-
-        return decorator
 
     @staticmethod
     def check_resource_thresholds(
