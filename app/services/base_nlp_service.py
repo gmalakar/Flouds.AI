@@ -129,6 +129,22 @@ class BaseNLPService:
                             tokenizer_path, local_files_only=True, legacy=True
                         )
                     except Exception as ex:
+                        if "PyPreTokenizerTypeWrapper" in str(ex):
+                            logger.warning(
+                                "PyPreTokenizerTypeWrapper error, trying from HuggingFace for %s",
+                                sanitize_for_log(tokenizer_path),
+                            )
+                            # Extract model name from path for HuggingFace download
+                            model_name = os.path.basename(tokenizer_path)
+                            if model_name in ["sentence-t5-base", "all-MiniLM-L6-v2"]:
+                                tokenizer = AutoTokenizer.from_pretrained(
+                                    f"sentence-transformers/{model_name}", legacy=True
+                                )
+                            else:
+                                raise ex
+                        else:
+                            raise ex
+                    except Exception as ex:
                         logger.error(
                             "Failed to load tokenizer for %s: %s",
                             sanitize_for_log(tokenizer_path),
@@ -160,7 +176,7 @@ class BaseNLPService:
     @staticmethod
     def _get_encoder_session(encoder_model_path: str) -> Optional[ort.InferenceSession]:
         """
-        Get or create ONNX session with error handling.
+        Get or create ONNX session with error handling and fallback to regular model.
         Adds provider to cache key for multi-provider support.
         """
         try:
@@ -177,9 +193,21 @@ class BaseNLPService:
 
             cache_key = f"{encoder_model_path}#{provider}"
 
+            # First check if session is already cached
+            cached_session = BaseNLPService._encoder_sessions.get(cache_key)
+            if cached_session is not None:
+                return cached_session
+
+            # Session not in cache - check memory and clear if needed
+            from app.utils.cache_manager import CacheManager
+
+            CacheManager.check_and_clear_cache_if_needed()
+
+            def create_session():
+                return ort.InferenceSession(encoder_model_path, providers=[provider])
+
             return BaseNLPService._encoder_sessions.get_or_add(
-                cache_key,
-                lambda: ort.InferenceSession(encoder_model_path, providers=[provider]),
+                cache_key, create_session
             )
         except (OSError, FileNotFoundError) as e:
             logger.error(

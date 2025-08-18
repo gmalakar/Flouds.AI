@@ -5,7 +5,7 @@
 # =============================================================================
 
 import re
-from typing import Any, Union
+from typing import Any
 
 
 def sanitize_for_log(value: Any) -> str:

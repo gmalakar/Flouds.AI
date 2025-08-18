@@ -4,10 +4,8 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import List
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
 from app.exceptions import FloudsBaseException
 from app.logger import get_logger

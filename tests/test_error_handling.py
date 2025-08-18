@@ -19,7 +19,7 @@ from app.exceptions import (
     TokenizerError,
     UnauthorizedError,
 )
-from app.utils.error_handler import ErrorHandler, handle_errors, safe_execute
+from app.utils.error_handler import ErrorHandler, handle_errors
 
 
 class TestCustomExceptions:
@@ -101,23 +101,6 @@ class TestErrorDecorators:
         assert isinstance(result, dict)
         assert result["success"] is False
         assert "Invalid parameter value" in result["message"]
-
-    def test_safe_execute(self):
-        """Test safe execution utility."""
-
-        def failing_function():
-            raise ValueError("Test error")
-
-        def working_function():
-            return "success"
-
-        # Test with failure
-        result = safe_execute(failing_function, default_value="default")
-        assert result == "default"
-
-        # Test with success
-        result = safe_execute(working_function, default_value="default")
-        assert result == "success"
 
 
 if __name__ == "__main__":

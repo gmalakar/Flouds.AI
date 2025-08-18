@@ -8,11 +8,21 @@ import os
 import signal
 import sys
 import warnings
+from contextlib import asynccontextmanager
 
 # Suppress PyTorch ONNX warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
 
-from fastapi import FastAPI, HTTPException, Request
+print("Starting imports...")
+import gc
+
+from fastapi import FastAPI, Request
+
+print("FastAPI imported")
+
+# Force garbage collection to free memory
+gc.collect()
+print("Memory cleanup completed")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -25,10 +35,29 @@ from app.middleware.path_security import PathSecurityMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_validation import RequestValidationMiddleware
 from app.routers import admin, embedder, health, summarizer
+from app.utils.background_cleanup import (
+    start_background_cleanup,
+    stop_background_cleanup,
+)
 from app.utils.error_handler import ErrorHandler
 from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events."""
+    # Startup
+    logger.info("Starting background cleanup service")
+    start_background_cleanup(cleanup_interval=60.0, max_age_seconds=60.0)
+
+    yield
+
+    # Shutdown
+    logger.info("Stopping background cleanup service")
+    stop_background_cleanup()
+
 
 app = FastAPI(
     title=APP_SETTINGS.app.name,
@@ -37,6 +66,7 @@ app = FastAPI(
     openapi_url="/api/v1/openapi.json",
     docs_url="/api/v1/docs",
     redoc_url="/api/v1/redoc",
+    lifespan=lifespan,
 )
 
 
@@ -180,11 +210,21 @@ def run_server():
 
 if __name__ == "__main__":
     try:
+        print("Starting Flouds AI application...")
         run_server()
     except KeyboardInterrupt:
+        print("Application stopped by user")
         logger.info("Application stopped by user")
+    except MemoryError as e:
+        print(f"Out of memory error: {e}")
+        logger.error("Out of memory error:", exc_info=e)
+        sys.exit(137)  # Docker OOM exit code
     except Exception as e:
+        print(f"Fatal error during startup: {e}")
         logger.error("Fatal error:", exc_info=e)
+        import traceback
+
+        traceback.print_exc()
         sys.exit(1)
 
 # Run Instruction

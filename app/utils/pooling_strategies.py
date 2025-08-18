@@ -77,26 +77,56 @@ class PoolingStrategies:
             return embedding[0]
 
         if strategy in ["cls", "first"]:
-            return embedding[0] if embedding.ndim >= 2 else embedding
+            if embedding.ndim == 3:  # (batch, seq_len, embedding_dim)
+                return embedding[0, 0]  # First token of first batch
+            elif embedding.ndim == 2:  # (seq_len, embedding_dim)
+                return embedding[0]  # First token
+            else:
+                return embedding
+
+        elif strategy == "none" or strategy == "no_pooling":
+            # Return raw last hidden state without pooling
+            return embedding
 
         elif strategy == "last":
-            if attention_mask is not None and embedding.ndim == 3:
-                # Get last non-padded token for each sequence
-                indices = np.maximum(attention_mask.sum(axis=1) - 1, 0)
-                return embedding[np.arange(embedding.shape[0]), indices]
-            return embedding[-1] if embedding.ndim >= 2 else embedding
+            if attention_mask is not None:
+                if embedding.ndim == 3:  # (batch, seq_len, embedding_dim)
+                    # Get last non-padded token for each sequence
+                    indices = np.maximum(attention_mask.sum(axis=1) - 1, 0)
+                    return embedding[0, indices[0]]  # First batch, last valid token
+                elif embedding.ndim == 2:  # (seq_len, embedding_dim)
+                    indices = np.maximum(attention_mask.sum() - 1, 0)
+                    return embedding[indices]
+            # Fallback without attention mask
+            if embedding.ndim == 3:
+                return embedding[0, -1]  # First batch, last token
+            elif embedding.ndim == 2:
+                return embedding[-1]  # Last token
+            else:
+                return embedding
 
         elif strategy == "max":
             if attention_mask is not None and embedding.ndim == 3:
                 return PoolingStrategies.max_pooling(embedding, attention_mask)
-            return embedding.max(axis=1) if embedding.ndim >= 2 else embedding
+            elif embedding.ndim == 3:
+                return embedding[0].max(axis=0)  # First batch, max over sequence
+            elif embedding.ndim == 2:
+                return embedding.max(axis=0)  # Max over sequence
+            else:
+                return embedding
 
         # Default to mean pooling
         if attention_mask is not None and embedding.ndim == 3:
             logger.debug(f"Applying pooling strategy: {strategy} has applied")
             return PoolingStrategies.mean_pooling(embedding, attention_mask)
-
-        logger.debug(
-            f"Applying pooling strategy without attention mask: {strategy} has applied"
-        )
-        return embedding.mean(axis=1) if embedding.ndim >= 2 else embedding
+        elif embedding.ndim == 3:
+            logger.debug(f"Applying mean pooling without attention mask for 3D tensor")
+            return embedding[0].mean(axis=0)  # First batch, mean over sequence
+        elif embedding.ndim == 2:
+            logger.debug(f"Applying mean pooling without attention mask for 2D tensor")
+            return embedding.mean(axis=0)  # Mean over sequence
+        else:
+            logger.debug(
+                f"Applying pooling strategy without attention mask: {strategy} has applied"
+            )
+            return embedding

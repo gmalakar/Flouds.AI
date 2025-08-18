@@ -7,7 +7,7 @@
 import base64
 import os
 from functools import lru_cache
-from typing import Dict, List, Optional, Set
+from typing import Optional, Set
 
 from cryptography.fernet import Fernet
 
@@ -15,11 +15,9 @@ from app.exceptions import (
     DatabaseConnectionError,
     DatabaseCorruptionError,
     DecryptionError,
-    EncryptionKeyError,
 )
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
-from app.utils.path_validator import validate_safe_path
 from tinydb import Query, TinyDB
 
 logger = get_logger("key_manager")

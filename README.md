@@ -381,17 +381,21 @@ curl -X POST "http://localhost:19690/api/v1/embedder/embed" \
   -d '{
     "model": "all-MiniLM-L6-v2",
     "input": "Text to embed",
-    "projected_dimension": 128
+    "projected_dimension": 128,
+    "pooling_strategy": "mean"
   }'
 
-# Batch embedding
+# Batch embedding with custom parameters
 curl -X POST "http://localhost:19690/api/v1/embedder/embed_batch" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <client_id>|<client_secret>" \
   -d '{
     "model": "all-MiniLM-L6-v2",
     "inputs": ["Text 1", "Text 2"],
-    "projected_dimension": 128
+    "projected_dimension": 64,
+    "pooling_strategy": "cls",
+    "normalize": true,
+    "max_length": 256
   }'
 ```
 
@@ -839,11 +843,54 @@ Flouds AI uses API versioning with the `/api/v1` prefix for all endpoints:
 | `/api/v1/docs` | GET | Interactive API docs | ❌ |
 | `/api/v1/health/performance` | GET | Performance metrics | ❌ |
 
+### Parameter Override Behavior
+
+Flouds AI uses a **request-first, config-fallback** approach:
+
+1. **Request parameter provided**: Uses the request parameter value
+2. **Request parameter is `null`**: Falls back to model configuration value
+3. **Both are `null`**: Uses system defaults
+
+**Available Override Parameters:**
+- `projected_dimension`: Target embedding dimension (e.g., 64, 128, 256)
+- `pooling_strategy`: Pooling method (`"mean"`, `"max"`, `"cls"`, `"first"`, `"last"`, `"none"`)
+- `max_length`: Maximum token length for input text
+- `chunk_logic`: Text chunking strategy (`"sentence"`, `"paragraph"`, `"fixed"`)
+- `chunk_overlap`: Number of overlapping tokens/sentences between chunks
+- `chunk_size`: Fixed chunk size in tokens (for `"fixed"` chunking)
+- `normalize`: Normalize embedding vectors to unit length
+- `force_pooling`: Force pooling even for single-token sequences
+- `legacy_tokenizer`: Use legacy tokenizer for older models
+- `lowercase`: Convert input text to lowercase
+- `remove_emojis`: Remove emojis and non-ASCII characters
+- `use_optimized`: Use optimized ONNX model if available
+
 ### Response Headers
 
 - `X-Processing-Time`: Request processing time in seconds
 - `X-RateLimit-Remaining-Minute`: Remaining requests this minute
 - `X-RateLimit-Remaining-Hour`: Remaining requests this hour
+
+### Response Format
+
+All embedding responses include a `used_parameters` field showing the actual parameter values used:
+
+```json
+{
+  "success": true,
+  "message": "Embedding generated successfully",
+  "model": "sentence-t5-base",
+  "results": [...],
+  "used_parameters": {
+    "pooling_strategy": "cls",
+    "projected_dimension": 64,
+    "max_length": 256,
+    "normalize": true,
+    "force_pooling": true
+  },
+  "time_taken": 0.45
+}
+```
 
 ---
 
@@ -980,6 +1027,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 - ✅ **Encrypted Client Storage** - Secure credential management with Fernet encryption
 - ✅ **Optimized Caching** - LRU caches with sliding expiration and automatic cleanup
 - ✅ **Resource Leak Prevention** - Proper cleanup and resource management
+- ✅ **Code Quality Improvements** - Removed unused imports and optimized dependency management
 
 ### Security Compliance
 
