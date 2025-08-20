@@ -272,24 +272,49 @@ python -m app.main
 
 ## Exporting Models to ONNX
 
-To use ONNX models, you need to export them from HuggingFace format.  
-The export process includes automatic warning suppression for cleaner output.
-Use the scripts in `onnx_loaders/load_scripts.txt` as examples:
+Flouds AI provides two export methods for converting HuggingFace models to ONNX format:
 
-```plaintext
+### Method 1: Standard Export (`export_model.py`)
+Uses optimum's built-in export with automatic fallbacks and optimizations.
+
+```bash
+# Embedding models
 python onnx_loaders/export_model.py --model_for "fe" --model_name "sentence-transformers/all-MiniLM-L6-v2" --optimize
+python onnx_loaders/export_model.py --model_for "fe" --model_name "sentence-transformers/all-mpnet-base-v2" --optimize
+
+# Summarization models  
 python onnx_loaders/export_model.py --model_for "s2s" --model_name "t5-small" --optimize --task "seq2seq-lm"
-python onnx_loaders/export_model.py --model_for "fe" --model_name "PleIAs/Pleias-Pico" --optimize
-python onnx_loaders/export_model.py --model_for "s2s" --model_name "PleIAs/Pleias-Pico" --optimize --task "seq2seq-lm"
-python onnx_loaders/export_model.py --model_for "fe" --model_name "sentence-transformers/sentence-t5-base" --optimize --use_t5_encoder
-python onnx_loaders/export_model.py --model_for "s2s" --model_name "google/pegasus-cnn_dailymail" --task "seq2seq-lm"
-python onnx_loaders/export_model.py --model_for "s2s" --model_name "Falconsai/text_summarization" --task "seq2seq-lm" --model_folder "falconsai_text_summarization"
+python onnx_loaders/export_model.py --model_for "s2s" --model_name "facebook/bart-large-cnn" --optimize --task "text2text-generation-with-past" --use_cache
 ```
 
+### Method 2: Manual Export (`export_model_v2.py`) ⭐ **Recommended**
+Uses direct optimum main_export with enhanced error handling and validation.
+
+```bash
+# Embedding models
+python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "sentence-transformers/all-MiniLM-L6-v2" --task "feature-extraction" --optimize
+python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "sentence-transformers/all-mpnet-base-v2" --task "feature-extraction" --opset_version 17
+
+# Summarization models
+python onnx_loaders/export_model_v2.py --model_for "s2s" --model_name "t5-small" --task "seq2seq-lm" --optimize
+python onnx_loaders/export_model_v2.py --model_for "s2s" --model_name "facebook/bart-large-cnn" --task "text2text-generation-with-past" --optimize
+```
+
+### Export Parameters
 - `"fe"` = feature extraction (embedding)
-- `"s2s"` = sequence-to-sequence (summarization)
-- `--optimize` enables ONNX graph optimizations
-- `--task` specifies the HuggingFace task type
+- `"s2s"` = sequence-to-sequence (summarization)  
+- `"sc"` = sequence classification
+- `--task` = **Required for v2** - HuggingFace task type
+- `--optimize` = Enable ONNX graph optimizations
+- `--opset_version` = ONNX opset version (default: 14)
+- `--model_folder` = Custom output folder name
+
+### Key Improvements in v2
+- ✅ **Enhanced Error Handling**: Detailed stack traces and corruption detection
+- ✅ **Model Validation**: Automatic verification and cleanup of corrupted files
+- ✅ **Flexible ONNX Opset**: Configurable opset versions (11-17)
+- ✅ **Better Optimization**: Graceful handling of unsupported model types
+- ✅ **Mandatory Task Parameter**: Prevents export configuration errors
 
 ---
 
@@ -1019,6 +1044,10 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ### Recent Improvements
 
+- ✅ **Enhanced ONNX Export** - New export_model_v2.py with improved error handling and validation
+- ✅ **Smart Cache Management** - Only clear cache when memory is low AND item not cached
+- ✅ **Model Validation** - Automatic verification and cleanup of corrupted ONNX files
+- ✅ **Flexible Opset Support** - Configurable ONNX opset versions (11-17) for compatibility
 - ✅ **100% Log Sanitization Coverage** - All user inputs sanitized to prevent log injection
 - ✅ **Path Traversal Protection** - Safe path validation for all file operations
 - ✅ **Performance Optimizations** - 60% faster rate limiting, 40% faster authentication
@@ -1027,7 +1056,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 - ✅ **Encrypted Client Storage** - Secure credential management with Fernet encryption
 - ✅ **Optimized Caching** - LRU caches with sliding expiration and automatic cleanup
 - ✅ **Resource Leak Prevention** - Proper cleanup and resource management
-- ✅ **Code Quality Improvements** - Removed unused imports and optimized dependency management
 
 ### Security Compliance
 
