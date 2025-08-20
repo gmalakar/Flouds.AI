@@ -23,6 +23,29 @@
         "use_optimized": true,
         "encoder_optimized_onnx_model": "model_optimized.onnx"
     },
+    "e5-base-v2": {
+        "dimension": 768,
+        "max_length": 512,
+        "embedder_task": "fe",
+        "normalize": true,
+        "pooling_strategy": "mean",
+        "chunk_logic": "sentence",
+        "chunk_overlap": 1,
+        "legacy_tokenizer": false,
+        "lowercase": false,
+        "remove_emojis": false,
+        "force_pooling": true,
+        "inputnames": {
+            "input": "input_ids",
+            "mask": "attention_mask"
+        },
+        "outputnames": {
+            "output": "last_hidden_state"
+        },
+        "encoder_onnx_model": "model.onnx",
+        "use_optimized": true,
+        "encoder_optimized_onnx_model": "model_optimized.onnx"
+    },
     "paraphrase-MiniLM-L6-v2": {
         "dimension": 384,
         "max_length": 384,
