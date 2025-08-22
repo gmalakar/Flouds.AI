@@ -66,5 +66,4 @@ class OnnxConfig(BaseModel):
     )  # Use legacy tokenizer for older models
     lowercase: bool = Field(default=False)  # Convert text to lowercase
     remove_emojis: bool = Field(default=False)  # Remove emojis and non-ASCII characters
-    use_t5_encoder: bool = Field(default=False)  # Use T5 encoder for embeddings
     force_pooling: bool = Field(default=False)  # Force pooling for embeddings
