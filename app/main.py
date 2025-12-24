@@ -10,6 +10,8 @@ import sys
 import warnings
 from contextlib import asynccontextmanager
 
+from app.middleware import auth
+
 # Suppress PyTorch ONNX warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
 
@@ -34,7 +36,16 @@ from app.middleware.auth import AuthMiddleware
 from app.middleware.path_security import PathSecurityMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_validation import RequestValidationMiddleware
-from app.routers import admin, embedder, health, summarizer
+from app.routers import (
+    admin,
+    embedder,
+    extract_embed,
+    extractor,
+    health,
+    rag,
+    sendprompt,
+    summarizer,
+)
 from app.utils.background_cleanup import (
     start_background_cleanup,
     stop_background_cleanup,
@@ -87,6 +98,34 @@ async def flouds_exception_handler(request: Request, exc: FloudsBaseException):
             "message": exc.message,
             "error_code": exc.error_code,
             "detail": exc.message,
+        },
+    )
+
+
+@app.exception_handler(MemoryError)
+async def memory_error_handler(request: Request, exc: MemoryError):
+    """Handle out-of-memory errors without crashing the service."""
+    logger.error(
+        "Out of memory error in %s: %s",
+        sanitize_for_log(str(request.url)),
+        sanitize_for_log(str(exc)),
+    )
+    # Trigger cache cleanup
+    try:
+        from app.utils.cache_manager import CacheManager
+
+        CacheManager.clear_all_caches()
+        logger.info("Cleared caches after memory error")
+    except Exception as cleanup_err:
+        logger.warning(f"Cache cleanup failed: {cleanup_err}")
+
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "message": "Out of memory: request too large or system resources exhausted",
+            "error_code": "OUT_OF_MEMORY",
+            "detail": "Please reduce input size or try again later",
         },
     )
 
@@ -145,8 +184,26 @@ app.include_router(
     summarizer.router, prefix="/api/v1/summarizer", tags=["Text Summarization"]
 )
 app.include_router(embedder.router, prefix="/api/v1/embedder", tags=["Text Embedding"])
+app.include_router(
+    rag.router, prefix="/api/v1/rag", tags=["RAG (Retrieval-Augmented Generation)"]
+)
 app.include_router(health.router, prefix="/api/v1", tags=["Health & Monitoring"])
 app.include_router(admin.router, prefix="/api/v1", tags=["Administration"])
+app.include_router(sendprompt.router, prefix="/api/v1", tags=["Prompt Processing"])
+
+app.include_router(
+    auth.router, prefix="/api/v1/secure-endpoint", tags=["Secure Endpoint"]
+)
+
+app.include_router(
+    extractor.router, prefix="/api/v1/extractor", tags=["Text Extraction"]
+)
+
+app.include_router(
+    extract_embed.router,
+    prefix="/api/v1/extract-embed",
+    tags=["Extract and Embed"],
+)
 
 
 @app.get("/")
@@ -163,6 +220,14 @@ def root() -> dict:
 def api_v1_root() -> dict:
     """API v1 root endpoint."""
     return {"message": "Flouds AI API v1", "version": "v1", "docs": "/api/v1/docs"}
+
+
+@app.get("/favicon.ico")
+def favicon():
+    """Return empty response for favicon requests."""
+    from fastapi.responses import Response
+
+    return Response(status_code=204)
 
 
 def cleanup_handlers():
@@ -228,5 +293,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
 # Run Instruction
+# Set Env: $env:FLOUDS_API_ENV="Development"
 # Unit Test : python -m pytest
 # Run for terminal: python -m app.main

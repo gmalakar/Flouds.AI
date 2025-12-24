@@ -1,5 +1,5 @@
 # =============================================================================
-# File: summarizer_service.py
+# File: prompt_service.py
 # Date: 2025-01-15
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
@@ -30,18 +30,15 @@ from app.exceptions import (
     TokenizerError,
 )
 from app.logger import get_logger
-from app.models.summarization_request import (
-    SummarizationBatchRequest,
-    SummarizationRequest,
-)
-from app.models.summarization_response import SummarizationResponse
+from app.models.prompt_request import PromptBatchRequest, PromptRequest
+from app.models.prompt_response import PromptResponse
 from app.modules.concurrent_dict import ConcurrentDict
 from app.services.base_nlp_service import BaseNLPService
 from app.utils.batch_limiter import BatchLimiter
 from app.utils.log_sanitizer import sanitize_for_log
 from app.utils.path_validator import validate_safe_path
 
-logger = get_logger("summarizer_service")
+logger = get_logger("prompt_service")
 
 # Constants
 DEFAULT_MODEL = "t5-small"
@@ -49,6 +46,9 @@ DEFAULT_TIMEOUT = 60
 DEFAULT_MAX_LENGTH = 128
 DEFAULT_BATCH_SIZE = 20
 DEFAULT_VOCAB_SIZE = 32000
+_CACHE_LIMIT_DECODER = int(os.getenv("FLOUDS_DECODER_CACHE_MAX", "3"))
+_CACHE_LIMIT_MODELS = int(os.getenv("FLOUDS_MODEL_CACHE_MAX", "2"))
+_CACHE_LIMIT_SPECIAL = int(os.getenv("FLOUDS_SPECIAL_TOKENS_CACHE_MAX", "8"))
 
 
 class SummaryResults(BaseModel):
@@ -57,17 +57,23 @@ class SummaryResults(BaseModel):
     success: bool = Field(default=True)
 
 
-class TextSummarizer(BaseNLPService):
+class PromptProcessor(BaseNLPService):
     """Static class for text summarization using ONNX models."""
 
-    _decoder_sessions: ConcurrentDict = ConcurrentDict("_decoder_sessions")
-    _models: ConcurrentDict = ConcurrentDict("_models")
-    _special_tokens: ConcurrentDict = ConcurrentDict("_special_tokens")
+    _decoder_sessions: ConcurrentDict = ConcurrentDict(
+        "_decoder_sessions", max_size=_CACHE_LIMIT_DECODER
+    )
+    _models: ConcurrentDict = ConcurrentDict("_models", max_size=_CACHE_LIMIT_MODELS)
+    _special_tokens: ConcurrentDict = ConcurrentDict(
+        "_special_tokens", max_size=_CACHE_LIMIT_SPECIAL
+    )
 
     @staticmethod
     def _load_special_tokens(special_tokens_path: str) -> Set[str]:
         """Load special tokens from JSON file."""
-        logger.debug(f"Loading special tokens from: {special_tokens_path}")
+        logger.debug(
+            "Loading special tokens from: %s", sanitize_for_log(special_tokens_path)
+        )
         if not os.path.exists(special_tokens_path):
             logger.warning(f"Special tokens file not found: {special_tokens_path}")
             return set()
@@ -76,7 +82,7 @@ class TextSummarizer(BaseNLPService):
             from app.utils.path_validator import safe_open
 
             with safe_open(
-                special_tokens_path, TextSummarizer._root_path, "r", encoding="utf-8"
+                special_tokens_path, PromptProcessor._root_path, "r", encoding="utf-8"
             ) as f:
                 data = json.load(f)
 
@@ -114,7 +120,7 @@ class TextSummarizer(BaseNLPService):
             cache_key = f"{decoder_model_path}#{provider}"
 
             # First check if session is already cached
-            cached_session = TextSummarizer._decoder_sessions.get(cache_key)
+            cached_session = PromptProcessor._decoder_sessions.get(cache_key)
             if cached_session is not None:
                 return cached_session
 
@@ -124,9 +130,11 @@ class TextSummarizer(BaseNLPService):
             CacheManager.check_and_clear_cache_if_needed()
 
             logger.debug(
-                f"Creating decoder session for {decoder_model_path} with provider {provider}"
+                "Creating decoder session for %s with provider %s",
+                sanitize_for_log(decoder_model_path),
+                sanitize_for_log(provider),
             )
-            return TextSummarizer._decoder_sessions.get_or_add(
+            return PromptProcessor._decoder_sessions.get_or_add(
                 cache_key,
                 lambda: ort.InferenceSession(decoder_model_path, providers=[provider]),
             )
@@ -137,20 +145,23 @@ class TextSummarizer(BaseNLPService):
     @staticmethod
     def _get_special_tokens(special_tokens_path: str) -> Set[str]:
         """Get cached special tokens."""
-        return TextSummarizer._special_tokens.get_or_add(
+        return PromptProcessor._special_tokens.get_or_add(
             special_tokens_path,
-            lambda: TextSummarizer._load_special_tokens(special_tokens_path),
+            lambda: PromptProcessor._load_special_tokens(special_tokens_path),
         )
 
     @staticmethod
     def get_model(model_to_use_path: str) -> Optional[Any]:
         """Get cached ONNX model with error handling."""
         if ORTModelForSeq2SeqLM is None:
-            raise ModelLoadError("optimum[onnxruntime] not installed")
+            logger.warning(
+                "optimum[onnxruntime] not installed; skipping Seq2SeqLM load"
+            )
+            return None
 
         try:
             # First check if model is already cached
-            cached_model = TextSummarizer._models.get(model_to_use_path)
+            cached_model = PromptProcessor._models.get(model_to_use_path)
             if cached_model is not None:
                 return cached_model
 
@@ -160,7 +171,7 @@ class TextSummarizer(BaseNLPService):
             CacheManager.check_and_clear_cache_if_needed()
 
             logger.debug(f"Loading model from path: {model_to_use_path}")
-            model = TextSummarizer._models.get_or_add(
+            model = PromptProcessor._models.get_or_add(
                 model_to_use_path,
                 lambda: ORTModelForSeq2SeqLM.from_pretrained(
                     model_to_use_path, use_cache=False
@@ -171,7 +182,7 @@ class TextSummarizer(BaseNLPService):
                 logger.debug("Applying compatibility patch for ORTModelForSeq2SeqLM")
                 model._supports_cache_class = False
 
-            logger.info(f"Model cache size: {TextSummarizer._models.size()}")
+            logger.info(f"Model cache size: {PromptProcessor._models.size()}")
             return model
         except FileNotFoundError:
             raise ModelNotFoundError(f"Model not found: {model_to_use_path}")
@@ -182,22 +193,22 @@ class TextSummarizer(BaseNLPService):
     def clear_model_cache():
         """Clear model/session/special token caches (for testing/reloading)."""
         logger.info("Clearing model/session/special token caches.")
-        TextSummarizer._models.clear()
-        TextSummarizer._decoder_sessions.clear()
-        TextSummarizer._special_tokens.clear()
+        PromptProcessor._models.clear()
+        PromptProcessor._decoder_sessions.clear()
+        PromptProcessor._special_tokens.clear()
 
     @staticmethod
-    def summarize(request: SummarizationRequest) -> SummarizationResponse:
-        """Summarize single text."""
+    def process_prompt(request: PromptRequest) -> PromptResponse:
+        """Process prompt for text generation/summarization."""
         start_time = time.time()
         logger.debug(
-            "Summarizing text for model: %s, input: %s",
+            "Processing prompt for model: %s, input: %s",
             sanitize_for_log(request.model),
             sanitize_for_log(request.input[:100]),
         )
-        response = SummarizationResponse(
+        response = PromptResponse(
             success=True,
-            message="Summarization generated successfully",
+            message="Prompt processed successfully",
             model=request.model or DEFAULT_MODEL,
             results=[],
         )
@@ -215,10 +226,10 @@ class TextSummarizer(BaseNLPService):
             timer.start()
 
             try:
-                result = TextSummarizer._summarize_local(request)
+                result = PromptProcessor._process_prompt_local(request)
                 if timeout_occurred[0]:
                     raise ProcessingTimeoutError(
-                        f"Summarization timed out after {timeout} seconds"
+                        f"Prompt processing timed out after {timeout} seconds"
                     )
                 elif result.success:
                     response.results.append(result.summary)
@@ -233,25 +244,38 @@ class TextSummarizer(BaseNLPService):
             return response
 
     @staticmethod
-    def _summarize_local(request: SummarizationRequest) -> SummaryResults:
-        """Core summarization logic."""
+    def summarize(request: PromptRequest) -> PromptResponse:
+        """Backward compatibility method for summarization."""
+        return PromptProcessor.process_prompt(request)
+
+    @staticmethod
+    def _process_prompt_local(request: PromptRequest) -> SummaryResults:
+        """Core prompt processing logic."""
         model_to_use = request.model or DEFAULT_MODEL
 
         try:
-            model_config = TextSummarizer._get_model_config(model_to_use)
+            model_config = PromptProcessor._get_model_config(model_to_use)
             if not model_config:
-                raise ModelLoadError(f"Failed to load config for model: {model_to_use}")
+                return SummaryResults(
+                    summary="",
+                    message=f"Model '{model_to_use}' not found",
+                    success=False,
+                )
 
-            model_path, tokenizer = TextSummarizer._prepare_model_resources(
+            model_path, tokenizer = PromptProcessor._prepare_model_resources(
                 model_config, model_to_use
             )
 
             if getattr(model_config, "use_seq2seqlm", False):
-                return TextSummarizer._run_seq2seq_summarization(
+                return PromptProcessor._run_seq2seq_generation(
+                    model_path, tokenizer, model_config, request
+                )
+            elif getattr(model_config, "encoder_only", False):
+                return PromptProcessor._run_encoder_only_generation(
                     model_path, tokenizer, model_config, request
                 )
             else:
-                return TextSummarizer._run_onnx_summarization(
+                return PromptProcessor._run_onnx_generation(
                     model_path, tokenizer, model_config, request
                 )
 
@@ -262,7 +286,7 @@ class TextSummarizer(BaseNLPService):
         except (ValueError, KeyError) as e:
             raise InferenceError(f"Invalid model configuration: {e}")
         except Exception as e:
-            raise InferenceError(f"Error generating summarization: {e}")
+            raise InferenceError(f"Error generating text: {e}")
 
     @staticmethod
     def _prepare_model_resources(
@@ -271,55 +295,85 @@ class TextSummarizer(BaseNLPService):
         """Prepare model path and tokenizer."""
         model_path = validate_safe_path(
             os.path.join(
-                TextSummarizer._root_path,
+                PromptProcessor._root_path,
                 "models",
                 model_config.summarization_task or "s2s",
                 model_name,
             ),
-            TextSummarizer._root_path,
+            PromptProcessor._root_path,
         )
-        logger.info(f"Using model path: {model_path}")
+        logger.info("Using model path: %s", sanitize_for_log(model_path))
 
         use_legacy = getattr(model_config, "legacy_tokenizer", False)
-        tokenizer = TextSummarizer._get_tokenizer_threadsafe(model_path, use_legacy)
+        tokenizer = PromptProcessor._get_tokenizer_threadsafe(model_path, use_legacy)
         if not tokenizer:
             raise TokenizerError(f"Failed to load tokenizer: {model_path}")
 
         return model_path, tokenizer
 
     @staticmethod
-    def _run_seq2seq_summarization(
+    def _run_seq2seq_generation(
         model_path: str,
         tokenizer: Any,
         model_config: OnnxConfig,
-        request: SummarizationRequest,
+        request: PromptRequest,
     ) -> SummaryResults:
-        """Run Seq2SeqLM summarization."""
+        """Run Seq2SeqLM text generation."""
         if ORTModelForSeq2SeqLM is None:
-            raise ModelLoadError("optimum[onnxruntime] not installed")
+            logger.info("Seq2SeqLM backend unavailable; falling back to ONNX sessions")
+            return PromptProcessor._run_onnx_generation(
+                model_path, tokenizer, model_config, request
+            )
 
-        model = TextSummarizer.get_model(model_path)
+        model = PromptProcessor.get_model(model_path)
         if not model:
-            raise ModelLoadError(f"Failed to load Seq2SeqLM model: {model_path}")
+            logger.info(
+                "Seq2SeqLM model missing; falling back to ONNX sessions for %s",
+                sanitize_for_log(model_path),
+            )
+            return PromptProcessor._run_onnx_generation(
+                model_path, tokenizer, model_config, request
+            )
 
-        return TextSummarizer._summarize_seq2seq(
+        return PromptProcessor._generate_seq2seq(
             model, tokenizer, model_config, request
         )
 
     @staticmethod
-    def _run_onnx_summarization(
+    def _run_encoder_only_generation(
         model_path: str,
         tokenizer: Any,
         model_config: OnnxConfig,
-        request: SummarizationRequest,
+        request: PromptRequest,
     ) -> SummaryResults:
-        """Run ONNX encoder/decoder summarization."""
-        encoder_path, decoder_path = TextSummarizer._get_model_file_paths(
+        """Run encoder-only ONNX text generation for GPT-style models."""
+        encoder_filename = PromptProcessor._get_model_filename(model_config, "encoder")
+        encoder_path = validate_safe_path(
+            os.path.join(model_path, encoder_filename), PromptProcessor._root_path
+        )
+
+        encoder_session = PromptProcessor._get_encoder_session(encoder_path)
+        if not encoder_session:
+            raise ModelLoadError("Failed to load encoder session")
+
+        return PromptProcessor._generate_encoder_only(
+            encoder_session, tokenizer, model_config, request
+        )
+
+    @staticmethod
+    def _run_onnx_generation(
+        model_path: str,
+        tokenizer: Any,
+        model_config: OnnxConfig,
+        request: PromptRequest,
+    ) -> SummaryResults:
+        """Run ONNX encoder/decoder text generation."""
+        encoder_path, decoder_path = PromptProcessor._get_model_file_paths(
             model_path, model_config
         )
 
-        encoder_session = TextSummarizer._get_encoder_session(encoder_path)
-        decoder_session = TextSummarizer._get_decoder_session(decoder_path)
+        encoder_session = PromptProcessor._get_encoder_session(encoder_path)
+        decoder_session = PromptProcessor._get_decoder_session(decoder_path)
 
         if not encoder_session or not decoder_session:
             raise ModelLoadError("Failed to load ONNX sessions")
@@ -329,11 +383,11 @@ class TextSummarizer(BaseNLPService):
                 model_path,
                 model_config.special_tokens_map_path or "special_tokens_map.json",
             ),
-            TextSummarizer._root_path,
+            PromptProcessor._root_path,
         )
-        special_tokens = TextSummarizer._get_special_tokens(special_tokens_path)
+        special_tokens = PromptProcessor._get_special_tokens(special_tokens_path)
 
-        return TextSummarizer._summarize_onnx(
+        return PromptProcessor._generate_onnx(
             encoder_session,
             decoder_session,
             tokenizer,
@@ -347,14 +401,14 @@ class TextSummarizer(BaseNLPService):
         model_path: str, model_config: OnnxConfig
     ) -> tuple[str, str]:
         """Get encoder and decoder model file paths."""
-        encoder_filename = TextSummarizer._get_model_filename(model_config, "encoder")
-        decoder_filename = TextSummarizer._get_model_filename(model_config, "decoder")
+        encoder_filename = PromptProcessor._get_model_filename(model_config, "encoder")
+        decoder_filename = PromptProcessor._get_model_filename(model_config, "decoder")
 
         encoder_path = validate_safe_path(
-            os.path.join(model_path, encoder_filename), TextSummarizer._root_path
+            os.path.join(model_path, encoder_filename), PromptProcessor._root_path
         )
         decoder_path = validate_safe_path(
-            os.path.join(model_path, decoder_filename), TextSummarizer._root_path
+            os.path.join(model_path, decoder_filename), PromptProcessor._root_path
         )
 
         logger.debug(f"Encoder path: {encoder_path}, Decoder path: {decoder_path}")
@@ -385,49 +439,87 @@ class TextSummarizer(BaseNLPService):
                 return model_config.decoder_onnx_model or "decoder_model.onnx"
 
     @staticmethod
-    def _summarize_seq2seq(
+    def _generate_seq2seq(
         model: Any,
         tokenizer: Any,
         model_config: OnnxConfig,
-        request: SummarizationRequest,
+        request: PromptRequest,
     ) -> SummaryResults:
-        """Summarize using Seq2SeqLM model."""
+        """Generate text using Seq2SeqLM model."""
+        # Preemptive memory check
         try:
-            generate_kwargs = TextSummarizer._build_generation_params(
+            import psutil
+
+            mem = psutil.virtual_memory()
+            if mem.available < 150 * 1024 * 1024:  # Less than 150MB available
+                logger.warning(
+                    f"Low memory before seq2seq generation: {mem.available / 1024 / 1024:.1f}MB available"
+                )
+                from app.utils.cache_manager import CacheManager
+
+                CacheManager.clear_all_caches()
+        except Exception as mem_check_err:
+            logger.debug(f"Memory check failed: {mem_check_err}")
+
+        try:
+            generate_kwargs = PromptProcessor._build_generation_params(
                 model_config, request
             )
-            input_text = TextSummarizer._prepare_input_text(request, model_config)
+            input_text = PromptProcessor._prepare_input_text(request, model_config)
             inputs = tokenizer(input_text, return_tensors="pt")
 
-            summary_ids = model.generate(**inputs, **generate_kwargs)
+            # Use GenerationConfig to avoid deprecation warning
+            try:
+                from transformers import GenerationConfig
+
+                generation_config = GenerationConfig(**generate_kwargs)
+                summary_ids = model.generate(
+                    **inputs, generation_config=generation_config
+                )
+            except ImportError:
+                # Fallback for older transformers versions
+                summary_ids = model.generate(**inputs, **generate_kwargs)
             summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True).strip()
-            summary = TextSummarizer._capitalize_sentences(summary)
+            summary = PromptProcessor._capitalize_sentences(summary)
 
             if not summary:
-                logger.warning(f"Empty summary generated for input: {input_text[:100]}")
+                logger.warning(f"Empty output generated for input: {input_text[:100]}")
 
             return SummaryResults(summary=summary, message="", success=True)
 
-        except Exception as e:
-            logger.exception("Seq2SeqLM summarization failed")
+        except MemoryError as e:
+            logger.error("Out of memory during Seq2Seq generation")
+            try:
+                from app.utils.cache_manager import CacheManager
+
+                CacheManager.clear_all_caches()
+            except:
+                pass
             return SummaryResults(
                 summary="",
-                message=f"Error generating summarization: {str(e)}",
+                message="Out of memory: input text too large. Please reduce size and try again.",
+                success=False,
+            )
+        except Exception as e:
+            logger.exception("Seq2SeqLM generation failed")
+            return SummaryResults(
+                summary="",
+                message=f"Error generating text: {str(e)}",
                 success=False,
             )
 
     @staticmethod
     def _build_generation_params(
-        model_config: OnnxConfig, request: SummarizationRequest
+        model_config: OnnxConfig, request: PromptRequest
     ) -> Dict[str, Any]:
         """Build generation parameters for model."""
         generate_kwargs = {}
 
         # Basic parameters
-        TextSummarizer._add_basic_params(generate_kwargs, model_config)
-        TextSummarizer._add_beam_params(generate_kwargs, model_config)
-        TextSummarizer._add_optional_params(generate_kwargs, model_config)
-        TextSummarizer._add_temperature_params(generate_kwargs, model_config, request)
+        PromptProcessor._add_basic_params(generate_kwargs, model_config)
+        PromptProcessor._add_beam_params(generate_kwargs, model_config)
+        PromptProcessor._add_optional_params(generate_kwargs, model_config)
+        PromptProcessor._add_temperature_params(generate_kwargs, model_config, request)
 
         logger.debug(f"Generation parameters: {generate_kwargs}")
         return generate_kwargs
@@ -439,7 +531,7 @@ class TextSummarizer(BaseNLPService):
         """Add basic generation parameters."""
         for param, default in [("max_length", DEFAULT_MAX_LENGTH), ("min_length", 0)]:
             value = getattr(model_config, param, default)
-            if value:
+            if value is not None:
                 generate_kwargs[param] = value
 
     @staticmethod
@@ -473,7 +565,7 @@ class TextSummarizer(BaseNLPService):
     def _add_temperature_params(
         generate_kwargs: Dict[str, Any],
         model_config: OnnxConfig,
-        request: SummarizationRequest,
+        request: PromptRequest,
     ) -> None:
         """Add temperature and sampling parameters."""
         temperature = request.temperature or getattr(model_config, "temperature", 0.0)
@@ -482,11 +574,9 @@ class TextSummarizer(BaseNLPService):
             generate_kwargs["do_sample"] = True
 
     @staticmethod
-    def _prepare_input_text(
-        request: SummarizationRequest, model_config: OnnxConfig
-    ) -> str:
+    def _prepare_input_text(request: PromptRequest, model_config: OnnxConfig) -> str:
         """Prepare input text for summarization."""
-        input_text = TextSummarizer._prepend_text(
+        input_text = PromptProcessor._prepend_text(
             request.input, getattr(model_config, "prepend_text", None)
         )
         logger.debug(
@@ -496,18 +586,34 @@ class TextSummarizer(BaseNLPService):
         return input_text
 
     @staticmethod
-    def _summarize_onnx(
+    def _generate_onnx(
         encoder_session: ort.InferenceSession,
         decoder_session: ort.InferenceSession,
         tokenizer: Any,
         special_tokens: Set[str],
         model_config: OnnxConfig,
-        request: SummarizationRequest,
+        request: PromptRequest,
     ) -> SummaryResults:
-        """Summarize using ONNX encoder/decoder sessions."""
+        """Generate text using ONNX encoder/decoder sessions."""
+        # Preemptive memory check to avoid OOM crashes
         try:
-            token_config = TextSummarizer._get_token_config(model_config, tokenizer)
-            input_text = TextSummarizer._prepare_input_text(request, model_config)
+            import psutil
+
+            mem = psutil.virtual_memory()
+            if mem.available < 150 * 1024 * 1024:  # Less than 150MB available
+                logger.warning(
+                    f"Low memory before generation: {mem.available / 1024 / 1024:.1f}MB available"
+                )
+                # Trigger preemptive cache clear
+                from app.utils.cache_manager import CacheManager
+
+                CacheManager.clear_all_caches()
+        except Exception as mem_check_err:
+            logger.debug(f"Memory check failed: {mem_check_err}")
+
+        try:
+            token_config = PromptProcessor._get_token_config(model_config, tokenizer)
+            input_text = PromptProcessor._prepare_input_text(request, model_config)
 
             # Tokenize and run encoder
             inputs = tokenizer(
@@ -516,12 +622,12 @@ class TextSummarizer(BaseNLPService):
                 truncation=True,
                 max_length=token_config["max_length"],
             )
-            encoder_outputs = TextSummarizer._run_encoder(
+            encoder_outputs = PromptProcessor._run_encoder(
                 encoder_session, inputs, model_config
             )
 
             # Generate tokens
-            summary_ids = TextSummarizer._generate_tokens(
+            summary_ids = PromptProcessor._generate_tokens(
                 decoder_session,
                 encoder_outputs,
                 inputs,
@@ -530,17 +636,31 @@ class TextSummarizer(BaseNLPService):
                 request,
             )
 
-            # Decode and process summary
-            summary = TextSummarizer._decode_summary(
+            # Decode and process output
+            summary = PromptProcessor._decode_output(
                 summary_ids, tokenizer, special_tokens, input_text
             )
             return SummaryResults(summary=summary, message="", success=True)
 
-        except Exception as e:
-            logger.exception("ONNX summarization failed")
+        except MemoryError as e:
+            logger.error("Out of memory during ONNX generation")
+            # Trigger aggressive cleanup
+            try:
+                from app.utils.cache_manager import CacheManager
+
+                CacheManager.clear_all_caches()
+            except:
+                pass
             return SummaryResults(
                 summary="",
-                message=f"Error generating summarization: {str(e)}",
+                message="Out of memory: input text too large. Please reduce size and try again.",
+                success=False,
+            )
+        except Exception as e:
+            logger.exception("ONNX generation failed")
+            return SummaryResults(
+                summary="",
+                message=f"Error generating text: {str(e)}",
                 success=False,
             )
 
@@ -596,7 +716,7 @@ class TextSummarizer(BaseNLPService):
         inputs: Dict,
         token_config: Dict[str, int],
         model_config: OnnxConfig,
-        request: SummarizationRequest,
+        request: PromptRequest,
     ) -> list[int]:
         """Generate tokens using decoder."""
         decoder_input_names = model_config.decoder_inputnames
@@ -634,8 +754,18 @@ class TextSummarizer(BaseNLPService):
                 logger.error(f"Decoder inference error: {e}")
                 break
 
-            next_token_id = TextSummarizer._sample_next_token(
-                decoder_outputs[0], temperature
+            # Get advanced sampling parameters from config
+            top_k = getattr(model_config, "top_k", None)
+            top_p = getattr(model_config, "top_p", None)
+            repetition_penalty = getattr(model_config, "repetition_penalty", None)
+
+            next_token_id = PromptProcessor._sample_next_token(
+                decoder_outputs[0],
+                temperature,
+                top_k,
+                top_p,
+                summary_ids,
+                repetition_penalty,
             )
 
             # Validate token ID
@@ -657,8 +787,15 @@ class TextSummarizer(BaseNLPService):
         return summary_ids
 
     @staticmethod
-    def _sample_next_token(logits_arr: ndarray, temperature: float) -> int:
-        """Sample next token from logits."""
+    def _sample_next_token(
+        logits_arr: ndarray,
+        temperature: float,
+        top_k: int = None,
+        top_p: float = None,
+        generated_ids: list = None,
+        repetition_penalty: float = None,
+    ) -> int:
+        """Sample next token from logits with top_k, top_p, and repetition penalty."""
         if logits_arr.ndim == 3:
             logits = logits_arr[:, -1, :][0]
         elif logits_arr.ndim == 2:
@@ -666,32 +803,184 @@ class TextSummarizer(BaseNLPService):
         else:
             logits = logits_arr
 
+        # Apply repetition penalty
+        if repetition_penalty and repetition_penalty != 1.0 and generated_ids:
+            for token_id in set(generated_ids):
+                if token_id < len(logits):
+                    if logits[token_id] < 0:
+                        logits[token_id] *= repetition_penalty
+                    else:
+                        logits[token_id] /= repetition_penalty
+
         if temperature > 0.0:
-            probs = TextSummarizer._softmax(logits / temperature)
+            logits = logits / temperature
+
+            # Apply top_k filtering
+            if top_k and top_k > 0:
+                top_k_indices = np.argpartition(logits, -top_k)[-top_k:]
+                filtered_logits = np.full_like(logits, -np.inf)
+                filtered_logits[top_k_indices] = logits[top_k_indices]
+                logits = filtered_logits
+
+            probs = PromptProcessor._softmax(logits)
+
+            # Apply top_p (nucleus) filtering
+            if top_p and top_p < 1.0:
+                sorted_indices = np.argsort(probs)[::-1]
+                sorted_probs = probs[sorted_indices]
+                cumsum_probs = np.cumsum(sorted_probs)
+
+                # Find cutoff index
+                cutoff_idx = np.searchsorted(cumsum_probs, top_p) + 1
+                cutoff_idx = min(cutoff_idx, len(sorted_indices))
+
+                # Zero out probabilities beyond cutoff
+                filtered_probs = np.zeros_like(probs)
+                filtered_probs[sorted_indices[:cutoff_idx]] = sorted_probs[:cutoff_idx]
+
+                # Renormalize
+                if filtered_probs.sum() > 0:
+                    probs = filtered_probs / filtered_probs.sum()
+
             return int(np.random.choice(len(probs), p=probs))
         else:
             return int(np.argmax(logits))
 
     @staticmethod
-    def _decode_summary(
-        summary_ids: list[int],
+    def _decode_output(
+        output_ids: list[int],
         tokenizer: Any,
         special_tokens: Set[str],
         input_text: str,
     ) -> str:
-        """Decode and process summary."""
-        if not summary_ids:
+        """Decode and process generated output."""
+        if not output_ids:
             logger.warning("No valid tokens generated")
             return ""
 
-        summary = tokenizer.decode(summary_ids, skip_special_tokens=True)
-        summary = TextSummarizer._remove_special_tokens(summary, special_tokens)
-        summary = TextSummarizer._capitalize_sentences(summary)
+        output = tokenizer.decode(output_ids, skip_special_tokens=True)
+        output = PromptProcessor._remove_special_tokens(output, special_tokens)
+        output = PromptProcessor._capitalize_sentences(output)
 
-        if not summary:
-            logger.warning(f"Empty summary generated for input: {input_text[:100]}")
+        if not output:
+            logger.warning(f"Empty output generated for input: {input_text[:100]}")
 
-        return summary
+        return output
+
+    @staticmethod
+    def _generate_encoder_only(
+        encoder_session: ort.InferenceSession,
+        tokenizer: Any,
+        model_config: OnnxConfig,
+        request: PromptRequest,
+    ) -> SummaryResults:
+        """Generate text using encoder-only model (GPT-style)."""
+        try:
+            input_text = request.input
+
+            # Add BOS token if specified in config
+            bos_token_id = getattr(model_config, "bos_token_id", None)
+            if bos_token_id is not None:
+                # Tokenize without special tokens first
+                inputs = tokenizer(
+                    input_text,
+                    return_tensors="np",
+                    truncation=True,
+                    max_length=getattr(model_config, "max_length", DEFAULT_MAX_LENGTH)
+                    - 1,
+                    add_special_tokens=False,
+                )
+                # Prepend BOS token
+                input_ids = inputs["input_ids"]
+                input_ids = np.concatenate(
+                    [np.array([[bos_token_id]]), input_ids], axis=1
+                )
+                inputs["input_ids"] = input_ids
+                if "attention_mask" in inputs:
+                    attention_mask = np.concatenate(
+                        [np.array([[1]]), inputs["attention_mask"]], axis=1
+                    )
+                    inputs["attention_mask"] = attention_mask
+            else:
+                inputs = tokenizer(
+                    input_text,
+                    return_tensors="np",
+                    truncation=True,
+                    max_length=getattr(model_config, "max_length", DEFAULT_MAX_LENGTH),
+                )
+
+            # Run encoder inference
+            onnx_inputs = {"input_ids": inputs["input_ids"].astype(np.int64)}
+            if "attention_mask" in inputs:
+                onnx_inputs["attention_mask"] = inputs["attention_mask"].astype(
+                    np.int64
+                )
+
+            # Add position_ids if required by the model
+            seq_len = inputs["input_ids"].shape[1]
+            onnx_inputs["position_ids"] = np.arange(seq_len, dtype=np.int64)[None, :]
+
+            outputs = encoder_session.run(None, onnx_inputs)
+            logits = outputs[0]
+
+            # Generate next tokens
+            temperature = request.temperature or getattr(
+                model_config, "temperature", 0.8
+            )
+            top_k = getattr(model_config, "top_k", None)
+            top_p = getattr(model_config, "top_p", None)
+            repetition_penalty = getattr(model_config, "repetition_penalty", None)
+            max_new_tokens = (
+                getattr(model_config, "max_length", DEFAULT_MAX_LENGTH)
+                - inputs["input_ids"].shape[1]
+            )
+
+            generated_ids = inputs["input_ids"][0].tolist()
+
+            for _ in range(max_new_tokens):
+                next_token_id = PromptProcessor._sample_next_token(
+                    logits[:, -1, :],
+                    temperature,
+                    top_k,
+                    top_p,
+                    generated_ids,
+                    repetition_penalty,
+                )
+                generated_ids.append(next_token_id)
+
+                # Check for EOS token
+                if next_token_id == getattr(model_config, "eos_token_id", 50256):
+                    break
+
+                # Prepare next input
+                new_input = np.array([generated_ids], dtype=np.int64)
+                onnx_inputs["input_ids"] = new_input
+                if "attention_mask" in onnx_inputs:
+                    onnx_inputs["attention_mask"] = np.ones_like(
+                        new_input, dtype=np.int64
+                    )
+                # Update position_ids for new sequence length
+                new_seq_len = new_input.shape[1]
+                onnx_inputs["position_ids"] = np.arange(new_seq_len, dtype=np.int64)[
+                    None, :
+                ]
+
+                outputs = encoder_session.run(None, onnx_inputs)
+                logits = outputs[0]
+
+            # Decode output (skip input tokens)
+            output_ids = generated_ids[inputs["input_ids"].shape[1] :]
+            output_text = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+
+            return SummaryResults(summary=output_text, message="", success=True)
+
+        except Exception as e:
+            logger.exception("Encoder-only generation failed")
+            return SummaryResults(
+                summary="",
+                message=f"Error generating text: {str(e)}",
+                success=False,
+            )
 
     @staticmethod
     def _remove_special_tokens(text: str, special_tokens: Set[str]) -> str:
@@ -736,8 +1025,8 @@ class TextSummarizer(BaseNLPService):
 
     @staticmethod
     async def summarize_batch_async(
-        request: SummarizationBatchRequest,
-    ) -> SummarizationResponse:
+        request: PromptBatchRequest,
+    ) -> PromptResponse:
         """Asynchronous batch summarization with partial success reporting."""
         start_time = time.time()
         logger.debug(
@@ -745,9 +1034,9 @@ class TextSummarizer(BaseNLPService):
             sanitize_for_log(request.model),
             len(request.inputs),
         )
-        response = SummarizationResponse(
+        response = PromptResponse(
             success=True,
-            message="Batch summarization generated successfully",
+            message="Batch prompt processing completed successfully",
             model=request.model,
             results=[],
         )
@@ -763,8 +1052,8 @@ class TextSummarizer(BaseNLPService):
                 tasks = [
                     loop.run_in_executor(
                         None,
-                        TextSummarizer._summarize_local,
-                        SummarizationRequest(
+                        PromptProcessor._process_prompt_local,
+                        PromptRequest(
                             model=request.model,
                             input=text,
                             temperature=getattr(request, "temperature", None),

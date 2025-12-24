@@ -110,7 +110,7 @@ def _get_model_filename(model_config: Any, model_type: str) -> str:
 - Extracted `_get_model_filename` method
 - Improved variable naming
 
-### 2. `app/services/summarizer_service.py`
+### 2. `app/services/prompt_service.py`
 - Consolidated numpy imports
 - Added module-level constants
 - Simplified token ID assignment logic

@@ -106,8 +106,9 @@ class TestSpecificExceptions:
         ) as mock_config:
             mock_config.side_effect = Exception("Config error")
 
-            with pytest.raises(InvalidConfigError):
-                BaseNLPService._get_model_config("test_model")
+            # Should return None instead of raising exception
+            result = BaseNLPService._get_model_config("test_model")
+            assert result is None
 
     def test_exception_hierarchy(self):
         """Test that all custom exceptions inherit from FloudsBaseException."""

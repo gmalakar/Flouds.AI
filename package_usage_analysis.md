@@ -9,8 +9,8 @@
 
 ### ML and ONNX Dependencies  
 - **onnx>=1.16.0,<1.19.0** ✅ - Used throughout services
-- **optimum[onnxruntime]>=1.16.0,<1.18.0** ✅ - Used in summarizer_service.py (optional import)
-- **onnxruntime>=1.16.3,<1.18.0** ✅ - Used in base_nlp_service.py, summarizer_service.py
+- **optimum[onnxruntime]>=1.16.0,<1.18.0** ✅ - Used in prompt_service.py (optional import)
+- **onnxruntime>=1.16.3,<1.18.0** ✅ - Used in base_nlp_service.py, prompt_service.py
 - **transformers>=4.35.0,<4.51.0** ✅ - Used in base_nlp_service.py
 - **numpy>=1.24.4,<2.0.0** ✅ - Used throughout services
 

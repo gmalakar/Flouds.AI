@@ -1,0 +1,5 @@
+=== ADMIN CREDENTIALS CREATED ===
+Admin Client ID: admin
+Admin Secret: lxZc1tjt5Ia-Khm0sc-3qm-HglHsxCTUQDSk6cfpDRM
+Admin Token: admin|lxZc1tjt5Ia-Khm0sc-3qm-HglHsxCTUQDSk6cfpDRM
+=== SAVE THESE CREDENTIALS ===

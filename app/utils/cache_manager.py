@@ -47,35 +47,54 @@ class CacheManager:
             return {}
 
     @staticmethod
-    def should_clear_cache(threshold_gb: float = 1.0) -> bool:
+    def should_clear_cache(threshold_gb: float = None) -> bool:
         """Check if cache should be cleared based on available memory."""
+        import os
+
+        if threshold_gb is None:
+            threshold_gb = float(os.getenv("FLOUDS_CACHE_MEMORY_THRESHOLD", "1.0"))
         available_gb = CacheManager.get_available_memory_gb()
         return available_gb < threshold_gb
 
     @staticmethod
     def cleanup_unused_caches(max_age_seconds: float = None):
-        """Clean up unused cache entries older than max_age_seconds."""
+        """Clean up unused cache entries older than max_age_seconds, with logging."""
         if max_age_seconds is None:
             max_age_seconds = APP_SETTINGS.monitoring.cache_cleanup_max_age_seconds
 
         try:
             from app.services.base_nlp_service import BaseNLPService
-            from app.services.summarizer_service import TextSummarizer
+            from app.services.prompt_service import PromptProcessor
 
             # Cleanup encoder sessions
             encoder_cleaned = BaseNLPService._encoder_sessions.cleanup_unused(
                 max_age_seconds
             )
+            if encoder_cleaned > 0:
+                logger.info(
+                    f"Cleaned up {encoder_cleaned} unused encoder sessions "
+                    f"(cache size now: {BaseNLPService._encoder_sessions.size()})"
+                )
 
             # Cleanup summarizer sessions if they exist
             decoder_cleaned = 0
             models_cleaned = 0
-            if hasattr(TextSummarizer, "_decoder_sessions"):
-                decoder_cleaned = TextSummarizer._decoder_sessions.cleanup_unused(
+            if hasattr(PromptProcessor, "_decoder_sessions"):
+                decoder_cleaned = PromptProcessor._decoder_sessions.cleanup_unused(
                     max_age_seconds
                 )
-            if hasattr(TextSummarizer, "_models"):
-                models_cleaned = TextSummarizer._models.cleanup_unused(max_age_seconds)
+                if decoder_cleaned > 0:
+                    logger.info(
+                        f"Cleaned up {decoder_cleaned} unused decoder sessions "
+                        f"(cache size now: {PromptProcessor._decoder_sessions.size()})"
+                    )
+            if hasattr(PromptProcessor, "_models"):
+                models_cleaned = PromptProcessor._models.cleanup_unused(max_age_seconds)
+                if models_cleaned > 0:
+                    logger.info(
+                        f"Cleaned up {models_cleaned} unused models "
+                        f"(cache size now: {PromptProcessor._models.size()})"
+                    )
 
             total_cleaned = encoder_cleaned + decoder_cleaned + models_cleaned
             if total_cleaned > 0:
@@ -90,10 +109,10 @@ class CacheManager:
         try:
             # Import here to avoid circular imports
             from app.services.base_nlp_service import BaseNLPService
-            from app.services.summarizer_service import TextSummarizer
+            from app.services.prompt_service import PromptProcessor
 
             # Clear summarizer caches
-            TextSummarizer.clear_model_cache()
+            PromptProcessor.clear_model_cache()
 
             # Clear base service caches
             BaseNLPService.clear_encoder_sessions()
@@ -106,12 +125,17 @@ class CacheManager:
             logger.error(f"Failed to clear caches: {e}")
 
     @staticmethod
-    def check_and_clear_cache_if_needed(threshold_gb: float = 1.0) -> bool:
+    def check_and_clear_cache_if_needed(threshold_gb: float = None) -> bool:
         """Check memory and clear caches if needed. Returns True if cache was cleared."""
+        if threshold_gb is None:
+            import os
+
+            threshold_gb = float(os.getenv("FLOUDS_CACHE_MEMORY_THRESHOLD", "1.0"))
+
         if CacheManager.should_clear_cache(threshold_gb):
             available_gb = CacheManager.get_available_memory_gb()
             logger.warning(
-                f"Low memory ({available_gb:.1f}GB available), cleaning up unused caches first"
+                f"Low memory ({available_gb:.1f}GB available, threshold {threshold_gb:.1f}GB), cleaning up unused caches first"
             )
 
             # First try cleaning up unused items

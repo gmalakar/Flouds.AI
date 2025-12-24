@@ -22,46 +22,11 @@ logger = get_logger("health")
 router = APIRouter()
 
 
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: float
-    uptime_seconds: float
-    memory_usage_mb: float
-    memory_percent: float
-
-
-class DetailedHealthResponse(BaseModel):
-    status: str
-    timestamp: float
-    uptime_seconds: float
-    memory: Dict[str, Any]
-    models: Dict[str, Any]
-    disk_space_mb: float
-
-
-class PerformanceMetricsResponse(BaseModel):
-    status: str
-    timestamp: float
-    metrics: Dict[str, Any]
-
-
-class CacheHealthResponse(BaseModel):
-    status: str
-    total_cached_items: int
-    cache_efficiency: str
-    details: Dict[str, Any]
-
-
-# Track startup time
-_startup_time = time.time()
-
-
 @router.get("/health")
 async def health_check():
     """Comprehensive health check endpoint."""
     try:
         health_status = HealthService.get_health_status()
-        status_code = 200 if health_status["status"] == "healthy" else 503
         return health_status
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -106,7 +71,6 @@ async def detailed_health_check():
         }
         health_status["disk_space_mb"] = disk_free
 
-        status_code = 200 if health_status["status"] == "healthy" else 503
         return health_status
     except Exception as e:
         logger.error(f"Detailed health check failed: {e}")

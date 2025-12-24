@@ -1,16 +1,15 @@
 # Core FastAPI and server
 fastapi>=0.116.1
-uvicorn[standard]>=0.24.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.6
 
 # ML and ONNX dependencies (strict for compatibility)
 onnx>=1.16.0,<1.19.0
-optimum[onnxruntime]>=1.16.0,<1.18.0
-onnxruntime>=1.16.3,<1.18.0
-transformers>=4.35.0,<4.51.0
-numpy>=1.24.4,<2.0.0
+transformers>=4.51.0
+numpy>=1.26.0,<2.0.0
 
 # Data validation and processing
-pydantic>=2.5.0
+pydantic>=2.10.0
 nltk>=3.9
 
 # System monitoring
@@ -21,3 +20,10 @@ cryptography>=42.0.0
 
 # Lightweight database
 tinydb>=4.8.0
+
+# Document Loaders (MIT/BSD licenses)
+pdfplumber>=0.10.0
+python-docx>=1.1.0
+beautifulsoup4>=4.12.0
+python-pptx>=0.6.21
+openpyxl>=3.1.0

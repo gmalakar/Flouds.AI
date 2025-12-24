@@ -36,7 +36,11 @@ class BaseNLPService:
     """
 
     _root_path: str = APP_SETTINGS.onnx.onnx_path
-    _encoder_sessions: ConcurrentDict = ConcurrentDict("_encoder_sessions")
+    _CACHE_LIMIT_ENCODER = int(os.getenv("FLOUDS_ENCODER_CACHE_MAX", "3"))
+
+    _encoder_sessions: ConcurrentDict = ConcurrentDict(
+        "_encoder_sessions", max_size=_CACHE_LIMIT_ENCODER
+    )
     _model_cache: SimpleCache = SimpleCache(max_size=5)
 
     @staticmethod
@@ -82,7 +86,7 @@ class BaseNLPService:
 
         except (KeyError, AttributeError) as e:
             logger.error(
-                "Invalid config structure for model '%s': %s",
+                "Model config '%s' not found in onnx_config.json: %s",
                 sanitize_for_log(model_to_use),
                 sanitize_for_log(str(e)),
             )
@@ -93,7 +97,7 @@ class BaseNLPService:
                 sanitize_for_log(model_to_use),
                 sanitize_for_log(str(e)),
             )
-            raise InvalidConfigError(f"Cannot load model config: {e}")
+            return None
 
     @staticmethod
     def _get_tokenizer_threadsafe(
