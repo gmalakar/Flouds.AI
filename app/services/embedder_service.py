@@ -6,6 +6,7 @@
 
 # Removed asyncio imports to prevent hanging
 
+import logging
 import os
 import re
 import time
@@ -42,19 +43,35 @@ DEFAULT_BATCH_SIZE = 50
 RANDOM_SEED = 42
 
 
-class _EmbeddingResults(BaseModel):
-    EmbeddingResults: List[float]  # For _small_text_embedding, this is a list of floats
+class SingleEmbeddingResult(BaseModel):
+    vector: List[float]
     message: str
     success: bool = Field(default=True)
 
+    @property
+    def embedding_results(self) -> List[float]:
+        """Backward compatibility property."""
+        return self.vector
 
-class _ChunkEmbeddingResults(BaseModel):
-    EmbeddingResults: List[
+    # Legacy property for existing tests
+    EmbeddingResults = embedding_results
+
+
+class ChunkEmbeddingResult(BaseModel):
+    embedding_chunks: List[
         EmbededChunk
     ]  # For chunk processing, this is a list of chunks
     message: str
     success: bool = Field(default=True)
     used_parameters: dict = Field(default_factory=dict)
+
+    @property
+    def embedding_results(self) -> List[EmbededChunk]:
+        """Backward compatibility property."""
+        return self.embedding_chunks
+
+    # Legacy property for existing tests
+    EmbeddingResults = embedding_results
 
 
 class SentenceTransformer(BaseNLPService):
@@ -115,7 +132,7 @@ class SentenceTransformer(BaseNLPService):
         session: Any,
         projected_dimension: int = DEFAULT_PROJECTED_DIMENSION,
         **kwargs,
-    ) -> _EmbeddingResults:
+    ) -> SingleEmbeddingResult:
         """Generate embedding for a single text chunk."""
         try:
             # Tokenize and prepare inputs
@@ -139,16 +156,16 @@ class SentenceTransformer(BaseNLPService):
                 **kwargs,
             )
 
-            logger.debug(
-                "Final embedding shape before flatten: %s", str(embedding.shape)
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Final embedding shape before flatten: %s", embedding.shape
+                )
             flattened = embedding.flatten()
-            logger.debug(
-                "Final embedding shape after flatten: %s", str(flattened.shape)
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Final embedding shape after flatten: %s", flattened.shape)
 
-            return _EmbeddingResults(
-                EmbeddingResults=flattened.tolist(),
+            return SingleEmbeddingResult(
+                vector=flattened.tolist(),
                 message="Embedding generated successfully",
                 success=True,
             )
@@ -183,15 +200,19 @@ class SentenceTransformer(BaseNLPService):
             return_tensors="np",
         )
 
-        input_ids = encoding["input_ids"].astype(np.int64)
+        input_ids = encoding["input_ids"]
         attention_mask = encoding.get("attention_mask")
+
+        # Ensure correct dtype without unnecessary copying
+        if input_ids.dtype != np.int64:
+            input_ids = input_ids.astype(np.int64)
 
         inputs = {getattr(input_names, "input", "input_ids"): input_ids}
 
         if attention_mask is not None:
-            inputs[getattr(input_names, "mask", "attention_mask")] = (
-                attention_mask.astype(np.int64)
-            )
+            if attention_mask.dtype != np.int64:
+                attention_mask = attention_mask.astype(np.int64)
+            inputs[getattr(input_names, "mask", "attention_mask")] = attention_mask
 
         # Add optional inputs
         SentenceTransformer._add_optional_inputs(
@@ -266,8 +287,8 @@ class SentenceTransformer(BaseNLPService):
         normalize = kwargs.get("normalize", getattr(model_config, "normalize", True))
         if normalize:
             norm = np.linalg.norm(embedding)
-            if norm > 0:
-                embedding = embedding / norm
+            if norm > 1e-12:  # Use small epsilon instead of 0 check
+                embedding /= norm  # In-place division
 
         # Project dimensions - only if explicitly requested
         logger.debug(
@@ -286,14 +307,14 @@ class SentenceTransformer(BaseNLPService):
                 str(projected_dimension),
             )
             if embedding.ndim > 1:  # Multi-dimensional (seq_len, embedding_dim)
-                # Project each token embedding
-                projected_embeddings = []
-                for i in range(embedding.shape[0]):
-                    projected = SentenceTransformer._project_embedding(
+                # Project each token embedding - pre-allocate array for efficiency
+                seq_len = embedding.shape[0]
+                projected_embeddings = np.empty((seq_len, projected_dimension))
+                for i in range(seq_len):
+                    projected_embeddings[i] = SentenceTransformer._project_embedding(
                         embedding[i], projected_dimension
                     )
-                    projected_embeddings.append(projected)
-                embedding = np.stack(projected_embeddings)
+                embedding = projected_embeddings
             else:  # Single vector
                 embedding = SentenceTransformer._project_embedding(
                     embedding, projected_dimension
@@ -316,7 +337,7 @@ class SentenceTransformer(BaseNLPService):
         input_dim = embedding.shape[-1]
         rng = np.random.default_rng(seed=RANDOM_SEED)
         random_matrix = rng.uniform(-1, 1, (input_dim, projected_dimension))
-        return np.dot(embedding, random_matrix)
+        return embedding @ random_matrix  # Use @ operator for better performance
 
     @staticmethod
     def _truncate_text_to_token_limit(
@@ -365,12 +386,15 @@ class SentenceTransformer(BaseNLPService):
             )
 
             if result.success:
-                response.results = result.EmbeddingResults
+                response.results = result.embedding_chunks
                 response.used_parameters = getattr(result, "used_parameters", {})
             else:
                 response.success = False
                 response.message = result.message
 
+        except ModelNotFoundError as e:
+            response.success = False
+            response.message = str(e)
         except Exception as e:
             response.success = False
             response.message = f"Error generating embedding: {str(e)}"
@@ -429,12 +453,15 @@ class SentenceTransformer(BaseNLPService):
                     response.message = f"Error in input {idx}: {result.message}"
                     break
                 else:
-                    response.results.extend(result.EmbeddingResults)
+                    response.results.extend(result.embedding_chunks)
                     if idx == 0:  # Set used_parameters from first result
                         response.used_parameters = getattr(
                             result, "used_parameters", {}
                         )
 
+        except ModelNotFoundError as e:
+            response.success = False
+            response.message = str(e)
         except Exception as e:
             response.success = False
             response.message = f"Error generating embedding: {str(e)}"
@@ -452,7 +479,7 @@ class SentenceTransformer(BaseNLPService):
         output_large_text_upon_join: bool = False,
         request_params: dict = None,
         **kwargs: Any,
-    ) -> _ChunkEmbeddingResults:
+    ) -> ChunkEmbeddingResult:
         """Core embedding logic for text processing."""
         try:
             model_config, tokenizer, session = (
@@ -504,13 +531,12 @@ class SentenceTransformer(BaseNLPService):
                 "lowercase": getattr(model_config, "lowercase", False),
             }
 
-            result = _ChunkEmbeddingResults(
-                EmbeddingResults=chunk_results,
+            return ChunkEmbeddingResult(
+                embedding_chunks=chunk_results,
                 message="Embedding generated successfully",
                 success=True,
+                used_parameters=used_params,
             )
-            result.used_parameters = used_params
-            return result
 
         except FileNotFoundError:
             raise ModelNotFoundError("Model files not accessible")
@@ -558,6 +584,8 @@ class SentenceTransformer(BaseNLPService):
     def _prepare_embedding_resources(model: str) -> tuple[Any, Any, Any]:
         """Prepare model config, tokenizer, and session for embedding."""
         original_config = SentenceTransformer._get_model_config(model)
+        if not original_config:
+            raise ModelNotFoundError(f"Model '{model}' not found")
         # Create a copy to avoid modifying the cached instance
         if hasattr(original_config, "model_copy"):
             model_config = original_config.model_copy()
@@ -665,7 +693,6 @@ class SentenceTransformer(BaseNLPService):
             else:
                 return getattr(model_config, "encoder_onnx_model", None) or "model.onnx"
         else:
-            # For decoder models
             if use_optimized:
                 return getattr(
                     model_config,
@@ -698,9 +725,7 @@ class SentenceTransformer(BaseNLPService):
             embedding_result = SentenceTransformer._process_single_chunk(
                 chunk, model_config, tokenizer, session, projected_dimension, **kwargs
             )
-            results.append(
-                EmbededChunk(vector=embedding_result.EmbeddingResults, chunk=chunk)
-            )
+            results.append(EmbededChunk(vector=embedding_result.vector, chunk=chunk))
         return results
 
     @staticmethod

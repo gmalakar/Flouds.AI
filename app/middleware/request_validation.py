@@ -12,6 +12,7 @@ from starlette.responses import Response
 
 from app.app_init import APP_SETTINGS
 from app.logger import get_logger
+from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("request_validation")
 
@@ -45,7 +46,9 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > self.max_request_size:
             logger.warning(
-                f"Request size {content_length} exceeds limit {self.max_request_size}"
+                "Request size %s exceeds limit %d",
+                sanitize_for_log(content_length),
+                self.max_request_size,
             )
             raise HTTPException(
                 status_code=413,
@@ -72,7 +75,10 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
             # Log slow requests
             if processing_time > 5.0:  # Log requests taking more than 5 seconds
                 logger.warning(
-                    f"Slow request: {request.method} {request.url.path} took {processing_time:.3f}s"
+                    "Slow request: %s %s took %.3fs",
+                    sanitize_for_log(request.method),
+                    sanitize_for_log(request.url.path),
+                    processing_time,
                 )
 
             return response

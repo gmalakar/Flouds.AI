@@ -85,7 +85,6 @@ dmypy.json
 # Documentation
 docs/
 *.md
-!README.md
 
 # Logs
 logs/
@@ -94,6 +93,11 @@ logs/
 # ONNX models (too large for build context)
 onnx/
 *.onnx
+
+# TinyDB runtime data (not needed in image)
+tinydb/
+*.db
+clients.db
 
 # Test files
 tests/
@@ -106,6 +110,7 @@ appsettings.*.json
 
 # Development dependencies and tools
 requirements-dev.txt
+requirements.lock
 .pre-commit-config.yaml
 pyproject.toml
 pytest.ini
@@ -115,9 +120,10 @@ Dockerfile*
 docker-compose*.yml
 .dockerignore
 
-# Scripts
+# Scripts (build/start scripts not needed in image)
 *.ps1
 *.sh
+*.bat
 build-*.ps1
 start-*.ps1
 build-*.sh
@@ -147,12 +153,10 @@ yarn-error.log*
 # Additional Python files
 *.sqlite
 *.sqlite3
-*.db
-clients.db
 admin_credentials.txt
 .encryption_key
 
-# Model and data files
+# Large data files
 models/
 data/
 *.pkl
@@ -206,3 +210,23 @@ lcov.info
 *.cert
 *.p12
 *.pfx
+
+# Hugging Face cache
+**/.huggingface/**
+
+# Cache files
+**/.cache/**
+
+# ML model weight files (detailed) - exclude these to keep image small
+# Note: app/models/ contains Python code and should NOT be excluded
+**/onnx/**
+**/*.onnx
+**/*.safetensors
+**/*.bin
+**/*.pt
+**/*.pth
+**/*.h5
+**/*.hdf5
+**/*.pkl
+**/*.pickle
+**/*.joblib

@@ -351,11 +351,17 @@ class ConfigLoader:
                     f"Environment-specific config file not found: {env_file}. Using base config."
                 )
             except (json.JSONDecodeError, ValueError) as e:
-                logger.error(f"Invalid environment config format in {env_file}: {e}")
+                logger.error(
+                    "Invalid environment config format in %s: %s",
+                    sanitize_for_log(env_file),
+                    sanitize_for_log(str(e)),
+                )
                 raise InvalidConfigError(f"Environment config format error: {e}")
             except Exception as e:
                 logger.error(
-                    f"Unexpected error loading environment config {env_file}: {e}"
+                    "Unexpected error loading environment config %s: %s",
+                    sanitize_for_log(env_file),
+                    sanitize_for_log(str(e)),
                 )
                 raise InvalidConfigError(f"Cannot load environment config: {e}")
 

@@ -9,29 +9,27 @@ from fastapi import APIRouter, HTTPException
 
 from app.exceptions import FloudsBaseException
 from app.logger import get_logger
-from app.models.summarization_request import (
-    SummarizationBatchRequest,
-    SummarizationRequest,
-)
-from app.models.summarization_response import SummarizationResponse
-from app.services.summarizer_service import TextSummarizer
+from app.models.prompt_request import PromptBatchRequest, PromptRequest
+from app.models.prompt_response import PromptResponse
+from app.services.prompt_service import PromptProcessor
 from app.utils.error_handler import ErrorHandler
+from app.utils.log_sanitizer import sanitize_for_log
 
 router = APIRouter()
 logger = get_logger("router")
 
 # HINTS:
-# - Both endpoints are async and call async methods from TextSummarizer.
+# - Both endpoints are async and call async methods from PromptProcessor.
 # - The /summarize endpoint expects a SummarizationRequest and returns a SummarizationResponse.
 # - The /summarize_batch endpoint expects a SummarizationBatchRequest and returns a list of SummarizationResponse.
 # - Use type hints for FastAPI endpoint parameters and return types for better validation and editor support.
 
 
-@router.post("/summarize", response_model=SummarizationResponse)
-async def summarize(request: SummarizationRequest) -> SummarizationResponse:
-    logger.debug(f"Summarization request by model: {request.model}")
+@router.post("/summarize", response_model=PromptResponse)
+async def summarize(request: PromptRequest) -> PromptResponse:
+    logger.debug("Summarization request by model: %s", sanitize_for_log(request.model))
     try:
-        summary: SummarizationResponse = TextSummarizer.summarize(request)
+        summary: PromptResponse = PromptProcessor.process_prompt(request)
         return summary
     except FloudsBaseException as e:
         status_code = ErrorHandler.get_http_status(e)
@@ -41,15 +39,13 @@ async def summarize(request: SummarizationRequest) -> SummarizationResponse:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/summarize_batch", response_model=SummarizationResponse)
+@router.post("/summarize_batch", response_model=PromptResponse)
 async def summarize_batch(
-    request: SummarizationBatchRequest,
-) -> SummarizationResponse:
+    request: PromptBatchRequest,
+) -> PromptResponse:
     logger.debug(f"Summarization batch request by model: {request.model}")
     try:
-        summary: SummarizationResponse = await TextSummarizer.summarize_batch_async(
-            request
-        )
+        summary: PromptResponse = await PromptProcessor.summarize_batch_async(request)
         return summary
     except FloudsBaseException as e:
         status_code = ErrorHandler.get_http_status(e)

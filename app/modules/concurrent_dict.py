@@ -8,18 +8,27 @@ import time
 from threading import RLock
 from typing import Any, Callable, Dict, Optional, Tuple
 
+logger = None  # Will be set by caller to avoid circular imports
+
 
 class ConcurrentDict:
     """
     Thread-safe dictionary for concurrent access.
-    Provides atomic get, set, remove, and get_or_add operations.
+    Provides atomic get, set, remove, and get_or_add operations with optional LRU eviction and callbacks.
     """
 
-    def __init__(self, created_for: Any = None):
+    def __init__(
+        self,
+        created_for: Any = None,
+        max_size: Optional[int] = None,
+        on_evict: Optional[Callable[[Any, Any], None]] = None,
+    ):
         self._lock = RLock()
         self._dict = {}
         self._access_times: Dict[Any, float] = {}
         self._created_for = created_for
+        self._max_size = max_size if (max_size is None or max_size > 0) else None
+        self._on_evict = on_evict  # Optional callback: on_evict(key, value)
 
     @property
     def created_for(self) -> Any:
@@ -52,6 +61,7 @@ class ConcurrentDict:
         with self._lock:
             self._dict[key] = value
             self._access_times[key] = time.time()
+            self._evict_if_needed()
 
     def remove(self, key: Any) -> None:
         """
@@ -60,6 +70,7 @@ class ConcurrentDict:
         with self._lock:
             if key in self._dict:
                 del self._dict[key]
+                self._access_times.pop(key, None)
 
     def get_or_add(self, key: Any, factory: Callable[[], Any]) -> Any:
         """
@@ -73,6 +84,7 @@ class ConcurrentDict:
             value = factory()
             self._dict[key] = value
             self._access_times[key] = current_time
+            self._evict_if_needed()
             return value
 
     def is_empty(self) -> bool:
@@ -96,6 +108,31 @@ class ConcurrentDict:
         with self._lock:
             self._dict.clear()
             self._access_times.clear()
+
+    def set_max_size(self, max_size: Optional[int]) -> None:
+        """Dynamically adjust max size and evict if needed."""
+        with self._lock:
+            self._max_size = max_size if (max_size is None or max_size > 0) else None
+            self._evict_if_needed()
+
+    def _evict_if_needed(self) -> None:
+        """Evict least-recently-used items until under max_size, invoking on_evict callback if provided."""
+        if not self._max_size:
+            return
+        # Evict based on oldest access time
+        while len(self._dict) > self._max_size and self._access_times:
+            lru_key = min(self._access_times, key=self._access_times.get)
+            evicted_value = self._dict.pop(lru_key, None)
+            self._access_times.pop(lru_key, None)
+            # Invoke optional callback for cleanup (e.g., release ONNX sessions)
+            if self._on_evict and evicted_value is not None:
+                try:
+                    self._on_evict(lru_key, evicted_value)
+                except Exception as e:
+                    if logger:
+                        logger.warning(
+                            f"Error in on_evict callback for key {lru_key}: {e}"
+                        )
 
     def cleanup_unused(self, max_age_seconds: float = 60.0) -> int:
         """

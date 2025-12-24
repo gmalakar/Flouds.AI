@@ -1,0 +1,240 @@
+# =============================================================================
+# File: extractor_service.py
+# Date: 2025-12-23
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
+# =============================================================================
+# File: extractor_service.py
+# Date: 2025-12-21
+# Copyright (c) 2025 Goutam Malakar. All rights reserved.
+# =============================================================================
+
+import base64
+import binascii
+import csv
+import time
+from io import BytesIO, StringIO
+from typing import List
+
+import pdfplumber
+from bs4 import BeautifulSoup
+from docx import Document
+
+try:
+    from pptx import Presentation
+except ImportError:
+    Presentation = None
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
+
+from app.exceptions import InferenceError, ModelLoadError, ModelNotFoundError
+from app.logger import get_logger
+from app.models.extracted_file_content import ExtractedFileContent
+from app.models.extracted_response import ExtractedResponse
+from app.models.file_request import FileRequest
+from app.utils.log_sanitizer import sanitize_for_log
+
+logger = get_logger("extractor_service")
+
+
+class ExtractorService:
+    """Service for extraction operations."""
+
+    @staticmethod
+    def extract_text(req: FileRequest) -> ExtractedResponse:
+        """Main text extraction function."""
+        start_time = time.time()
+        response = ExtractedResponse(
+            success=True,
+            message="Text extracted successfully",
+            results=[],
+            time_taken=0.0,
+        )
+
+        try:
+            response.results = ExtractorService._extract_local(req)
+        except ModelNotFoundError as e:
+            logger.warning("Model/library not found: %s", sanitize_for_log(str(e)))
+            response.success = False
+            response.message = str(e)
+        except InferenceError as e:
+            logger.error("Extraction error: %s", sanitize_for_log(str(e)))
+            response.success = False
+            response.message = str(e)
+        except Exception as e:
+            logger.error(
+                "Unexpected extraction error: %s",
+                sanitize_for_log(str(e)),
+                exc_info=True,
+            )
+            response.success = False
+            response.message = "Error extracting text from file"
+
+        response.time_taken = time.time() - start_time
+        return response
+
+    @staticmethod
+    def _extract_local(req: FileRequest) -> List[ExtractedFileContent]:
+        """Extract text from file based on extension."""
+        try:
+            file_bytes = base64.b64decode(req.file_content)
+        except (binascii.Error, ValueError):
+            raise InferenceError("Invalid base64 encoded file content")
+
+        ext = req.extention.lower()
+
+        if ext == "pdf":
+            return ExtractorService._extract_pdf(file_bytes)
+        elif ext == "doc":
+            return ExtractorService._extract_doc(file_bytes)
+        elif ext == "docx":
+            return ExtractorService._extract_docx(file_bytes)
+        elif ext == "csv":
+            return ExtractorService._extract_csv(file_bytes)
+        elif ext in ["txt", "md"]:
+            return ExtractorService._extract_text(file_bytes)
+        elif ext in ["html", "htm"]:
+            return ExtractorService._extract_html(file_bytes)
+        elif ext in ["ppt", "pptx"]:
+            return ExtractorService._extract_ppt(file_bytes)
+        elif ext in ["xls", "xlsx"]:
+            return ExtractorService._extract_excel(file_bytes, ext)
+
+        raise ModelNotFoundError("Unsupported file type")
+
+    @staticmethod
+    def _extract_pdf(file_bytes: bytes) -> List[ExtractedFileContent]:
+        """Extract text from PDF file."""
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            pages = [page.extract_text() or "" for page in pdf.pages]
+        return [
+            ExtractedFileContent(content=page, item_number=i + 1, content_as="pages")
+            for i, page in enumerate(pages)
+        ]
+
+    @staticmethod
+    def _extract_doc(file_bytes: bytes) -> List[ExtractedFileContent]:
+        """Extract text from DOC file using python-docx."""
+        try:
+            with BytesIO(file_bytes) as bio:
+                doc = Document(bio)
+                paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            return [
+                ExtractedFileContent(
+                    content=para, item_number=i + 1, content_as="paragraphs"
+                )
+                for i, para in enumerate(paragraphs)
+            ]
+        except Exception:
+            raise InferenceError(
+                "Failed to parse .doc file - file may be corrupted or not a valid Word document"
+            )
+
+    @staticmethod
+    def _extract_docx(file_bytes: bytes) -> List[ExtractedFileContent]:
+        """Extract text from DOCX file."""
+        with BytesIO(file_bytes) as bio:
+            doc = Document(bio)
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        return [
+            ExtractedFileContent(
+                content=para, item_number=i + 1, content_as="paragraphs"
+            )
+            for i, para in enumerate(paragraphs)
+        ]
+
+    @staticmethod
+    def _extract_csv(file_bytes: bytes) -> List[ExtractedFileContent]:
+        """Extract text from CSV file."""
+        try:
+            text = file_bytes.decode("utf-8")
+            csv_reader = csv.DictReader(StringIO(text))
+            rows = list(csv_reader)
+        except UnicodeDecodeError:
+            raise InferenceError("CSV file is not valid UTF-8 encoded")
+        except Exception as e:
+            raise InferenceError(f"Failed to parse CSV file: {str(e)}")
+
+        return [
+            ExtractedFileContent(content=str(row), item_number=i + 1, content_as="rows")
+            for i, row in enumerate(rows)
+        ]
+
+    @staticmethod
+    def _extract_text(file_bytes: bytes) -> List[ExtractedFileContent]:
+        """Extract text from plain text file."""
+        try:
+            text = file_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raise InferenceError("File is not valid UTF-8 encoded text")
+        return [ExtractedFileContent(content=text, item_number=1, content_as="text")]
+
+    @staticmethod
+    def _extract_html(file_bytes: bytes) -> List[ExtractedFileContent]:
+        """Extract text from HTML file."""
+        soup = BeautifulSoup(file_bytes, "html.parser")
+        return [
+            ExtractedFileContent(
+                content=soup.get_text(), item_number=1, content_as="text"
+            )
+        ]
+
+    @staticmethod
+    def _extract_ppt(file_bytes: bytes) -> List[ExtractedFileContent]:
+        """Extract text from PowerPoint file."""
+        if not Presentation:
+            raise ModelNotFoundError(
+                "Install python-pptx to support PowerPoint files: pip install python-pptx"
+            )
+        try:
+            with BytesIO(file_bytes) as bio:
+                prs = Presentation(bio)
+                slides = []
+                for slide in prs.slides:
+                    slide_text = [
+                        shape.text for shape in slide.shapes if hasattr(shape, "text")
+                    ]
+                    slides.append("\n".join(slide_text))
+            return [
+                ExtractedFileContent(
+                    content=slide, item_number=i + 1, content_as="slides"
+                )
+                for i, slide in enumerate(slides)
+            ]
+        except Exception:
+            raise InferenceError("Failed to parse PowerPoint file")
+
+    @staticmethod
+    def _extract_excel(file_bytes: bytes, ext: str) -> List[ExtractedFileContent]:
+        """Extract text from Excel file."""
+        if not openpyxl:
+            raise ModelNotFoundError(
+                "Install openpyxl to support Excel files: pip install openpyxl"
+            )
+
+        try:
+            with BytesIO(file_bytes) as bio:
+                wb = openpyxl.load_workbook(bio, data_only=True)
+                sheets = []
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    sheet_data = []
+                    for row in ws.iter_rows(values_only=True):
+                        if any(cell is not None for cell in row):
+                            row_str = ",".join(
+                                str(cell) if cell is not None else "" for cell in row
+                            )
+                            sheet_data.append(row_str)
+                    sheets.append("\n".join(sheet_data))
+
+            return [
+                ExtractedFileContent(
+                    content=sheet, item_number=i + 1, content_as="sheets"
+                )
+                for i, sheet in enumerate(sheets)
+            ]
+        except Exception as e:
+            raise InferenceError(f"Failed to parse Excel file: {str(e)}")

@@ -62,10 +62,12 @@ function New-NetworkIfMissing {
         docker network create $Name | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Network $Name created successfully"
-        } else {
+        }
+        else {
             Write-Error "Failed to create network: $Name"
         }
-    } else {
+    }
+    else {
         Write-Success "Network $Name already exists"
     }
 }
@@ -86,10 +88,12 @@ function Connect-NetworkIfNotConnected {
         docker network connect $Network $Container 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Successfully connected $Container to $Network"
-        } else {
+        }
+        else {
             Write-Warning "Failed to connect $Container to $Network"
         }
-    } else {
+    }
+    else {
         Write-Success "Container $Container is already connected to $Network"
     }
 }
@@ -120,7 +124,8 @@ function Test-Docker {
         }
         Write-Success "Docker is running"
         return $true
-    } catch {
+    }
+    catch {
         Write-Error "Docker command failed: $_"
         exit 1
     }
@@ -133,7 +138,8 @@ function Test-DirectoryWritable {
         [System.IO.File]::WriteAllText($testFile, "test")
         Remove-Item -Path $testFile -Force
         return $true
-    } catch {
+    }
+    catch {
         return $false
     }
 }
@@ -149,18 +155,21 @@ function Set-DirectoryPermissions {
         try {
             New-Item -ItemType Directory -Path $Path -Force | Out-Null
             Write-Success "$Description directory created: $Path"
-        } catch {
+        }
+        catch {
             Write-Error "Failed to create $Description directory: $_"
             exit 1
         }
-    } else {
+    }
+    else {
         Write-Success "Found $Description directory: $Path"
     }
     
     # Test if directory is writable
     if (Test-DirectoryWritable -Path $Path) {
         Write-Success "$Description directory is writable: $Path"
-    } else {
+    }
+    else {
         Write-Warning "$Description directory is not writable: $Path"
         Write-Host "Setting permissions on $Description directory..." -ForegroundColor Yellow
         try {
@@ -170,7 +179,8 @@ function Set-DirectoryPermissions {
             $acl.SetAccessRule($accessRule)
             Set-Acl $Path $acl
             Write-Success "Permissions set successfully"
-        } catch {
+        }
+        catch {
             Write-Warning "Failed to set permissions: $_"
             Write-Warning "$Description may not be writable. Please check directory permissions manually."
             $continue = Read-Host "Continue anyway? (y/n)"
@@ -243,7 +253,8 @@ Write-Success "Found ONNX model path: $modelPath"
 if ($envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
     $logPath = $envVars["FLOUDS_LOG_PATH_AT_HOST"]
     Set-DirectoryPermissions -Path $logPath -Description "Log"
-} else {
+}
+else {
     Write-Warning "FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
 }
 
@@ -251,7 +262,8 @@ if ($envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
 if ($envVars.ContainsKey("FLOUDS_TINYDB_PATH_AT_HOST")) {
     $tinydbPath = $envVars["FLOUDS_TINYDB_PATH_AT_HOST"]
     Set-DirectoryPermissions -Path $tinydbPath -Description "TinyDB"
-} else {
+}
+else {
     Write-Warning "FLOUDS_TINYDB_PATH_AT_HOST not set. Client database will not be persisted to host."
 }
 
@@ -279,7 +291,8 @@ if ($containerExists) {
         docker stop $InstanceName | Out-Null
         docker rm $InstanceName | Out-Null
         Write-Success "Container removed"
-    } else {
+    }
+    else {
         Write-Error "Container already exists. Use -Force to replace it."
         exit 1
     }
@@ -302,6 +315,24 @@ foreach ($key in $envVars.Keys) {
     if ($key -notmatch "_AT_HOST$") {
         $dockerArgs += "-e"
         $dockerArgs += "$key=$($envVars[$key])"
+    }
+}
+
+# Add cache tuning environment variables with defaults (only if not already in .env)
+$cacheDefaults = @{
+    "FLOUDS_ENCODER_CACHE_MAX"        = "3"
+    "FLOUDS_DECODER_CACHE_MAX"        = "3"
+    "FLOUDS_MODEL_CACHE_MAX"          = "2"
+    "FLOUDS_SPECIAL_TOKENS_CACHE_MAX" = "8"
+    "FLOUDS_CACHE_MEMORY_THRESHOLD"   = "1.0"
+}
+
+foreach ($key in $cacheDefaults.Keys) {
+    if (-not $envVars.ContainsKey($key)) {
+        $value = $cacheDefaults[$key]
+        $dockerArgs += "-e"
+        $dockerArgs += "$key=$value"
+        Write-Host "Setting default $key=$value" -ForegroundColor Gray
     }
 }
 
@@ -368,7 +399,8 @@ try {
 
         Write-StepHeader "Container Status"
         docker ps --filter "name=$InstanceName" --format "table {{.ID}}`t{{.Image}}`t{{.Status}}`t{{.Ports}}"
-    } else {
+    }
+    else {
         Write-Error "Failed to start Flouds AI container."
         exit 1
     }

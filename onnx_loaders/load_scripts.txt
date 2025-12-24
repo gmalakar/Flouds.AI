@@ -17,11 +17,15 @@ python onnx_loaders/export_model.py --model_for "s2s" --model_name "google/pegas
 # Embedding models
 python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "sentence-transformers/all-MiniLM-L6-v2" --task "feature-extraction" --optimize --optimization_level 2
 python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "sentence-transformers/paraphrase-MiniLM-L6-v2" --optimize --task "feature-extraction" --opset_version 17 --optimization_level 2
-python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "sentence-transformers/sentence-t5-base" --optimize --task "feature-extraction"--opset_version 17 --optimization_level 2
+python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "sentence-transformers/sentence-t5-base" --optimize --task "feature-extraction" --opset_version 17 --optimization_level 2
 python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "PleIAs/Pleias-Pico" --optimize --task "feature-extraction" 
 python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "sentence-transformers/all-mpnet-base-v2"  --task "feature-extraction" --optimize --optimization_level 2
 python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "intfloat/e5-base-v2" --task "feature-extraction" --optimize
+python onnx_loaders/export_model_v2.py --model_for "fe" --model_name "hkunlp/instructor-xl" --task "feature-extraction" --opset_version 17 --optimize
 
+# LLM models
+python onnx_loaders/export_model_v2.py --model_for "llm" --model_name "microsoft/Phi-3-mini-4k-instruct" --task "text-generation" --opset_version 17 --optimize
+python onnx_loaders/export_model_v2.py --model_for "llm" --model_name "distilgpt2" --task "text-generation" --optimize
 # Summarization models
 python onnx_loaders/export_model_v2.py --model_for "s2s" --model_name "t5-small" --optimize --task "text2text-generation" --opset_version 17
 python onnx_loaders/export_model_v2.py --model_for "s2s" --model_name "facebook/bart-large-cnn" --optimize --task "text2text-generation-with-past" --opset_version 13

@@ -27,7 +27,7 @@ warnings.filterwarnings(
     "ignore", message=".*torch.tensor results are registered as constants.*"
 )
 
-from export_model_to_onnx_manual import export_and_optimize_onnx_manual
+from export_model_to_onnx_v2 import export_and_optimize_onnx_v2
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export and optimize ONNX model.")
@@ -38,7 +38,7 @@ if __name__ == "__main__":
         "--model_for",
         type=str,
         default="fe",
-        help="Model purpose: s2s (seq2seq-lm), sc (sequence-classification), fe (feature-extraction)",
+        help="Model purpose: s2s (seq2seq-lm), sc (sequence-classification), fe (feature-extraction), llm (causal-lm)",
     )
     parser.add_argument(
         "--optimize", action="store_true", help="Whether to optimize the ONNX model"
@@ -82,4 +82,4 @@ if __name__ == "__main__":
         # task=args.task,
     )
 
-    export_and_optimize_onnx_manual(**export_args)
+    export_and_optimize_onnx_v2(**export_args)

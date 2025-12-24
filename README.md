@@ -11,10 +11,13 @@
 ## ✨ Key Features
 
 ### 🤖 **AI Capabilities**
-- **Advanced Text Summarization**: Seq2seq models with ONNX optimization and automatic sentence capitalization
+- **Advanced Text Generation**: Support for seq2seq (T5, BART) and GPT-style models with ONNX optimization
+- **Text Summarization**: Seq2seq models with automatic sentence capitalization and advanced sampling
 - **High-Performance Embeddings**: Sentence and document embeddings with configurable chunking strategies
+- **File Content Extraction**: Extract text from PDF, DOCX, DOC, PPT, Excel, TXT, HTML, CSV files with structured output
 - **Batch Processing**: Async batch operations for high-throughput scenarios
 - **Model Optimization**: Optimized ONNX models with automatic fallback and KV caching
+- **Advanced Sampling**: Top-k, top-p, and repetition penalty for high-quality text generation
 
 ### 🚀 **Enterprise Features**
 - **Performance Monitoring**: Real-time system metrics, memory tracking, and performance profiling with optimized rate limiting
@@ -45,7 +48,11 @@ app/
     request_validation.py        # Request size/timeout validation
   models/                        # Pydantic request/response models
   routers/                       # FastAPI route handlers
-  services/                      # Core NLP service logic
+  services/
+    prompt_service.py            # Text generation and processing (renamed from summarizer_service)
+    embedder_service.py          # Text embedding and similarity
+    extractor_service.py         # File content extraction service
+    base_nlp_service.py          # Shared NLP functionality
   utils/
     performance_monitor.py       # System performance tracking
     memory_monitor.py           # Memory usage monitoring
@@ -320,6 +327,23 @@ python onnx_loaders/export_model_v2.py --model_for "s2s" --model_name "facebook/
 
 ## 🔐 Authentication
 
+### Authentication Methods
+
+Flouds AI supports two authentication methods:
+
+#### 1. Authorization Header (Production & Development)
+```bash
+curl -H "Authorization: Bearer <client_id>|<client_secret>" \
+  http://localhost:19690/api/v1/summarizer/summarize
+```
+
+#### 2. Query Parameter (Development Only)
+```bash
+curl "http://localhost:19690/api/v1/summarizer/summarize?token=<client_id>|<client_secret>"
+```
+
+**Note**: Query parameter authentication is only available in development mode for convenience. Production deployments require the Authorization header for security.
+
 ### Client-Based Authentication
 
 Flouds AI uses a modern client-based authentication system with encrypted storage.
@@ -372,20 +396,29 @@ curl -H "Authorization: Bearer <admin_client_id>|<admin_client_secret>" \
 
 Flouds AI provides a comprehensive REST API with automatic documentation at `/docs`.
 
-#### Text Summarization
+#### Text Generation/Summarization
 
 ```bash
-# Single summarization
+# Single text generation
 curl -X POST "http://localhost:19690/api/v1/summarizer/summarize" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <client_id>|<client_secret>" \
   -d '{
     "model": "t5-small",
-    "input": "Your long text to summarize here...",
+    "input": "Your text to process here...",
     "temperature": 0.7
   }'
 
-# Batch summarization
+# Development mode: Query parameter authentication (less secure)
+curl -X POST "http://localhost:19690/api/v1/summarizer/summarize?token=<client_id>|<client_secret>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "t5-small",
+    "input": "Your text to process here...",
+    "temperature": 0.7
+  }'
+
+# Batch text generation
 curl -X POST "http://localhost:19690/api/v1/summarizer/summarize_batch" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <client_id>|<client_secret>" \
@@ -394,9 +427,61 @@ curl -X POST "http://localhost:19690/api/v1/summarizer/summarize_batch" \
     "inputs": ["Text 1...", "Text 2..."],
     "temperature": 0.5
   }'
+
+# GPT-style text generation
+curl -X POST "http://localhost:19690/api/v1/sendprompt" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <client_id>|<client_secret>" \
+  -d '{
+    "model": "distilgpt2",
+    "input": "Once upon a time",
+    "temperature": 0.8
+  }'
 ```
 
-#### Text Embedding
+#### File Content Extraction
+
+```bash
+# Extract text from base64 encoded file
+curl -X POST "http://localhost:19690/api/v1/extract/extract" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <client_id>|<client_secret>" \
+  -d '{
+    "file_content": "<base64_encoded_file>",
+    "extention": "pdf"
+  }'
+
+# Extract text from multipart file upload
+curl -X POST "http://localhost:19690/api/v1/extract/extract_file" \
+  -H "Authorization: Bearer <client_id>|<client_secret>" \
+  -F "file=@document.pdf" \
+  -F "extension=pdf"
+```
+
+**Supported File Types:**
+- **PDF**: Extracts text from each page with page numbers
+- **DOCX/DOC**: Extracts text from each paragraph with paragraph numbers
+- **PowerPoint (PPT/PPTX)**: Extracts text from each slide with slide numbers
+- **Excel (XLS/XLSX)**: Extracts data from each sheet with sheet numbers
+- **TXT/MD**: Plain text extraction
+- **HTML/HTM**: Extracts clean text content
+- **CSV**: Extracts each row as structured data
+
+**Response Format:**
+```json
+{
+  "success": true,
+  "message": "Text extracted successfully",
+  "results": [
+    {
+      "content": "Extracted text content",
+      "item_number": 1,
+      "content_as": "pages"
+    }
+  ],
+  "time_taken": 0.25
+}
+```
 
 ```bash
 # Single embedding
@@ -427,17 +512,17 @@ curl -X POST "http://localhost:19690/api/v1/embedder/embed_batch" \
 ### Python SDK Usage
 
 ```python
-# Summarization
-from app.models.summarization_request import SummarizationRequest
-from app.services.summarizer_service import TextSummarizer
+# Text Generation/Summarization
+from app.models.prompt_request import PromptRequest
+from app.services.prompt_service import PromptProcessor
 
-request = SummarizationRequest(
+request = PromptRequest(
     model="t5-small",
     input="Your text to summarize",
     temperature=0.7
 )
-response = TextSummarizer.summarize(request)
-print(response.results.summary)
+response = PromptProcessor.process_prompt(request)
+print(response.results[0])
 
 # Embedding
 from app.models.embedding_request import EmbeddingRequest
@@ -857,10 +942,13 @@ Flouds AI uses API versioning with the `/api/v1` prefix for all endpoints:
 
 | Endpoint | Method | Description | Rate Limited |
 |----------|--------|-------------|-------------|
-| `/api/v1/summarize` | POST | Single text summarization | ✅ |
-| `/api/v1/summarize_batch` | POST | Batch text summarization | ✅ |
-| `/api/v1/embed` | POST | Single text embedding | ✅ |
-| `/api/v1/embed_batch` | POST | Batch text embedding | ✅ |
+| `/api/v1/summarizer/summarize` | POST | Single text generation/summarization | ✅ |
+| `/api/v1/summarizer/summarize_batch` | POST | Batch text generation/summarization | ✅ |
+| `/api/v1/sendprompt` | POST | GPT-style text generation | ✅ |
+| `/api/v1/embedder/embed` | POST | Single text embedding | ✅ |
+| `/api/v1/embedder/embed_batch` | POST | Batch text embedding | ✅ |
+| `/api/v1/extract/extract` | POST | Extract text from base64 file | ✅ |
+| `/api/v1/extract/extract_file` | POST | Extract text from multipart upload | ✅ |
 | `/api/v1/health` | GET | Basic health check | ❌ |
 | `/api/v1/health/detailed` | GET | Detailed system info | ❌ |
 | `/api/v1/health/ready` | GET | Readiness probe | ❌ |
@@ -1056,6 +1144,13 @@ MIT License. See [LICENSE](LICENSE) for details.
 - ✅ **Encrypted Client Storage** - Secure credential management with Fernet encryption
 - ✅ **Optimized Caching** - LRU caches with sliding expiration and automatic cleanup
 - ✅ **Resource Leak Prevention** - Proper cleanup and resource management
+- ✅ **Service Refactoring** - Renamed summarizer_service to prompt_service for clarity
+- ✅ **Memory Optimizations** - Improved array operations and reduced object creation
+- ✅ **Dead Code Removal** - Cleaned up unused variables and model classes
+- ✅ **Enhanced File Extraction** - Support for DOC, PPT/PPTX, XLS/XLSX formats with structured output
+- ✅ **File Content Extraction** - New ExtractorService for PDF, DOCX, TXT, HTML, CSV processing
+- ✅ **Multipart Upload Support** - Both base64 and multipart file upload endpoints
+- ✅ **Structured Extraction Output** - Item-based extraction with content type identification
 
 ### Security Compliance
 

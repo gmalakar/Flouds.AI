@@ -35,7 +35,6 @@ python onnx_loaders/batch_export.py
 - `--optimize`: Enable ONNX optimization (recommended)
 - `--task`: Export task (`seq2seq-lm`, `feature-extraction`, etc.)
 - `--use_cache`: Use KV cache for seq2seq models (faster inference)
-- `--use_t5_encoder`: Export T5 encoder only for embeddings
 - `--model_folder`: Custom output folder name
 
 ## Output Structure

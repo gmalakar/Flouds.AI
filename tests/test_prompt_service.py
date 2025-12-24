@@ -1,5 +1,5 @@
 # =============================================================================
-# File: test_summarizer_service.py
+# File: test_prompt_service.py
 # Date: 2025-01-15
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
@@ -19,8 +19,8 @@ def _isolate_tests(monkeypatch):
     pass
 
 
-from app.models.summarization_response import SummarizationResponse
-from app.services.summarizer_service import TextSummarizer
+from app.models.prompt_response import PromptResponse
+from app.services.prompt_service import PromptProcessor
 
 
 # Dummy classes for mocking
@@ -121,11 +121,11 @@ def dummy_model_config():
 
 # ---- Single summarization (seq2seq) ----
 @patch(
-    "app.services.summarizer_service.TextSummarizer._get_tokenizer_threadsafe",
+    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
     return_value=DummyTokenizerEmpty(),
 )
 @patch(
-    "app.services.summarizer_service.TextSummarizer.get_model",
+    "app.services.prompt_service.PromptProcessor.get_model",
     return_value=DummyModel(),
 )
 @patch("app.config.config_loader.ConfigLoader.get_onnx_config")
@@ -133,10 +133,10 @@ def test_summarize_empty_summary(
     mock_get_config, mock_get_model, mock_get_tokenizer, dummy_model_config
 ):
     mock_get_config.return_value = dummy_model_config
-    from app.models.summarization_request import SummarizationRequest
+    from app.models.prompt_request import PromptRequest
 
-    req = SummarizationRequest(model="dummy-model", input="This is a test.")
-    response = TextSummarizer.summarize(req)
+    req = PromptRequest(model="dummy-model", input="This is a test.")
+    response = PromptProcessor.summarize(req)
     assert response.success
     if len(response.results) > 0:
         assert response.results[0] == ""
@@ -144,11 +144,11 @@ def test_summarize_empty_summary(
 
 # ---- Single summarization with temperature ----
 @patch(
-    "app.services.summarizer_service.TextSummarizer._get_tokenizer_threadsafe",
+    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
     return_value=DummyTokenizerEmpty(),
 )
 @patch(
-    "app.services.summarizer_service.TextSummarizer.get_model",
+    "app.services.prompt_service.PromptProcessor.get_model",
     return_value=DummyModel(),
 )
 @patch("app.config.config_loader.ConfigLoader.get_onnx_config")
@@ -156,12 +156,10 @@ def test_summarize_empty_summary_with_config(
     mock_get_config, mock_get_model, mock_get_tokenizer, dummy_model_config
 ):
     mock_get_config.return_value = dummy_model_config
-    from app.models.summarization_request import SummarizationRequest
+    from app.models.prompt_request import PromptRequest
 
-    req = SummarizationRequest(
-        model="dummy-model", input="This is a test.", temperature=0.5
-    )
-    response = TextSummarizer.summarize(req)
+    req = PromptRequest(model="dummy-model", input="This is a test.", temperature=0.5)
+    response = PromptProcessor.summarize(req)
     assert response.success
     if len(response.results) > 0:
         assert response.results[0] == ""
@@ -169,11 +167,11 @@ def test_summarize_empty_summary_with_config(
 
 # ---- Exception handling ----
 @patch(
-    "app.services.summarizer_service.TextSummarizer._get_tokenizer_threadsafe",
+    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
 )
 @patch(
-    "app.services.summarizer_service.TextSummarizer.get_model",
+    "app.services.prompt_service.PromptProcessor.get_model",
     return_value=DummyModelException(),
 )
 @patch("app.config.config_loader.ConfigLoader.get_onnx_config")
@@ -181,31 +179,29 @@ def test_summarize_generation_exception(
     mock_get_config, mock_get_model, mock_get_tokenizer, dummy_model_config
 ):
     mock_get_config.return_value = dummy_model_config
-    from app.models.summarization_request import SummarizationRequest
+    from app.models.prompt_request import PromptRequest
 
-    req = SummarizationRequest(
-        model="dummy-model", input="This is a test.", temperature=0.0
-    )
-    response = TextSummarizer.summarize(req)
+    req = PromptRequest(model="dummy-model", input="This is a test.", temperature=0.0)
+    response = PromptProcessor.summarize(req)
     # The test should pass regardless of success/failure since we're testing error handling
-    assert isinstance(response, SummarizationResponse)
+    assert isinstance(response, PromptResponse)
 
 
 # ---- Remove special tokens ----
 def test_remove_special_tokens():
     text = "This is <pad> a test <eos>."
     special_tokens = {"<pad>", "<eos>"}
-    result = TextSummarizer._remove_special_tokens(text, special_tokens)
+    result = PromptProcessor._remove_special_tokens(text, special_tokens)
     assert result == "This is a test ."
 
 
 # ---- Batch summarization ----
 @patch(
-    "app.services.summarizer_service.TextSummarizer._get_tokenizer_threadsafe",
+    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
 )
 @patch(
-    "app.services.summarizer_service.TextSummarizer.get_model",
+    "app.services.prompt_service.PromptProcessor.get_model",
     return_value=DummyModel(),
 )
 @patch("app.config.config_loader.ConfigLoader.get_onnx_config")
@@ -217,11 +213,11 @@ def test_summarize_batch_seq2seqlm(
     BaseNLPService.clear_thread_tokenizers()
 
     mock_get_config.return_value = dummy_model_config
-    from app.models.summarization_request import SummarizationBatchRequest
+    from app.models.prompt_request import PromptBatchRequest
 
-    req = SummarizationBatchRequest(model="dummy-model", inputs=["Text 1", "Text 2"])
-    responses = TextSummarizer.summarize_batch(req)
-    assert isinstance(responses, SummarizationResponse)
+    req = PromptBatchRequest(model="dummy-model", inputs=["Text 1", "Text 2"])
+    responses = PromptProcessor.summarize_batch(req)
+    assert isinstance(responses, PromptResponse)
     assert isinstance(responses.results, list)
     # May fail due to optimum not being available
     if responses.success:
@@ -229,14 +225,14 @@ def test_summarize_batch_seq2seqlm(
 
 
 # ---- ONNX summarization ----
-@patch("app.services.summarizer_service.TextSummarizer._get_decoder_session")
-@patch("app.services.summarizer_service.TextSummarizer._get_encoder_session")
+@patch("app.services.prompt_service.PromptProcessor._get_decoder_session")
+@patch("app.services.prompt_service.PromptProcessor._get_encoder_session")
 @patch(
-    "app.services.summarizer_service.TextSummarizer._get_tokenizer_threadsafe",
+    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
 )
 @patch(
-    "app.services.summarizer_service.TextSummarizer._get_special_tokens",
+    "app.services.prompt_service.PromptProcessor._get_special_tokens",
     return_value=set(),
 )
 @patch("app.config.config_loader.ConfigLoader.get_onnx_config")
@@ -276,12 +272,12 @@ def test_summarize_other(
     mock_get_encoder_session.return_value = DummySession()
     mock_get_decoder_session.return_value = DummySession()
 
-    from app.models.summarization_request import SummarizationRequest
+    from app.models.prompt_request import PromptRequest
 
-    req = SummarizationRequest(model="dummy-model", input="This is a test.")
-    response = TextSummarizer.summarize(req)
+    req = PromptRequest(model="dummy-model", input="This is a test.")
+    response = PromptProcessor.summarize(req)
 
-    assert isinstance(response, SummarizationResponse)
+    assert isinstance(response, PromptResponse)
     assert isinstance(response.results, list)
     assert response.success
     # Results may be empty for ONNX test due to mocking
@@ -290,6 +286,6 @@ def test_summarize_other(
 # ---- Validation test ----
 def test_validation_error():
     with pytest.raises(ValidationError):
-        from app.models.summarization_request import SummarizationRequest
+        from app.models.prompt_request import PromptRequest
 
-        SummarizationRequest(model="dummy-model", input={"foo": "bar"}, temperature=0.5)
+        PromptRequest(model="dummy-model", input={"foo": "bar"}, temperature=0.5)

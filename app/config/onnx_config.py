@@ -38,6 +38,7 @@ class OnnxConfig(BaseModel):
     normalize: bool = True
     logits: bool = Field(default=False)
     eos_token_id: int = Field(default=1)
+    bos_token_id: Optional[int] = Field(default=None)
     summarization_task: str = Field(default="s2s")
     embedder_task: str = Field(default="fe")
     outputnames: OutputNames = Field(default_factory=OutputNames)
@@ -55,8 +56,14 @@ class OnnxConfig(BaseModel):
     generation_config_path: str = Field(default="generation_config.json")
     num_beams: int = 4
     temperature: float = 0.0
+    top_k: Optional[int] = Field(default=None)
+    top_p: Optional[float] = Field(default=None)
+    repetition_penalty: Optional[float] = Field(default=None)
     early_stopping: bool = True
     use_seq2seqlm: bool = Field(default=False)
+    encoder_only: bool = Field(
+        default=False
+    )  # For GPT-style models that use only encoder
     prepend_text: str = Field(default="summarize: ")
     chunk_logic: str = Field(default="sentence")
     chunk_overlap: int = Field(default=1)

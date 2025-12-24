@@ -55,7 +55,9 @@ class KeyManager:
             # Initialize database with error handling
             try:
                 self.db = TinyDB(self.db_path)
-                logger.info(f"Using clients database: {self.db_path}")
+                logger.info(
+                    "Using clients database: %s", sanitize_for_log(self.db_path)
+                )
                 self.clients_table = self.db.table("clients")
             except (OSError, PermissionError) as db_error:
                 if self.db:
@@ -118,7 +120,7 @@ class KeyManager:
 
         with safe_open(key_file, key_dir, "wb") as f:
             f.write(key)
-        logger.info(f"Generated new encryption key at {key_file}")
+        logger.info("Generated new encryption key at %s", sanitize_for_log(key_file))
         return key
 
     @lru_cache(maxsize=1000)
@@ -361,12 +363,17 @@ def _ensure_admin_exists():
         admin_secret = token_urlsafe(32)
 
         if key_manager.add_client(admin_id, admin_secret, "admin"):
-            # Log to console
-            logger.warning(f"=== ADMIN CREDENTIALS CREATED ===")
-            logger.warning(f"Admin Client ID: {admin_id}")
-            logger.warning(f"Admin Secret: {admin_secret}")
-            logger.warning(f"Admin Token: {admin_id}|{admin_secret}")
-            logger.warning(f"=== SAVE THESE CREDENTIALS ===")
+            # Save credentials to console file
+            try:
+                with open("admin_console.txt", "w", encoding="utf-8") as console_file:
+                    console_file.write("=== ADMIN CREDENTIALS CREATED ===\n")
+                    console_file.write(f"Admin Client ID: {admin_id}\n")
+                    console_file.write(f"Admin Secret: {admin_secret}\n")
+                    console_file.write(f"Admin Token: {admin_id}|{admin_secret}\n")
+                    console_file.write("=== SAVE THESE CREDENTIALS ===\n")
+                logger.warning("Admin credentials saved to admin_console.txt")
+            except Exception as e:
+                logger.error(f"Failed to save console output: {e}")
 
             # Write to admin credentials file
             try:
