@@ -6,6 +6,8 @@
 
 import base64
 import os
+import sqlite3
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Optional, Set
 
@@ -18,7 +20,6 @@ from app.exceptions import (
 )
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
-from tinydb import Query, TinyDB
 
 logger = get_logger("key_manager")
 
@@ -31,13 +32,13 @@ class Client:
 
 
 class KeyManager:
-    """Manages client credentials using TinyDB with encryption."""
+    """Manages client credentials using SQLite with encryption."""
 
     def __init__(self, db_path: str = None):
-        self.db = None
+        self.db_path = None
         self.clients = {}
-        self._token_cache: Set[str] = set()  # Cache for valid tokens
-        self._admin_cache: Set[str] = set()  # Cache for admin client IDs
+        self._token_cache: Set[str] = set()
+        self._admin_cache: Set[str] = set()
 
         try:
             from app.app_init import APP_SETTINGS
@@ -52,52 +53,173 @@ class KeyManager:
                 os.makedirs(db_dir, exist_ok=True)
                 logger.info(f"Created database directory: {db_dir}")
 
-            # Initialize database with error handling
-            try:
-                self.db = TinyDB(self.db_path)
-                logger.info(
-                    "Using clients database: %s", sanitize_for_log(self.db_path)
-                )
-                self.clients_table = self.db.table("clients")
-            except (OSError, PermissionError) as db_error:
-                if self.db:
-                    self.db.close()
-                    self.db = None
-                logger.error(f"Database access error: {db_error}")
-                raise DatabaseConnectionError(f"Cannot access database: {db_error}")
-            except Exception as db_error:
-                if self.db:
-                    self.db.close()
-                    self.db = None
-                logger.error(f"Database corruption detected: {db_error}")
-                # Try to create a new database file
-                if os.path.exists(self.db_path):
-                    backup_path = f"{self.db_path}.backup"
-                    os.rename(self.db_path, backup_path)
-                    logger.info(f"Backed up corrupted database to {backup_path}")
-                try:
-                    self.db = TinyDB(self.db_path)
-                    self.clients_table = self.db.table("clients")
-                    logger.info(f"Created new database: {self.db_path}")
-                except Exception as recovery_error:
-                    raise DatabaseCorruptionError(
-                        f"Cannot recover database: {recovery_error}"
-                    )
+            # Initialize database schema
+            self._init_database()
+            logger.info("Using clients database: %s", sanitize_for_log(self.db_path))
 
             self.encryption_key = self._get_or_create_encryption_key()
             self.fernet = Fernet(self.encryption_key)
             self.load_clients()
+
         except (DatabaseConnectionError, DatabaseCorruptionError):
-            if self.db:
-                self.db.close()
             raise
         except Exception as init_error:
-            if self.db:
-                self.db.close()
             logger.error(f"Critical error initializing KeyManager: {init_error}")
             raise DatabaseConnectionError(
                 f"KeyManager initialization failed: {init_error}"
             )
+
+    @contextmanager
+    def _get_connection(self):
+        """Get database connection with automatic commit/rollback."""
+        conn = None
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=10.0)
+            conn.row_factory = sqlite3.Row  # Access columns by name
+            yield conn
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"Database access error: {e}")
+            raise DatabaseConnectionError(f"Cannot access database: {e}")
+        except sqlite3.DatabaseError as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"Database corruption: {e}")
+            raise DatabaseCorruptionError(f"Database corruption detected: {e}")
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            raise
+        finally:
+            if conn:
+                conn.close()
+
+    def _init_database(self):
+        """Initialize database schema."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Create clients table with indexes
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS clients (
+                        client_id TEXT PRIMARY KEY,
+                        client_secret TEXT NOT NULL,
+                        client_type TEXT NOT NULL DEFAULT 'api_user',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """
+                )
+
+                # Create index on client_type for faster admin lookups
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_client_type 
+                    ON clients(client_type)
+                """
+                )
+
+                # Create trigger to update updated_at
+                cursor.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS update_client_timestamp 
+                    AFTER UPDATE ON clients
+                    BEGIN
+                        UPDATE clients SET updated_at = CURRENT_TIMESTAMP
+                        WHERE client_id = NEW.client_id;
+                    END
+                """
+                )
+
+                logger.info("Database schema initialized successfully")
+
+        except DatabaseCorruptionError as e:
+            # Handle "file is not a database" error (e.g., TinyDB file)
+            logger.warning(f"Database corruption detected: {e}")
+            self._recover_database()
+        except sqlite3.DatabaseError as e:
+            # Handle "file is not a database" error (e.g., TinyDB file)
+            error_msg = str(e).lower()
+            if (
+                "not a database" in error_msg
+                or "malformed" in error_msg
+                or "corrupt" in error_msg
+            ):
+                logger.warning(f"Database file is corrupted or wrong format: {e}")
+                self._recover_database()
+            else:
+                raise DatabaseConnectionError(f"Cannot initialize database: {e}")
+        except sqlite3.OperationalError as e:
+            # Try to recover from corrupted database
+            if "malformed" in str(e).lower() or "corrupt" in str(e).lower():
+                logger.warning(f"Database operational error: {e}")
+                self._recover_database()
+            else:
+                raise DatabaseConnectionError(f"Cannot initialize database: {e}")
+
+    def _recover_database(self):
+        """Attempt to recover from corrupted database."""
+        logger.warning("Attempting database recovery...")
+
+        if os.path.exists(self.db_path):
+            backup_path = f"{self.db_path}.backup"
+            try:
+                # Remove old backup if exists
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+                os.rename(self.db_path, backup_path)
+                logger.info(f"Backed up corrupted database to {backup_path}")
+            except OSError as e:
+                logger.error(f"Failed to backup corrupted database: {e}")
+                # Try to remove the corrupted file directly
+                try:
+                    os.remove(self.db_path)
+                    logger.info(f"Removed corrupted database: {self.db_path}")
+                except OSError as remove_error:
+                    logger.error(f"Failed to remove corrupted database: {remove_error}")
+
+        # Recreate database - call directly without recursion risk
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS clients (
+                        client_id TEXT PRIMARY KEY,
+                        client_secret TEXT NOT NULL,
+                        client_type TEXT NOT NULL DEFAULT 'api_user',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """
+                )
+
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_client_type 
+                    ON clients(client_type)
+                """
+                )
+
+                cursor.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS update_client_timestamp 
+                    AFTER UPDATE ON clients
+                    BEGIN
+                        UPDATE clients SET updated_at = CURRENT_TIMESTAMP
+                        WHERE client_id = NEW.client_id;
+                    END
+                """
+                )
+
+                logger.info("Database recreated successfully")
+        except Exception as e:
+            raise DatabaseCorruptionError(f"Cannot recover database: {e}")
 
     def _get_or_create_encryption_key(self) -> bytes:
         """Get or create encryption key from environment or file."""
@@ -107,6 +229,7 @@ class KeyManager:
 
         key_dir = os.path.dirname(os.path.abspath(self.db_path))
         key_file = os.path.join(key_dir, ".encryption_key")
+
         if os.path.exists(key_file):
             from app.utils.path_validator import safe_open
 
@@ -116,10 +239,12 @@ class KeyManager:
         # Generate new key
         key = Fernet.generate_key()
         os.makedirs(key_dir, exist_ok=True)
+
         from app.utils.path_validator import safe_open
 
         with safe_open(key_file, key_dir, "wb") as f:
             f.write(key)
+
         logger.info("Generated new encryption key at %s", sanitize_for_log(key_file))
         return key
 
@@ -137,7 +262,6 @@ class KeyManager:
     def authenticate_client(self, token: str) -> Optional[Client]:
         """Authenticate client using client_id|client_secret format."""
         try:
-            # Use cached token parsing
             parsed = self._parse_token(token)
             if not parsed:
                 return None
@@ -171,16 +295,17 @@ class KeyManager:
             # Encrypt secret
             encrypted_secret = self.fernet.encrypt(client_secret.encode()).decode()
 
-            # Insert or update client
-            ClientQuery = Query()
-            self.clients_table.upsert(
-                {
-                    "client_id": client_id,
-                    "client_secret": encrypted_secret,
-                    "type": client_type,
-                },
-                ClientQuery.client_id == client_id,
-            )
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Use INSERT OR REPLACE for upsert behavior
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO clients (client_id, client_secret, client_type)
+                    VALUES (?, ?, ?)
+                """,
+                    (client_id, encrypted_secret, client_type),
+                )
 
             # Update in-memory cache
             self.clients[client_id] = Client(client_id, client_secret, client_type)
@@ -191,7 +316,7 @@ class KeyManager:
             if client_type == "admin":
                 self._admin_cache.add(client_id)
 
-            # Clear LRU cache to ensure fresh parsing
+            # Clear LRU cache
             self._parse_token.cache_clear()
 
             logger.info(
@@ -200,12 +325,8 @@ class KeyManager:
                 sanitize_for_log(client_type),
             )
             return True
-        except (PermissionError, OSError) as e:
-            logger.error(
-                "Database access error for client %s: %s",
-                sanitize_for_log(client_id),
-                str(e),
-            )
+
+        except (DatabaseConnectionError, DatabaseCorruptionError):
             return False
         except (ValueError, TypeError) as e:
             logger.error(
@@ -221,10 +342,12 @@ class KeyManager:
     def remove_client(self, client_id: str) -> bool:
         """Remove client from database."""
         try:
-            ClientQuery = Query()
-            result = self.clients_table.remove(ClientQuery.client_id == client_id)
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM clients WHERE client_id = ?", (client_id,))
+                deleted = cursor.rowcount > 0
 
-            if result:
+            if deleted:
                 # Remove from caches
                 removed_client = self.clients.pop(client_id, None)
                 if removed_client:
@@ -238,12 +361,8 @@ class KeyManager:
                 logger.info(f"Removed client: {client_id}")
                 return True
             return False
-        except (PermissionError, OSError) as e:
-            logger.error(
-                "Database access error removing client %s: %s",
-                sanitize_for_log(client_id),
-                str(e),
-            )
+
+        except (DatabaseConnectionError, DatabaseCorruptionError):
             return False
         except Exception as e:
             logger.error(
@@ -252,73 +371,77 @@ class KeyManager:
             return False
 
     def load_clients(self):
-        """Load clients from TinyDB."""
+        """Load clients from SQLite database."""
         try:
-            # Initialize empty clients dict
             self.clients = {}
 
-            # Check if database file exists and is readable
             if not os.path.exists(self.db_path):
                 logger.info(
                     f"Database file {self.db_path} does not exist, will be created"
                 )
                 return
 
-            all_clients = self.clients_table.all()
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT client_id, client_secret, client_type 
+                    FROM clients
+                """
+                )
 
-            if not all_clients:
-                logger.info(f"No clients found in database {self.db_path}")
-                return
+                rows = cursor.fetchall()
 
-            for client_data in all_clients:
-                try:
-                    client_id = client_data["client_id"]
-                    encrypted_secret = client_data["client_secret"]
-                    client_type = client_data.get("type", "api_user")
+                if not rows:
+                    logger.info(f"No clients found in database {self.db_path}")
+                    return
 
-                    # Decrypt secret
+                for row in rows:
                     try:
-                        client_secret = self.fernet.decrypt(
-                            encrypted_secret.encode()
-                        ).decode()
-                    except Exception as decrypt_error:
+                        client_id = row["client_id"]
+                        encrypted_secret = row["client_secret"]
+                        client_type = row["client_type"]
+
+                        # Decrypt secret
+                        try:
+                            client_secret = self.fernet.decrypt(
+                                encrypted_secret.encode()
+                            ).decode()
+                        except Exception as decrypt_error:
+                            logger.error(
+                                f"Failed to decrypt client secret for {client_id}: {decrypt_error}"
+                            )
+                            raise DecryptionError(
+                                f"Cannot decrypt client credentials: {decrypt_error}"
+                            )
+
+                        client = Client(client_id, client_secret, client_type)
+                        self.clients[client_id] = client
+
+                        # Update caches
+                        token = f"{client_id}|{client_secret}"
+                        self._token_cache.add(token)
+                        if client_type == "admin":
+                            self._admin_cache.add(client_id)
+
+                    except DecryptionError:
+                        logger.error(f"Decryption failed for client {client_id}")
+                        continue
+                    except (KeyError, ValueError) as client_error:
                         logger.error(
-                            f"Failed to decrypt client secret for {client_id}: {decrypt_error}"
+                            f"Invalid client data for {client_id}: {client_error}"
                         )
-                        raise DecryptionError(
-                            f"Cannot decrypt client credentials: {decrypt_error}"
+                        continue
+                    except Exception as client_error:
+                        logger.error(
+                            f"Failed to load client {client_id}: {client_error}"
                         )
+                        continue
 
-                    client = Client(client_id, client_secret, client_type)
-                    self.clients[client_id] = client
+                logger.info(f"Loaded {len(self.clients)} clients from {self.db_path}")
 
-                    # Update caches
-                    token = f"{client_id}|{client_secret}"
-                    self._token_cache.add(token)
-                    if client_type == "admin":
-                        self._admin_cache.add(client_id)
-                except DecryptionError:
-                    logger.error(
-                        f"Decryption failed for client {client_data.get('client_id', 'unknown')}"
-                    )
-                    continue
-                except (KeyError, ValueError) as client_error:
-                    logger.error(
-                        f"Invalid client data for {client_data.get('client_id', 'unknown')}: {client_error}"
-                    )
-                    continue
-                except Exception as client_error:
-                    logger.error(
-                        f"Failed to load client {client_data.get('client_id', 'unknown')}: {client_error}"
-                    )
-                    continue
-
-            logger.info(f"Loaded {len(self.clients)} clients from {self.db_path}")
-        except (FileNotFoundError, PermissionError) as e:
-            logger.error("Database file access error: %s", str(e))
-            self.clients = {}
-        except (DecryptionError, DatabaseCorruptionError) as e:
-            logger.error("Database/encryption error loading clients: %s", str(e))
+        except (DatabaseConnectionError, DatabaseCorruptionError) as e:
+            logger.error("Database error loading clients: %s", str(e))
             self.clients = {}
             self._token_cache.clear()
             self._admin_cache.clear()
@@ -329,11 +452,47 @@ class KeyManager:
             self._token_cache.clear()
             self._admin_cache.clear()
 
+    def get_client_stats(self) -> dict:
+        """Get statistics about stored clients."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Total clients
+                cursor.execute("SELECT COUNT(*) as total FROM clients")
+                total = cursor.fetchone()["total"]
+
+                # Clients by type
+                cursor.execute(
+                    """
+                    SELECT client_type, COUNT(*) as count 
+                    FROM clients 
+                    GROUP BY client_type
+                """
+                )
+                by_type = {
+                    row["client_type"]: row["count"] for row in cursor.fetchall()
+                }
+
+                return {
+                    "total_clients": total,
+                    "by_type": by_type,
+                    "database_size_bytes": (
+                        os.path.getsize(self.db_path)
+                        if os.path.exists(self.db_path)
+                        else 0
+                    ),
+                }
+        except Exception as e:
+            logger.error(f"Failed to get client stats: {e}")
+            return {
+                "total_clients": len(self.clients),
+                "by_type": {},
+                "database_size_bytes": 0,
+            }
+
     def close(self):
-        """Close database connection and clear caches."""
-        if self.db:
-            self.db.close()
-            self.db = None
+        """Clear caches (SQLite connections are auto-closed by context manager)."""
         self._token_cache.clear()
         self._admin_cache.clear()
         self._parse_token.cache_clear()

@@ -6,7 +6,7 @@
 
 
 import base64
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Optional, Union
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 
@@ -27,13 +27,13 @@ logger = get_logger("router")
 
 
 def _extract_text_from_file(
-    file_content: str, extension: str
+    file_content: Union[str, bytes], extension: str
 ) -> List[ExtractedFileContent]:
     """
     Extract text from a file with the given content and extension.
 
     Args:
-        file_content: Base64 encoded file content
+        file_content: Base64 string or raw bytes file content
         extension: File extension
 
     Returns:
@@ -222,7 +222,35 @@ async def extract_file_and_embed(
     4. Returns the embedding batch response with item_number and content_as metadata
     """
     try:
+        # Validate file is provided
+        if not file or not file.filename:
+            raise HTTPException(
+                status_code=422,
+                detail=[
+                    {
+                        "type": "missing",
+                        "loc": ["body", "file"],
+                        "msg": "Field required",
+                        "input": None,
+                    }
+                ],
+            )
+
         file_bytes = await file.read()
+
+        # Validate file content is not empty
+        if not file_bytes:
+            raise HTTPException(
+                status_code=422,
+                detail=[
+                    {
+                        "type": "value_error",
+                        "loc": ["body", "file"],
+                        "msg": "Uploaded file is empty",
+                        "input": None,
+                    }
+                ],
+            )
         file_content = base64.b64encode(file_bytes).decode()
 
         # Auto-detect extension if not provided

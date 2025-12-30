@@ -34,14 +34,14 @@ def isolate_tests():
 
 # Service Tests
 def test_extract_text_pdf():
-    mock_doc = MagicMock()
     mock_page = MagicMock()
-    mock_page.get_text.return_value = "Page 1 content"
-    mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-    mock_doc.__enter__ = MagicMock(return_value=mock_doc)
-    mock_doc.__exit__ = MagicMock(return_value=False)
+    mock_page.extract_text.return_value = "Page 1 content"
+    mock_pdf = MagicMock()
+    mock_pdf.pages = [mock_page]
+    mock_pdf.__enter__ = MagicMock(return_value=mock_pdf)
+    mock_pdf.__exit__ = MagicMock(return_value=False)
 
-    with patch("app.services.extractor_service.fitz.open", return_value=mock_doc):
+    with patch("app.services.extractor_service.pdfplumber.open", return_value=mock_pdf):
         req = FileRequest(
             file_content=base64.b64encode(b"dummy pdf content").decode(),
             extention="pdf",
@@ -76,8 +76,12 @@ def test_extract_text_docx():
 
 
 def test_extract_text_doc():
-    with patch("app.services.extractor_service.docx2txt") as mock_docx2txt:
-        mock_docx2txt.process.return_value = "DOC file content"
+    mock_doc = MagicMock()
+    mock_paragraph = MagicMock()
+    mock_paragraph.text = "DOC paragraph content"
+    mock_doc.paragraphs = [mock_paragraph]
+
+    with patch("app.services.extractor_service.Document", return_value=mock_doc):
         req = FileRequest(
             file_content=base64.b64encode(b"dummy doc content").decode(),
             extention="doc",
@@ -86,8 +90,8 @@ def test_extract_text_doc():
 
         assert response.success is True
         assert len(response.results) == 1
-        assert response.results[0].content == "DOC file content"
-        assert response.results[0].content_as == "text"
+        assert response.results[0].content == "DOC paragraph content"
+        assert response.results[0].content_as == "paragraphs"
 
 
 def test_extract_text_pptx():
@@ -144,6 +148,17 @@ def test_extract_text_txt():
     assert response.results[0].content_as == "text"
 
 
+def test_extract_text_txt_bytes():
+    text_content = b"This is plain text content"
+    req = FileRequest(file_content=text_content, extention="txt")
+    response = ExtractorService.extract_text(req)
+
+    assert response.success is True
+    assert len(response.results) == 1
+    assert response.results[0].content == text_content.decode()
+    assert response.results[0].content_as == "text"
+
+
 def test_extract_text_html():
     html_content = "<html><body><p>HTML content</p></body></html>"
     req = FileRequest(
@@ -158,19 +173,15 @@ def test_extract_text_html():
 
 
 def test_extract_text_csv():
-    mock_df = MagicMock()
-    mock_df.to_dict.return_value = [{"col1": "val1", "col2": "val2"}]
+    req = FileRequest(
+        file_content=base64.b64encode(b"col1,col2\nval1,val2").decode(),
+        extention="csv",
+    )
+    response = ExtractorService.extract_text(req)
 
-    with patch("pandas.read_csv", return_value=mock_df):
-        req = FileRequest(
-            file_content=base64.b64encode(b"col1,col2\nval1,val2").decode(),
-            extention="csv",
-        )
-        response = ExtractorService.extract_text(req)
-
-        assert response.success is True
-        assert len(response.results) == 1
-        assert response.results[0].content_as == "rows"
+    assert response.success is True
+    assert len(response.results) == 1
+    assert response.results[0].content_as == "rows"
 
 
 def test_extract_text_unsupported_format():
@@ -184,7 +195,9 @@ def test_extract_text_unsupported_format():
 
 
 def test_extract_text_doc_missing_library():
-    with patch("app.services.extractor_service.docx2txt", None):
+    with patch(
+        "app.services.extractor_service.Document", side_effect=Exception("no docx")
+    ):
         req = FileRequest(
             file_content=base64.b64encode(b"dummy doc content").decode(),
             extention="doc",
@@ -192,7 +205,7 @@ def test_extract_text_doc_missing_library():
         response = ExtractorService.extract_text(req)
 
         assert response.success is False
-        assert "Install docx2txt" in response.message
+        assert "Failed to parse" in response.message
 
 
 def test_extract_text_pptx_missing_library():
@@ -214,14 +227,14 @@ async def test_extract_file_pdf():
     mock_file = MagicMock(spec=UploadFile)
     mock_file.read = AsyncMock(return_value=file_content)
 
-    mock_doc = MagicMock()
     mock_page = MagicMock()
-    mock_page.get_text.return_value = "PDF page content"
-    mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-    mock_doc.__enter__ = MagicMock(return_value=mock_doc)
-    mock_doc.__exit__ = MagicMock(return_value=False)
+    mock_page.extract_text.return_value = "PDF page content"
+    mock_pdf = MagicMock()
+    mock_pdf.pages = [mock_page]
+    mock_pdf.__enter__ = MagicMock(return_value=mock_pdf)
+    mock_pdf.__exit__ = MagicMock(return_value=False)
 
-    with patch("app.services.extractor_service.fitz.open", return_value=mock_doc):
+    with patch("app.services.extractor_service.pdfplumber.open", return_value=mock_pdf):
         response = await extract_file(mock_file, "pdf")
 
         assert response.success is True

@@ -45,7 +45,7 @@ function Write-Error {
     Write-Host "❌ ERROR: $Message" -ForegroundColor Red
 }
 
-function Check-Docker {
+function Test-Docker {
     try {
         $process = Start-Process -FilePath "docker" -ArgumentList "version" -NoNewWindow -Wait -PassThru -RedirectStandardError "NUL"
         
@@ -56,7 +56,8 @@ function Check-Docker {
         
         Write-Success "Docker is running"
         return $true
-    } catch {
+    }
+    catch {
         Write-Error "Docker command failed: $_"
         exit 1
     }
@@ -83,7 +84,7 @@ Write-Host "========================================================="
 
 # Check Docker installation
 Write-StepHeader "Checking Docker installation"
-Check-Docker
+Test-Docker
 
 # Check for Dockerfile
 Write-StepHeader "Validating build prerequisites"
@@ -111,10 +112,12 @@ if ($imageExists) {
             Write-Host "Build cancelled by user." -ForegroundColor Yellow
             exit 0
         }
-    } else {
+    }
+    else {
         Write-Warning "$fullImageName already exists. Forcing rebuild as requested."
     }
-} else {
+}
+else {
     Write-Success "No existing image found with name $fullImageName"
 }
 
@@ -205,7 +208,8 @@ try {
                 if ($LASTEXITCODE -eq 0) {
                     $pushSuccess = $true
                     Write-Success "Image pushed successfully to registry"
-                } else {
+                }
+                else {
                     Write-Warning "Push attempt $pushAttempt failed"
                 }
             }
@@ -216,7 +220,8 @@ try {
                 exit 1
             }
         }
-    } else {
+    }
+    else {
         Write-Error "Failed to build Docker image after $maxRetries attempts"
         exit 1
     }
