@@ -28,15 +28,18 @@ class TestSpecificExceptions:
     """Test specific exception handling in various modules."""
 
     def test_database_exceptions_in_key_manager(self):
-        """Test database-specific exceptions in KeyManager."""
+        """Test database-specific exceptions in KeyManager (SQLite)."""
+        import os
+        import tempfile
+
         from app.utils.key_manager import KeyManager
 
-        # Test database connection error
-        with patch("app.utils.key_manager.TinyDB") as mock_db:
-            mock_db.side_effect = OSError("Permission denied")
+        # Test database connection error with invalid path
+        with patch("app.utils.key_manager.sqlite3.connect") as mock_connect:
+            mock_connect.side_effect = OSError("Permission denied")
 
             with pytest.raises(DatabaseConnectionError):
-                KeyManager("test.db")
+                KeyManager(db_path="/invalid/path/test.db")
 
     def test_config_exceptions_in_config_loader(self):
         """Test configuration-specific exceptions in ConfigLoader."""

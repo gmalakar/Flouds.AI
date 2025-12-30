@@ -258,13 +258,13 @@ else {
     Write-Warning "FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
 }
 
-# Check and set permissions for TinyDB directory
-if ($envVars.ContainsKey("FLOUDS_TINYDB_PATH_AT_HOST")) {
-    $tinydbPath = $envVars["FLOUDS_TINYDB_PATH_AT_HOST"]
-    Set-DirectoryPermissions -Path $tinydbPath -Description "TinyDB"
+# Check and set permissions for Data directory (SQLite database)
+if ($envVars.ContainsKey("FLOUDS_DATA_PATH_AT_HOST")) {
+    $dataPath = $envVars["FLOUDS_DATA_PATH_AT_HOST"]
+    Set-DirectoryPermissions -Path $dataPath -Description "Data"
 }
 else {
-    Write-Warning "FLOUDS_TINYDB_PATH_AT_HOST not set. Client database will not be persisted to host."
+    Write-Warning "FLOUDS_DATA_PATH_AT_HOST not set. Client database will not be persisted to host."
 }
 
 if ($BuildImage) {
@@ -366,14 +366,14 @@ if ($envVars.ContainsKey("FLOUDS_LOG_PATH_AT_HOST")) {
     $dockerArgs += "FLOUDS_LOG_PATH=$dockerLogPath"
 }
 
-# TinyDB directory mapping
-if ($envVars.ContainsKey("FLOUDS_TINYDB_PATH_AT_HOST")) {
-    $dockerTinydbPath = "$workingDir/tinydb"
-    Write-Host "Mapping TinyDB: $tinydbPath -> $dockerTinydbPath"
+# Data directory mapping (SQLite database)
+if ($envVars.ContainsKey("FLOUDS_DATA_PATH_AT_HOST")) {
+    $dockerDataPath = "$workingDir/data"
+    Write-Host "Mapping Data directory: $dataPath -> $dockerDataPath"
     $dockerArgs += "-v"
-    $dockerArgs += "${tinydbPath}:${dockerTinydbPath}:rw"
+    $dockerArgs += "${dataPath}:${dockerDataPath}:rw"
     $dockerArgs += "-e"
-    $dockerArgs += "FLOUDS_CLIENTS_DB=$dockerTinydbPath/clients.db"
+    $dockerArgs += "FLOUDS_CLIENTS_DB=$dockerDataPath/clients.db"
 }
 
 # Add platform flag if specified

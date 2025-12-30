@@ -72,6 +72,61 @@ def test_extract_text_from_file_success():
         assert result[1].content_as == "pages"
 
 
+def test_extract_text_from_file_accepts_bytes():
+    """Ensure raw bytes content is accepted and passed through."""
+    mock_response = ExtractedResponse(
+        success=True,
+        message="Extraction successful",
+        results=[
+            ExtractedFileContent(
+                content="Page 1 content", item_number=1, content_as="pages"
+            ),
+        ],
+        time_taken=0.1,
+    )
+
+    with patch(
+        "app.routers.extract_embed.ExtractorService.extract_text",
+        return_value=mock_response,
+    ) as mock_extract:
+        file_content = b"dummy pdf content"
+        result = _extract_text_from_file(file_content, "pdf")
+
+        assert len(result) == 1
+        assert result[0].content == "Page 1 content"
+        # Verify bytes were preserved on the request model
+        called_request = mock_extract.call_args[0][0]
+        assert called_request.file_content == file_content
+        assert isinstance(called_request.file_content, bytes)
+
+
+def test_extract_text_from_file_accepts_base64_string():
+    """Ensure base64 string content is accepted without coercion to bytes."""
+    mock_response = ExtractedResponse(
+        success=True,
+        message="Extraction successful",
+        results=[
+            ExtractedFileContent(
+                content="Page 1 content", item_number=1, content_as="pages"
+            ),
+        ],
+        time_taken=0.1,
+    )
+
+    with patch(
+        "app.routers.extract_embed.ExtractorService.extract_text",
+        return_value=mock_response,
+    ) as mock_extract:
+        file_content = base64.b64encode(b"dummy pdf content").decode()
+        result = _extract_text_from_file(file_content, "pdf")
+
+        assert len(result) == 1
+        assert result[0].content == "Page 1 content"
+        called_request = mock_extract.call_args[0][0]
+        assert called_request.file_content == file_content
+        assert isinstance(called_request.file_content, str)
+
+
 def test_extract_text_from_file_no_results():
     """Test extraction when no content is found."""
     mock_response = ExtractedResponse(

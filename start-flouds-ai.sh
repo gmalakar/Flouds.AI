@@ -218,11 +218,11 @@ else
     write_warning "FLOUDS_LOG_PATH_AT_HOST not set. Container logs will not be persisted to host."
 fi
 
-# Check and set permissions for TinyDB directory
-if [[ -n "$FLOUDS_TINYDB_PATH_AT_HOST" ]]; then
-    set_directory_permissions "$FLOUDS_TINYDB_PATH_AT_HOST" "TinyDB"
+# Check and set permissions for Data directory (SQLite database)
+if [[ -n "$FLOUDS_DATA_PATH_AT_HOST" ]]; then
+    set_directory_permissions "$FLOUDS_DATA_PATH_AT_HOST" "Data"
 else
-    write_warning "FLOUDS_TINYDB_PATH_AT_HOST not set. Client database will not be persisted to host."
+    write_warning "FLOUDS_DATA_PATH_AT_HOST not set. Client database will not be persisted to host."
 fi
 
 if [[ "$BUILD_IMAGE" == true ]]; then
@@ -335,12 +335,12 @@ if [[ -n "$FLOUDS_LOG_PATH_AT_HOST" ]]; then
     DOCKER_ARGS+=("-e" "FLOUDS_LOG_PATH=$DOCKER_LOG_PATH")
 fi
 
-# TinyDB directory mapping
-if [[ -n "$FLOUDS_TINYDB_PATH_AT_HOST" ]]; then
-    DOCKER_TINYDB_PATH="$WORKING_DIR/tinydb"
-    echo "Mapping TinyDB: $FLOUDS_TINYDB_PATH_AT_HOST -> $DOCKER_TINYDB_PATH"
-    DOCKER_ARGS+=("-v" "${FLOUDS_TINYDB_PATH_AT_HOST}:${DOCKER_TINYDB_PATH}:rw")
-    DOCKER_ARGS+=("-e" "FLOUDS_CLIENTS_DB=$DOCKER_TINYDB_PATH/clients.db")
+# Data directory mapping (SQLite database)
+if [[ -n "$FLOUDS_DATA_PATH_AT_HOST" ]]; then
+    DOCKER_DATA_PATH="$WORKING_DIR/data"
+    echo "Mapping Data directory: $FLOUDS_DATA_PATH_AT_HOST -> $DOCKER_DATA_PATH"
+    DOCKER_ARGS+=("-v" "${FLOUDS_DATA_PATH_AT_HOST}:${DOCKER_DATA_PATH}:rw")
+    DOCKER_ARGS+=("-e" "FLOUDS_CLIENTS_DB=$DOCKER_DATA_PATH/clients.db")
 fi
 
 # Add platform flag if specified

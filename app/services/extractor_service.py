@@ -13,6 +13,7 @@
 import base64
 import binascii
 import csv
+import re
 import time
 from io import BytesIO, StringIO
 from typing import List
@@ -42,6 +43,17 @@ logger = get_logger("extractor_service")
 
 class ExtractorService:
     """Service for extraction operations."""
+
+    @staticmethod
+    def _normalize_whitespace(text: str) -> str:
+        """Normalize tabs/spaces and collapse multiple newlines, similar to the C# helper."""
+        if not text:
+            return text
+        # Replace runs of spaces/tabs with a single space
+        normalized = re.sub(r"[ \t]+", " ", text)
+        # Replace runs of newlines (any mix of \r/\n) with a single newline
+        normalized = re.sub(r"[\r\n]+", "\n", normalized)
+        return normalized.strip()
 
     @staticmethod
     def extract_text(req: FileRequest) -> ExtractedResponse:
@@ -79,10 +91,16 @@ class ExtractorService:
     @staticmethod
     def _extract_local(req: FileRequest) -> List[ExtractedFileContent]:
         """Extract text from file based on extension."""
-        try:
-            file_bytes = base64.b64decode(req.file_content)
-        except (binascii.Error, ValueError):
-            raise InferenceError("Invalid base64 encoded file content")
+        # Accept either raw bytes or base64-encoded string
+        if isinstance(req.file_content, bytes):
+            file_bytes = req.file_content
+        elif isinstance(req.file_content, str):
+            try:
+                file_bytes = base64.b64decode(req.file_content)
+            except (binascii.Error, ValueError):
+                raise InferenceError("Invalid base64 encoded file content")
+        else:
+            raise InferenceError("file_content must be base64 string or bytes")
 
         ext = req.extention.lower()
 
@@ -109,7 +127,10 @@ class ExtractorService:
     def _extract_pdf(file_bytes: bytes) -> List[ExtractedFileContent]:
         """Extract text from PDF file."""
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-            pages = [page.extract_text() or "" for page in pdf.pages]
+            pages = [
+                ExtractorService._normalize_whitespace(page.extract_text() or "")
+                for page in pdf.pages
+            ]
         return [
             ExtractedFileContent(content=page, item_number=i + 1, content_as="pages")
             for i, page in enumerate(pages)
@@ -121,7 +142,11 @@ class ExtractorService:
         try:
             with BytesIO(file_bytes) as bio:
                 doc = Document(bio)
-                paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+                paragraphs = [
+                    ExtractorService._normalize_whitespace(p.text)
+                    for p in doc.paragraphs
+                    if p.text.strip()
+                ]
             return [
                 ExtractedFileContent(
                     content=para, item_number=i + 1, content_as="paragraphs"
@@ -138,7 +163,11 @@ class ExtractorService:
         """Extract text from DOCX file."""
         with BytesIO(file_bytes) as bio:
             doc = Document(bio)
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            paragraphs = [
+                ExtractorService._normalize_whitespace(p.text)
+                for p in doc.paragraphs
+                if p.text.strip()
+            ]
         return [
             ExtractedFileContent(
                 content=para, item_number=i + 1, content_as="paragraphs"
@@ -159,7 +188,11 @@ class ExtractorService:
             raise InferenceError(f"Failed to parse CSV file: {str(e)}")
 
         return [
-            ExtractedFileContent(content=str(row), item_number=i + 1, content_as="rows")
+            ExtractedFileContent(
+                content=ExtractorService._normalize_whitespace(str(row)),
+                item_number=i + 1,
+                content_as="rows",
+            )
             for i, row in enumerate(rows)
         ]
 
@@ -170,7 +203,10 @@ class ExtractorService:
             text = file_bytes.decode("utf-8")
         except UnicodeDecodeError:
             raise InferenceError("File is not valid UTF-8 encoded text")
-        return [ExtractedFileContent(content=text, item_number=1, content_as="text")]
+        normalized = ExtractorService._normalize_whitespace(text)
+        return [
+            ExtractedFileContent(content=normalized, item_number=1, content_as="text")
+        ]
 
     @staticmethod
     def _extract_html(file_bytes: bytes) -> List[ExtractedFileContent]:
@@ -178,7 +214,9 @@ class ExtractorService:
         soup = BeautifulSoup(file_bytes, "html.parser")
         return [
             ExtractedFileContent(
-                content=soup.get_text(), item_number=1, content_as="text"
+                content=ExtractorService._normalize_whitespace(soup.get_text()),
+                item_number=1,
+                content_as="text",
             )
         ]
 
@@ -195,7 +233,9 @@ class ExtractorService:
                 slides = []
                 for slide in prs.slides:
                     slide_text = [
-                        shape.text for shape in slide.shapes if hasattr(shape, "text")
+                        ExtractorService._normalize_whitespace(shape.text)
+                        for shape in slide.shapes
+                        if hasattr(shape, "text")
                     ]
                     slides.append("\n".join(slide_text))
             return [
@@ -227,7 +267,9 @@ class ExtractorService:
                             row_str = ",".join(
                                 str(cell) if cell is not None else "" for cell in row
                             )
-                            sheet_data.append(row_str)
+                            sheet_data.append(
+                                ExtractorService._normalize_whitespace(row_str)
+                            )
                     sheets.append("\n".join(sheet_data))
 
             return [
