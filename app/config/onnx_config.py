@@ -20,8 +20,6 @@ class InputNames(BaseModel):
 
 class OutputNames(BaseModel):
     output: str = Field(default="last_hidden_state")
-    outputnext: Optional[str] = None
-    outmask: Optional[str] = None
 
 
 class DecoderInputNames(BaseModel):
@@ -36,17 +34,14 @@ class OnnxConfig(BaseModel):
     max_length: int = 256
     min_length: int = 0
     normalize: bool = True
-    logits: bool = Field(default=False)
     eos_token_id: int = Field(default=1)
     bos_token_id: Optional[int] = Field(default=None)
     summarization_task: str = Field(default="s2s")
     embedder_task: str = Field(default="fe")
     outputnames: OutputNames = Field(default_factory=OutputNames)
     decoder_inputnames: DecoderInputNames = Field(default_factory=DecoderInputNames)
-    use_generation_config: bool = Field(default=False)
     pad_token_id: int = 0
     pooling_strategy: str = Field(default="mean")
-    projected_dimension: int = Field(default=256)
     encoder_onnx_model: str = Field(default="encoder_model.onnx")
     decoder_onnx_model: str = Field(default="decoder_model.onnx")
     encoder_optimized_onnx_model: str = Field(default="model_optimized.onnx")

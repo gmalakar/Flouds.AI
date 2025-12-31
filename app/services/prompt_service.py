@@ -6,10 +6,11 @@
 
 import json
 import os
+import re
 import time
 from asyncio import TimeoutError as AsyncTimeoutError
 from asyncio import gather, get_event_loop, run
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 import onnxruntime as ort
@@ -43,9 +44,10 @@ logger = get_logger("prompt_service")
 # Constants
 DEFAULT_MODEL = "t5-small"
 DEFAULT_TIMEOUT = 60
-DEFAULT_MAX_LENGTH = 128
+DEFAULT_MAX_LENGTH = 256
 DEFAULT_BATCH_SIZE = 20
 DEFAULT_VOCAB_SIZE = 32000
+MEMORY_LOW_THRESHOLD_MB = 150  # Clear cache if available memory below this
 _CACHE_LIMIT_DECODER = int(os.getenv("FLOUDS_DECODER_CACHE_MAX", "3"))
 _CACHE_LIMIT_MODELS = int(os.getenv("FLOUDS_MODEL_CACHE_MAX", "2"))
 _CACHE_LIMIT_SPECIAL = int(os.getenv("FLOUDS_SPECIAL_TOKENS_CACHE_MAX", "8"))
@@ -103,6 +105,29 @@ class PromptProcessor(BaseNLPService):
         except Exception as e:
             logger.error(f"Failed to load special tokens: {e}")
             return set()
+
+    @staticmethod
+    def _get_vocab_size_from_session(session: ort.InferenceSession) -> Optional[int]:
+        """Extract vocabulary size from ONNX session output shape (for language models)."""
+        try:
+            outputs = session.get_outputs()
+            if outputs:
+                for output in outputs:
+                    # Look for logits output with shape [batch, seq_len, vocab_size]
+                    if output.shape and len(output.shape) >= 3:
+                        vocab_dim = output.shape[-1]
+                        if (
+                            isinstance(vocab_dim, (int, np.integer))
+                            and vocab_dim > 1000
+                        ):
+                            # Reasonable vocab size (> 1000 tokens)
+                            logger.debug(
+                                f"Auto-detected vocab_size from ONNX output: {vocab_dim}"
+                            )
+                            return int(vocab_dim)
+        except Exception as e:
+            logger.warning(f"Could not auto-detect vocab_size from ONNX session: {e}")
+        return None
 
     @staticmethod
     def _get_decoder_session(decoder_model_path: str) -> Optional[ort.InferenceSession]:
@@ -196,6 +221,24 @@ class PromptProcessor(BaseNLPService):
         PromptProcessor._models.clear()
         PromptProcessor._decoder_sessions.clear()
         PromptProcessor._special_tokens.clear()
+
+    @staticmethod
+    def _check_memory_and_clear_cache() -> None:
+        """Check available memory and clear caches if below threshold."""
+        try:
+            import psutil
+
+            mem = psutil.virtual_memory()
+            threshold_bytes = MEMORY_LOW_THRESHOLD_MB * 1024 * 1024
+            if mem.available < threshold_bytes:
+                logger.warning(
+                    f"Low memory before generation: {mem.available / 1024 / 1024:.1f}MB available"
+                )
+                from app.utils.cache_manager import CacheManager
+
+                CacheManager.clear_all_caches()
+        except Exception as e:
+            logger.debug(f"Memory check failed: {e}")
 
     @staticmethod
     def process_prompt(request: PromptRequest) -> PromptResponse:
@@ -356,6 +399,13 @@ class PromptProcessor(BaseNLPService):
         if not encoder_session:
             raise ModelLoadError("Failed to load encoder session")
 
+        # Auto-detect vocab_size from encoder session if not in config
+        if not hasattr(model_config, "vocab_size") or model_config.vocab_size is None:
+            vocab_size = PromptProcessor._get_vocab_size_from_session(encoder_session)
+            if vocab_size:
+                model_config.vocab_size = vocab_size
+                logger.info(f"Auto-detected vocab_size from ONNX model: {vocab_size}")
+
         return PromptProcessor._generate_encoder_only(
             encoder_session, tokenizer, model_config, request
         )
@@ -377,6 +427,13 @@ class PromptProcessor(BaseNLPService):
 
         if not encoder_session or not decoder_session:
             raise ModelLoadError("Failed to load ONNX sessions")
+
+        # Auto-detect vocab_size from decoder session if not in config
+        if not hasattr(model_config, "vocab_size") or model_config.vocab_size is None:
+            vocab_size = PromptProcessor._get_vocab_size_from_session(decoder_session)
+            if vocab_size:
+                model_config.vocab_size = vocab_size
+                logger.info(f"Auto-detected vocab_size from ONNX decoder: {vocab_size}")
 
         special_tokens_path = validate_safe_path(
             os.path.join(
@@ -447,19 +504,7 @@ class PromptProcessor(BaseNLPService):
     ) -> SummaryResults:
         """Generate text using Seq2SeqLM model."""
         # Preemptive memory check
-        try:
-            import psutil
-
-            mem = psutil.virtual_memory()
-            if mem.available < 150 * 1024 * 1024:  # Less than 150MB available
-                logger.warning(
-                    f"Low memory before seq2seq generation: {mem.available / 1024 / 1024:.1f}MB available"
-                )
-                from app.utils.cache_manager import CacheManager
-
-                CacheManager.clear_all_caches()
-        except Exception as mem_check_err:
-            logger.debug(f"Memory check failed: {mem_check_err}")
+        PromptProcessor._check_memory_and_clear_cache()
 
         try:
             generate_kwargs = PromptProcessor._build_generation_params(
@@ -596,20 +641,7 @@ class PromptProcessor(BaseNLPService):
     ) -> SummaryResults:
         """Generate text using ONNX encoder/decoder sessions."""
         # Preemptive memory check to avoid OOM crashes
-        try:
-            import psutil
-
-            mem = psutil.virtual_memory()
-            if mem.available < 150 * 1024 * 1024:  # Less than 150MB available
-                logger.warning(
-                    f"Low memory before generation: {mem.available / 1024 / 1024:.1f}MB available"
-                )
-                # Trigger preemptive cache clear
-                from app.utils.cache_manager import CacheManager
-
-                CacheManager.clear_all_caches()
-        except Exception as mem_check_err:
-            logger.debug(f"Memory check failed: {mem_check_err}")
+        PromptProcessor._check_memory_and_clear_cache()
 
         try:
             token_config = PromptProcessor._get_token_config(model_config, tokenizer)
@@ -717,7 +749,7 @@ class PromptProcessor(BaseNLPService):
         token_config: Dict[str, int],
         model_config: OnnxConfig,
         request: PromptRequest,
-    ) -> list[int]:
+    ) -> List[int]:
         """Generate tokens using decoder."""
         decoder_input_names = model_config.decoder_inputnames
         decoder_input_ids = np.array(
@@ -848,7 +880,7 @@ class PromptProcessor(BaseNLPService):
 
     @staticmethod
     def _decode_output(
-        output_ids: list[int],
+        output_ids: List[int],
         tokenizer: Any,
         special_tokens: Set[str],
         input_text: str,
@@ -985,8 +1017,6 @@ class PromptProcessor(BaseNLPService):
     @staticmethod
     def _remove_special_tokens(text: str, special_tokens: Set[str]) -> str:
         """Remove special tokens from text using regex for batch removal."""
-        import re
-
         if not special_tokens or not text:
             return text
 
@@ -1011,8 +1041,6 @@ class PromptProcessor(BaseNLPService):
         """Capitalize the first word of each sentence."""
         if not text:
             return text
-        import re
-
         sentences = re.split(r"([.!?]\s*)", text)
         result = []
         for i, part in enumerate(sentences):

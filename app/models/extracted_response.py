@@ -1,15 +1,16 @@
 # =============================================================================
-# File: base_response.py
-# Date: 2025-06-10
+# File: extracted_response.py
+# Date: 2025-12-21
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
-
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.models.extracted_file_content import ExtractedFileContent
 
-class BaseResponse(BaseModel):
+
+class ExtractedResponse(BaseModel):
     """
     Base response model for API responses.
     """
@@ -21,14 +22,9 @@ class BaseResponse(BaseModel):
         "Operation completed successfully.",
         description="A message providing additional information about the operation.",
     )
-    model: str = Field(
-        "none",
-        description="The model used for generating the response.",
+    results: List[ExtractedFileContent] = Field(
+        ..., description="A list of extracted file contents."
     )
     time_taken: float = Field(
         0.0, description="The time taken to complete the operation in seconds."
-    )
-    warnings: Optional[List[str]] = Field(
-        default_factory=list,
-        description="Warning messages about parameter adjustments.",
     )

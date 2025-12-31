@@ -102,12 +102,6 @@ class ConfigLoader:
                 ConfigLoader.__appsettings.onnx.model_cache_size,
             )
         )
-        ConfigLoader.__appsettings.onnx.model_cache_ttl = int(
-            os.getenv(
-                "FLOUDS_MODEL_CACHE_TTL",
-                ConfigLoader.__appsettings.onnx.model_cache_ttl,
-            )
-        )
         ConfigLoader.__appsettings.app.max_request_size = int(
             os.getenv(
                 "FLOUDS_MAX_REQUEST_SIZE",
@@ -297,8 +291,9 @@ class ConfigLoader:
         """Refresh the ONNX configuration cache."""
         try:
             data = ConfigLoader._load_config_data(config_file_name)
+            # Filter out documentation/metadata keys that start with underscore
             ConfigLoader.__onnx_config_cache = {
-                k: OnnxConfig(**v) for k, v in data.items()
+                k: OnnxConfig(**v) for k, v in data.items() if not k.startswith("_")
             }
             ConfigLoader.__config_file_mtime = os.path.getmtime(config_file_name)
             logger.debug(

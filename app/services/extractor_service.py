@@ -4,12 +4,6 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-# =============================================================================
-# File: extractor_service.py
-# Date: 2025-12-21
-# Copyright (c) 2025 Goutam Malakar. All rights reserved.
-# =============================================================================
-
 import base64
 import binascii
 import csv
@@ -31,7 +25,7 @@ try:
 except ImportError:
     openpyxl = None
 
-from app.exceptions import InferenceError, ModelLoadError, ModelNotFoundError
+from app.exceptions import InferenceError, ModelNotFoundError
 from app.logger import get_logger
 from app.models.extracted_file_content import ExtractedFileContent
 from app.models.extracted_response import ExtractedResponse
@@ -106,10 +100,8 @@ class ExtractorService:
 
         if ext == "pdf":
             return ExtractorService._extract_pdf(file_bytes)
-        elif ext == "doc":
+        elif ext in ["doc", "docx"]:
             return ExtractorService._extract_doc(file_bytes)
-        elif ext == "docx":
-            return ExtractorService._extract_docx(file_bytes)
         elif ext == "csv":
             return ExtractorService._extract_csv(file_bytes)
         elif ext in ["txt", "md"]:
@@ -119,9 +111,9 @@ class ExtractorService:
         elif ext in ["ppt", "pptx"]:
             return ExtractorService._extract_ppt(file_bytes)
         elif ext in ["xls", "xlsx"]:
-            return ExtractorService._extract_excel(file_bytes, ext)
+            return ExtractorService._extract_excel(file_bytes)
 
-        raise ModelNotFoundError("Unsupported file type")
+        raise ModelNotFoundError(f"Unsupported file type: .{ext}")
 
     @staticmethod
     def _extract_pdf(file_bytes: bytes) -> List[ExtractedFileContent]:
@@ -138,7 +130,7 @@ class ExtractorService:
 
     @staticmethod
     def _extract_doc(file_bytes: bytes) -> List[ExtractedFileContent]:
-        """Extract text from DOC file using python-docx."""
+        """Extract text from DOC/DOCX file using python-docx."""
         try:
             with BytesIO(file_bytes) as bio:
                 doc = Document(bio)
@@ -153,27 +145,13 @@ class ExtractorService:
                 )
                 for i, para in enumerate(paragraphs)
             ]
-        except Exception:
+        except Exception as e:
             raise InferenceError(
-                "Failed to parse .doc file - file may be corrupted or not a valid Word document"
+                f"Failed to parse Word document - file may be corrupted or not a valid Word document: {str(e)}"
             )
 
-    @staticmethod
-    def _extract_docx(file_bytes: bytes) -> List[ExtractedFileContent]:
-        """Extract text from DOCX file."""
-        with BytesIO(file_bytes) as bio:
-            doc = Document(bio)
-            paragraphs = [
-                ExtractorService._normalize_whitespace(p.text)
-                for p in doc.paragraphs
-                if p.text.strip()
-            ]
-        return [
-            ExtractedFileContent(
-                content=para, item_number=i + 1, content_as="paragraphs"
-            )
-            for i, para in enumerate(paragraphs)
-        ]
+    # Alias for consistency
+    _extract_docx = _extract_doc
 
     @staticmethod
     def _extract_csv(file_bytes: bytes) -> List[ExtractedFileContent]:
@@ -244,12 +222,12 @@ class ExtractorService:
                 )
                 for i, slide in enumerate(slides)
             ]
-        except Exception:
-            raise InferenceError("Failed to parse PowerPoint file")
+        except Exception as e:
+            raise InferenceError(f"Failed to parse PowerPoint file: {str(e)}")
 
     @staticmethod
-    def _extract_excel(file_bytes: bytes, ext: str) -> List[ExtractedFileContent]:
-        """Extract text from Excel file."""
+    def _extract_excel(file_bytes: bytes) -> List[ExtractedFileContent]:
+        """Extract text from Excel file (XLS/XLSX)."""
         if not openpyxl:
             raise ModelNotFoundError(
                 "Install openpyxl to support Excel files: pip install openpyxl"
