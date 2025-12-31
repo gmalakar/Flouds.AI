@@ -84,7 +84,8 @@ logs/
 # ML models and data
 onnx/
 app/onnx/
-models/
+/models/
+!app/models/
 data/
 datasets/
 checkpoints/
@@ -152,3 +153,5 @@ volumes/
 # Admin credentials
 admin_credentials.txt
 .encryption_key
+
+!app/models/

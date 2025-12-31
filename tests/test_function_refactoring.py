@@ -147,25 +147,28 @@ class TestEmbedderRefactoring:
             mock_path.assert_called_once()
 
     def test_add_optional_inputs(self):
-        """Test optional input addition."""
+        """Test optional input addition with auto-detection."""
         inputs = {"input_ids": Mock()}
         mock_input_names = Mock()
         mock_input_names.position = "position_ids"
         mock_input_names.tokentype = "token_type_ids"
         mock_input_names.use_decoder_input = False
 
-        # Create mock inputs that include token_type_ids
+        # Create mock inputs that include both position_ids and token_type_ids
         mock_input1 = Mock()
         mock_input1.name = "input_ids"
         mock_input2 = Mock()
         mock_input2.name = "token_type_ids"
+        mock_input3 = Mock()
+        mock_input3.name = "position_ids"
         mock_session = Mock()
-        mock_session.get_inputs.return_value = [mock_input1, mock_input2]
+        mock_session.get_inputs.return_value = [mock_input1, mock_input2, mock_input3]
 
         SentenceTransformer._add_optional_inputs(
             inputs, mock_input_names, Mock(), mock_session, 128
         )
 
+        # Both should be added since they're in model inputs
         assert "position_ids" in inputs
         assert "token_type_ids" in inputs
 

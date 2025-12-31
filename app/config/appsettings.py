@@ -3,7 +3,6 @@
 # Date: 2025-01-27
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
-import os
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -16,7 +15,6 @@ class AppConfig(BaseModel):
         default="AI-powered text summarization and embedding service"
     )
     debug: bool = Field(default=False)
-    working_dir: str = Field(default=os.getcwd())
     is_production: bool = Field(default=True)
     cors_origins: List[str] = Field(default=["*"])
     max_request_size: int = Field(default=10485760)  # 10MB
@@ -35,8 +33,6 @@ class OnnxConfigSection(BaseModel):
     onnx_path: Optional[str] = None
     config_file: str = Field(default="onnx_config.json")
     model_cache_size: int = Field(default=5)
-    model_cache_ttl: int = Field(default=3600)
-    enable_optimizations: bool = Field(default=True)
 
 
 class RateLimitConfig(BaseModel):

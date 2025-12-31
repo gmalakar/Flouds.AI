@@ -42,6 +42,7 @@ from app.routers import (
     extract_embed,
     extractor,
     health,
+    model_info,
     rag,
     sendprompt,
     summarizer,
@@ -189,6 +190,7 @@ app.include_router(
 )
 app.include_router(health.router, prefix="/api/v1", tags=["Health & Monitoring"])
 app.include_router(admin.router, prefix="/api/v1", tags=["Administration"])
+app.include_router(model_info.router, prefix="/api/v1", tags=["Model Information"])
 app.include_router(sendprompt.router, prefix="/api/v1", tags=["Prompt Processing"])
 
 app.include_router(

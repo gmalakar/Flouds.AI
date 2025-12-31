@@ -152,20 +152,6 @@ class ConcurrentDict:
 
         return len(keys_to_remove)
 
-    def get_unused_keys(self, max_age_seconds: float = 60.0) -> list:
-        """
-        Get list of keys not accessed for max_age_seconds.
-        """
-        current_time = time.time()
-        unused_keys = []
-
-        with self._lock:
-            for key, access_time in self._access_times.items():
-                if current_time - access_time > max_age_seconds:
-                    unused_keys.append(key)
-
-        return unused_keys
-
     @staticmethod
     def add_missing_from_other(
         target: "ConcurrentDict", source: "ConcurrentDict"

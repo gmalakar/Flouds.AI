@@ -6,8 +6,9 @@
 
 import os
 import threading
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
+import numpy as np
 import onnxruntime as ort
 from numpy import ndarray
 from transformers import AutoTokenizer, PreTrainedTokenizer
@@ -28,6 +29,12 @@ _tokenizer_local = threading.local()
 # Model configuration cache
 _model_config_cache = SimpleCache(max_size=50)
 
+# HuggingFace model mappings for fallback
+HUGGINGFACE_MODEL_MAPPING = {
+    "sentence-t5-base": "sentence-transformers/sentence-t5-base",
+    "all-MiniLM-L6-v2": "sentence-transformers/all-MiniLM-L6-v2",
+}
+
 
 class BaseNLPService:
     """
@@ -46,8 +53,6 @@ class BaseNLPService:
     @staticmethod
     def _softmax(x: ndarray) -> ndarray:
         """Numerically stable softmax."""
-        import numpy as np
-
         x = np.asarray(x)
         x_max = np.max(x, axis=-1, keepdims=True)
         e_x = np.exp(x - x_max)
@@ -58,8 +63,9 @@ class BaseNLPService:
         """Validate required config fields are present."""
         if config is None:
             return False
-        required_fields = ["inputnames", "outputnames"]
-        return all(hasattr(config, field) for field in required_fields)
+        # inputnames and outputnames can now be auto-detected, so not strictly required
+        # Only fail if config is completely empty or invalid
+        return True
 
     @staticmethod
     def _get_model_config(model_to_use: str) -> Any:
@@ -140,21 +146,22 @@ class BaseNLPService:
                             )
                             # Extract model name from path for HuggingFace download
                             model_name = os.path.basename(tokenizer_path)
-                            if model_name in ["sentence-t5-base", "all-MiniLM-L6-v2"]:
+                            hf_model = HUGGINGFACE_MODEL_MAPPING.get(model_name)
+                            if hf_model:
                                 tokenizer = AutoTokenizer.from_pretrained(
-                                    f"sentence-transformers/{model_name}", legacy=True
+                                    hf_model, legacy=True
                                 )
                             else:
-                                raise ex
+                                raise TokenizerError(
+                                    f"No HuggingFace mapping found for {model_name}"
+                                )
                         else:
-                            raise ex
-                    except Exception as ex:
-                        logger.error(
-                            "Failed to load tokenizer for %s: %s",
-                            sanitize_for_log(tokenizer_path),
-                            sanitize_for_log(str(ex)),
-                        )
-                        raise TokenizerError(f"Cannot load tokenizer: {ex}")
+                            logger.error(
+                                "Failed to load tokenizer for %s: %s",
+                                sanitize_for_log(tokenizer_path),
+                                sanitize_for_log(str(ex)),
+                            )
+                            raise TokenizerError(f"Cannot load tokenizer: {ex}")
                 else:
                     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
@@ -246,7 +253,7 @@ class BaseNLPService:
         logger.info("Model configuration cache cleared")
 
     @staticmethod
-    def get_cache_stats() -> dict:
+    def get_cache_stats() -> Dict[str, int]:
         """Get cache statistics for monitoring."""
         return {
             "encoder_sessions": BaseNLPService._encoder_sessions.size(),
@@ -312,7 +319,7 @@ class BaseNLPService:
         return arr.ndim >= 2 and arr.shape[-1] <= vocab_threshold
 
     @staticmethod
-    def warm_up_cache(model_names: list[str]) -> None:
+    def warm_up_cache(model_names: List[str]) -> None:
         """Pre-load model configurations into cache."""
         logger.info(f"Warming up cache for {len(model_names)} models")
         for model_name in model_names:

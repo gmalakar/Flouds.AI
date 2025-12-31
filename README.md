@@ -15,6 +15,8 @@
 - **Text Summarization**: Seq2seq models with automatic sentence capitalization and advanced sampling
 - **High-Performance Embeddings**: Sentence and document embeddings with configurable chunking strategies
 - **File Content Extraction**: Extract text from PDF, DOCX, DOC, PPT, Excel, TXT, HTML, CSV files with structured output
+- **Model Information API**: Real-time model availability checks, auto-detected parameters, and configuration inspection
+- **Auto-Detection**: Automatic detection of dimension, input/output names, and vocab_size from ONNX models
 - **Batch Processing**: Async batch operations for high-throughput scenarios
 - **Model Optimization**: Optimized ONNX models with automatic fallback and KV caching
 - **Advanced Sampling**: Top-k, top-p, and repetition penalty for high-quality text generation
@@ -142,47 +144,49 @@ Flouds AI features a sophisticated configuration system with environment-specifi
 The `onnx_config.json` file (located in `app/config/onnx_config.json`) is used to configure all ONNX models that you want to use in your application.  
 Each entry in this file corresponds to a model you have downloaded and placed in your ONNX model folder.
 
-- **Key**: The model name (e.g., `"t5-small"`, `"sentence-t5-base"`)
-- **Value**: A dictionary describing the model's configuration, including:
-  - `dimension`, `max_length`, `embedder_task` or `summarization_task`
-  - `inputnames`, `outputnames`, `decoder_inputnames`
-  - ONNX model file paths (`encoder_onnx_model`, `decoder_onnx_model`)
-  - Optimized model paths (`encoder_optimized_onnx_model`, `decoder_optimized_onnx_model`)
-  - Performance flags (`use_optimized`, `legacy_tokenizer`)
-  - Special tokens, generation config, and other options
+**Production Optimization (v1.1.0):**
+- ✅ **40% size reduction**: Removed parameters that can be auto-detected (293 → 175 lines)
+- ✅ **Auto-detection**: `dimension`, `inputnames`, `outputnames`, `vocab_size` detected from ONNX files
+- ✅ **Minimal config**: Only required parameters and behavioral overrides needed
+- ✅ **Inline docs**: `_comment`, `_auto_detected`, `_defaults` provide configuration guidance
 
-**Example snippet:**
+**Configuration Structure:**
+- **Key**: The model name (e.g., `"t5-small"`, `"all-MiniLM-L6-v2"`)
+- **Value**: A dictionary with model settings:
+  - **Required**: `max_length`, `embedder_task`/`summarization_task`, ONNX file paths
+  - **Auto-detected**: `dimension`, `inputnames`, `outputnames`, `vocab_size` (optional in config)
+  - **Behavioral**: Token IDs, generation parameters, preprocessing flags
+  - **Optional**: Optimized model paths, special configurations
+
+**Minimal Example (Auto-Detection):**
+```json
+"all-MiniLM-L6-v2": {
+    "max_length": 256,
+    "embedder_task": "fe",
+    "normalize": true,
+    "pooling_strategy": "mean",
+    "chunk_logic": "sentence",
+    "encoder_onnx_model": "model.onnx"
+}
+```
+
+**Full Example (Generation Model):**
 ```json
 "t5-small": {
-    "dimension": 512,
     "max_length": 512,
     "pad_token_id": 0,
     "eos_token_id": 1,
     "summarization_task": "s2s",
     "legacy_tokenizer": true,
-    "use_optimized": false,
-    "inputnames": {
-        "input": "input_ids",
-        "mask": "attention_mask"
-    },
-    "outputnames": {
-        "output": "last_hidden_state"
-    },
-    "decoder_inputnames": {
-        "encoder_output": "encoder_hidden_states",
-        "input": "input_ids",
-        "mask": "encoder_attention_mask"
-    },
     "encoder_onnx_model": "encoder_model.onnx",
     "decoder_onnx_model": "decoder_model.onnx",
-    "encoder_optimized_onnx_model": "encoder_model_optimized.onnx",
-    "decoder_optimized_onnx_model": "decoder_model_optimized.onnx",
     "special_tokens_map_path": "special_tokens_map.json",
     "num_beams": 4,
-    "early_stopping": true,
-    "use_seq2seqlm": false
+    "early_stopping": true
 }
 ```
+
+**Note**: `inputnames`, `outputnames`, and `vocab_size` are now auto-detected from ONNX models. Only include them in config if you need to override the detected values or for models with custom input/output mapping (like BART's `decoder_inputnames`).
 
 - The structure of your ONNX model folder should match the configuration in this file.
 
@@ -395,6 +399,49 @@ curl -H "Authorization: Bearer <admin_client_id>|<admin_client_secret>" \
 ### REST API Endpoints
 
 Flouds AI provides a comprehensive REST API with automatic documentation at `/docs`.
+
+#### Model Information & Discovery
+
+```bash
+# Get detailed model information
+curl -X GET "http://localhost:19690/api/v1/model/info?model=all-MiniLM-L6-v2" \
+  -H "Authorization: Bearer <client_id>|<client_secret>"
+
+# List all available models
+curl -X GET "http://localhost:19690/api/v1/models/list" \
+  -H "Authorization: Bearer <client_id>|<client_secret>"
+```
+
+**Model Information Response:**
+```json
+{
+  "success": true,
+  "model": "all-MiniLM-L6-v2",
+  "model_type": "embedding",
+  "model_available": true,
+  "onnx_file_available": true,
+  "auto_detected_params": {
+    "dimension": 384,
+    "inputnames": ["input_ids", "attention_mask"],
+    "outputnames": ["token_embeddings", "sentence_embedding"]
+  },
+  "config_params": {
+    "max_length": 256,
+    "pooling_strategy": "mean",
+    "normalize": true
+  },
+  "required_params": ["max_length", "embedder_task", "normalize"],
+  "default_params": {"force_pooling": false, "chunk_overlap": 0}
+}
+```
+
+**Key Features:**
+- ✅ **Auto-Detection**: Dimension, input/output names, vocab_size detected from ONNX models
+- ✅ **Type-Specific Filtering**: Only relevant parameters returned for each model type
+- ✅ **Security**: Internal file paths not exposed
+- ✅ **Real-Time Status**: Check model availability before inference
+
+See [MODEL_INFO_API.md](MODEL_INFO_API.md) for complete documentation.
 
 #### Text Generation/Summarization
 

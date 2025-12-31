@@ -37,10 +37,13 @@ from app.utils.pooling_strategies import PoolingStrategies
 logger = get_logger("embedder_service")
 
 # Constants
-DEFAULT_MAX_LENGTH = 128
+DEFAULT_MAX_LENGTH = 256
 DEFAULT_PROJECTED_DIMENSION = 128
 DEFAULT_BATCH_SIZE = 50
 RANDOM_SEED = 42
+
+# Global cache for projection matrices - ensures consistent projection across all embeddings
+_PROJECTION_MATRIX_CACHE = {}
 
 
 class SingleEmbeddingResult(BaseModel):
@@ -64,6 +67,7 @@ class ChunkEmbeddingResult(BaseModel):
     message: str
     success: bool = Field(default=True)
     used_parameters: dict = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
 
     @property
     def embedding_results(self) -> List[EmbededChunk]:
@@ -188,8 +192,7 @@ class SentenceTransformer(BaseNLPService):
     def _prepare_onnx_inputs(
         processed_text: str, tokenizer: Any, model_config: Any, session: Any
     ) -> dict:
-        """Prepare ONNX inputs for inference."""
-        input_names = getattr(model_config, "inputnames", {})
+        """Prepare ONNX inputs for inference with auto-detected input names."""
         max_length = getattr(model_config, "max_length", DEFAULT_MAX_LENGTH)
 
         encoding = tokenizer(
@@ -207,44 +210,97 @@ class SentenceTransformer(BaseNLPService):
         if input_ids.dtype != np.int64:
             input_ids = input_ids.astype(np.int64)
 
-        inputs = {getattr(input_names, "input", "input_ids"): input_ids}
+        # Auto-detect input names from ONNX model with config override
+        model_input_names = [inp.name for inp in session.get_inputs()]
+        input_names_config = getattr(model_config, "inputnames", {})
+
+        # Map tokenizer outputs to ONNX inputs
+        # Priority: config override > auto-detection > defaults
+        input_id_name = (
+            getattr(input_names_config, "input", None)
+            or SentenceTransformer._find_matching_input(
+                model_input_names, ["input_ids", "input"]
+            )
+            or "input_ids"
+        )
+
+        inputs = {input_id_name: input_ids}
+        logger.debug(f"Using input name '{input_id_name}' for input_ids")
 
         if attention_mask is not None:
             if attention_mask.dtype != np.int64:
                 attention_mask = attention_mask.astype(np.int64)
-            inputs[getattr(input_names, "mask", "attention_mask")] = attention_mask
+
+            mask_name = getattr(
+                input_names_config, "mask", None
+            ) or SentenceTransformer._find_matching_input(
+                model_input_names, ["attention_mask", "mask"]
+            )
+
+            if mask_name:
+                inputs[mask_name] = attention_mask
+                logger.debug(f"Using input name '{mask_name}' for attention_mask")
 
         # Add optional inputs
         SentenceTransformer._add_optional_inputs(
-            inputs, input_names, model_config, session, input_ids.shape[1]
+            inputs, input_names_config, model_config, session, input_ids.shape[1]
         )
 
         return inputs
 
     @staticmethod
+    def _find_matching_input(
+        model_input_names: List[str], candidates: List[str]
+    ) -> str:
+        """Find first matching input name from candidates in model inputs."""
+        for candidate in candidates:
+            if candidate in model_input_names:
+                return candidate
+        return None
+
+    @staticmethod
     def _add_optional_inputs(
-        inputs: dict, input_names: Any, model_config: Any, session: Any, seq_len: int
+        inputs: dict,
+        input_names_config: Any,
+        model_config: Any,
+        session: Any,
+        seq_len: int,
     ):
         """Add optional inputs like position_ids, token_type_ids, decoder_input_ids."""
-        # Position IDs
-        position_name = getattr(input_names, "position", None)
-        if position_name:
+        model_input_names = [inp.name for inp in session.get_inputs()]
+
+        # Position IDs - config override or auto-detect
+        position_name = getattr(
+            input_names_config, "position", None
+        ) or SentenceTransformer._find_matching_input(
+            model_input_names, ["position_ids"]
+        )
+        if position_name and position_name in model_input_names:
             inputs[position_name] = np.arange(seq_len, dtype=np.int64)[None, :]
+            logger.debug(f"Added position_ids as '{position_name}'")
 
-        # Token type IDs
-        required_inputs = [inp.name for inp in session.get_inputs()]
-        tokentype_name = getattr(input_names, "tokentype", "token_type_ids")
-        if tokentype_name in required_inputs:
+        # Token type IDs - config override or auto-detect
+        tokentype_name = getattr(
+            input_names_config, "tokentype", None
+        ) or SentenceTransformer._find_matching_input(
+            model_input_names, ["token_type_ids"]
+        )
+        if tokentype_name and tokentype_name in model_input_names:
             inputs[tokentype_name] = np.zeros((1, seq_len), dtype=np.int64)
+            logger.debug(f"Added token_type_ids as '{tokentype_name}'")
 
-        # Decoder input IDs
-        use_decoder_input = getattr(input_names, "use_decoder_input", False)
+        # Decoder input IDs - config override (special case for T5 models)
+        use_decoder_input = getattr(input_names_config, "use_decoder_input", False)
         if use_decoder_input:
-            decoder_names = getattr(model_config, "decoder_inputnames", input_names)
+            decoder_names = getattr(
+                model_config, "decoder_inputnames", input_names_config
+            )
             decoder_input_name = getattr(
                 decoder_names, "decoder_input_name", "decoder_input_ids"
             )
-            inputs[decoder_input_name] = np.zeros((1, seq_len), dtype=np.int64)
+            if decoder_input_name in model_input_names:
+                inputs[decoder_input_name] = np.zeros((1, seq_len), dtype=np.int64)
+                logger.debug(f"Added decoder_input_ids as '{decoder_input_name}'")
 
     @staticmethod
     def _process_embedding_output(
@@ -283,49 +339,63 @@ class SentenceTransformer(BaseNLPService):
         )
         logger.debug("After pooling: shape=%s", sanitize_for_log(str(embedding.shape)))
 
-        # Normalize
-        normalize = kwargs.get("normalize", getattr(model_config, "normalize", True))
-        if normalize:
-            norm = np.linalg.norm(embedding)
-            if norm > 1e-12:  # Use small epsilon instead of 0 check
-                embedding /= norm  # In-place division
-
-        # Project dimensions - only if explicitly requested
+        # Project dimensions - only for downsampling (reducing dimensions)
+        # Upsampling (increasing dimensions) would add noise without information gain
         logger.debug(
             "Before projection: shape=%s, dimension=%s",
             str(embedding.shape),
             str(projected_dimension),
         )
+        current_dim = embedding.shape[-1]
         if (
             projected_dimension is not None
             and projected_dimension > 0
-            and embedding.shape[-1] != projected_dimension
+            and current_dim != projected_dimension
         ):
-            logger.debug(
-                "Applying projection from %s to %s",
-                str(embedding.shape[-1]),
-                str(projected_dimension),
-            )
-            if embedding.ndim > 1:  # Multi-dimensional (seq_len, embedding_dim)
-                # Project each token embedding - pre-allocate array for efficiency
-                seq_len = embedding.shape[0]
-                projected_embeddings = np.empty((seq_len, projected_dimension))
-                for i in range(seq_len):
-                    projected_embeddings[i] = SentenceTransformer._project_embedding(
-                        embedding[i], projected_dimension
-                    )
-                embedding = projected_embeddings
-            else:  # Single vector
-                embedding = SentenceTransformer._project_embedding(
-                    embedding, projected_dimension
+            if projected_dimension > current_dim:
+                # Warn about upsampling - cannot create information from nothing
+                logger.warning(
+                    "Requested projected_dimension (%d) is larger than native dimension (%d). "
+                    "Upsampling adds noise without information gain. Using native dimension instead.",
+                    projected_dimension,
+                    current_dim,
                 )
-            logger.debug("After projection: shape=%s", str(embedding.shape))
+            else:
+                # Downsampling - reduces dimensions using random projection
+                logger.debug(
+                    "Applying projection (downsampling) from %s to %s",
+                    str(current_dim),
+                    str(projected_dimension),
+                )
+                if embedding.ndim > 1:  # Multi-dimensional (seq_len, embedding_dim)
+                    # Project each token embedding - pre-allocate array for efficiency
+                    seq_len = embedding.shape[0]
+                    projected_embeddings = np.empty((seq_len, projected_dimension))
+                    for i in range(seq_len):
+                        projected_embeddings[i] = (
+                            SentenceTransformer._project_embedding(
+                                embedding[i], projected_dimension
+                            )
+                        )
+                    embedding = projected_embeddings
+                else:  # Single vector
+                    embedding = SentenceTransformer._project_embedding(
+                        embedding, projected_dimension
+                    )
+                logger.debug("After projection: shape=%s", str(embedding.shape))
         else:
             logger.debug(
                 "Skipping projection: projected_dimension=%s, current_dim=%s",
                 str(projected_dimension),
-                str(embedding.shape[-1]),
+                str(current_dim),
             )
+
+        # Normalize AFTER projection to ensure normalized vectors for cosine similarity
+        normalize = kwargs.get("normalize", getattr(model_config, "normalize", True))
+        if normalize:
+            norm = np.linalg.norm(embedding)
+            if norm > 1e-12:  # Use small epsilon instead of 0 check
+                embedding /= norm  # In-place division
 
         return embedding
 
@@ -333,10 +403,18 @@ class SentenceTransformer(BaseNLPService):
     def _project_embedding(
         embedding: np.ndarray, projected_dimension: int
     ) -> np.ndarray:
-        """Project embedding to target dimension using fixed random matrix."""
+        """Project embedding to target dimension using cached random matrix for consistency."""
         input_dim = embedding.shape[-1]
-        rng = np.random.default_rng(seed=RANDOM_SEED)
-        random_matrix = rng.uniform(-1, 1, (input_dim, projected_dimension))
+        cache_key = (input_dim, projected_dimension)
+
+        # Use cached projection matrix if available, otherwise create and cache it
+        if cache_key not in _PROJECTION_MATRIX_CACHE:
+            rng = np.random.default_rng(seed=RANDOM_SEED)
+            _PROJECTION_MATRIX_CACHE[cache_key] = rng.uniform(
+                -1, 1, (input_dim, projected_dimension)
+            )
+
+        random_matrix = _PROJECTION_MATRIX_CACHE[cache_key]
         return embedding @ random_matrix  # Use @ operator for better performance
 
     @staticmethod
@@ -388,6 +466,7 @@ class SentenceTransformer(BaseNLPService):
             if result.success:
                 response.results = result.embedding_chunks
                 response.used_parameters = getattr(result, "used_parameters", {})
+                response.warnings = getattr(result, "warnings", [])
             else:
                 response.success = False
                 response.message = result.message
@@ -454,10 +533,11 @@ class SentenceTransformer(BaseNLPService):
                     break
                 else:
                     response.results.extend(result.embedding_chunks)
-                    if idx == 0:  # Set used_parameters from first result
+                    if idx == 0:  # Set used_parameters and warnings from first result
                         response.used_parameters = getattr(
                             result, "used_parameters", {}
                         )
+                        response.warnings = getattr(result, "warnings", [])
 
         except ModelNotFoundError as e:
             response.success = False
@@ -519,6 +599,7 @@ class SentenceTransformer(BaseNLPService):
                     if projected_dimension is not None
                     else getattr(model_config, "dimension", None)
                 ),
+                "dimension_used": getattr(model_config, "dimension", None),
                 "max_length": getattr(model_config, "max_length", 256),
                 "chunk_logic": getattr(model_config, "chunk_logic", "sentence"),
                 "chunk_overlap": getattr(model_config, "chunk_overlap", 1),
@@ -531,11 +612,17 @@ class SentenceTransformer(BaseNLPService):
                 "lowercase": getattr(model_config, "lowercase", False),
             }
 
+            # Collect warnings
+            warnings = []
+            if hasattr(model_config, "_dimension_warning"):
+                warnings.append(model_config._dimension_warning)
+
             return ChunkEmbeddingResult(
                 embedding_chunks=chunk_results,
                 message="Embedding generated successfully",
                 success=True,
                 used_parameters=used_params,
+                warnings=warnings,
             )
 
         except FileNotFoundError:
@@ -660,10 +747,83 @@ class SentenceTransformer(BaseNLPService):
         if not session:
             raise ModelLoadError(f"Failed to load ONNX session: {model_path}")
 
+        # Auto-detect native dimension from ONNX model
+        native_dim = SentenceTransformer._get_native_dimension_from_session(session)
+
+        # Validate and adjust dimension if needed
+        if native_dim:
+            if not hasattr(model_config, "dimension") or model_config.dimension is None:
+                # No dimension in config - use native
+                model_config.dimension = native_dim
+                logger.info(
+                    f"Auto-detected native dimension from ONNX model: {native_dim}"
+                )
+            elif model_config.dimension > native_dim:
+                # Config dimension is larger than native - use native instead
+                original_dim = model_config.dimension
+                model_config.dimension = native_dim
+                logger.warning(
+                    f"Config dimension ({original_dim}) exceeds native dimension ({native_dim}). "
+                    f"Using native dimension to prevent upsampling."
+                )
+                # Store warning to be included in response
+                if not hasattr(model_config, "_dimension_warning"):
+                    model_config._dimension_warning = (
+                        f"Config dimension ({original_dim}) was larger than model's native dimension ({native_dim}). "
+                        f"Using native dimension {native_dim} to avoid information loss."
+                    )
+
+        # Auto-detect output names from ONNX model
+        output_names_list = SentenceTransformer._get_output_names_from_session(session)
+        if output_names_list and (
+            not hasattr(model_config, "outputnames") or not model_config.outputnames
+        ):
+            # Create outputnames object with primary output
+            from types import SimpleNamespace
+
+            model_config.outputnames = SimpleNamespace(output=output_names_list[0])
+            logger.info(f"Auto-detected primary output name: {output_names_list[0]}")
+
         logger.info(
             f"Encoder session cache size: {SentenceTransformer._encoder_sessions.size()}"
         )
         return session
+
+    @staticmethod
+    def _get_native_dimension_from_session(session: Any) -> int:
+        """Extract the native embedding dimension from ONNX session output shape."""
+        try:
+            outputs = session.get_outputs()
+            if outputs and len(outputs) > 0:
+                output_shape = outputs[0].shape
+                # Output shape is typically ['batch_size', 'sequence_length', dimension]
+                # The last dimension is the embedding dimension
+                if output_shape and len(output_shape) >= 3:
+                    # Handle symbolic dimensions (e.g., 'batch_size') vs numeric
+                    last_dim = output_shape[-1]
+                    if isinstance(last_dim, (int, np.integer)):
+                        logger.debug(
+                            f"Detected native dimension from ONNX output: {last_dim}"
+                        )
+                        return int(last_dim)
+        except Exception as e:
+            logger.warning(f"Could not auto-detect dimension from ONNX session: {e}")
+        return None
+
+    @staticmethod
+    def _get_output_names_from_session(session: Any) -> List[str]:
+        """Extract output tensor names from ONNX session."""
+        try:
+            outputs = session.get_outputs()
+            if outputs:
+                output_names = [output.name for output in outputs]
+                logger.debug(
+                    f"Auto-detected output names from ONNX model: {output_names}"
+                )
+                return output_names
+        except Exception as e:
+            logger.warning(f"Could not auto-detect output names from ONNX session: {e}")
+        return []
 
     @staticmethod
     def _get_embedding_model_path(model_to_use_path: str, model_config: Any) -> str:
