@@ -16,6 +16,11 @@ class ModelDetails(BaseModel):
     Detailed model information nested under the 'details' field.
     """
 
+    model_name: str = Field(
+        None,
+        description="Name of the model as specified in the configuration file.",
+    )
+
     model_available: bool = Field(
         False, description="Whether the model is available in the configuration."
     )
@@ -64,7 +69,20 @@ class ModelInfoResponse(BaseResponse):
     All model details are nested under the 'details' field.
     """
 
-    details: ModelDetails = Field(
-        default_factory=ModelDetails,
+    details: Optional[ModelDetails] = Field(
+        default=None,
         description="Detailed information about the model.",
+    )
+
+    class ResultsModel(BaseModel):
+        property_name: str = Field(
+            ..., description="Requested property name (dot notation allowed)"
+        )
+        property_value: Optional[Any] = Field(
+            None, description="Value of the requested property (nullable)"
+        )
+
+    results: Optional[ResultsModel] = Field(
+        default=None,
+        description="If `property_name` query param was provided, contains the requested property's name and value.",
     )

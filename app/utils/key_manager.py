@@ -524,13 +524,16 @@ def _ensure_admin_exists():
         if key_manager.add_client(admin_id, admin_secret, "admin"):
             # Save credentials to console file
             try:
-                with open("admin_console.txt", "w", encoding="utf-8") as console_file:
+                # write credentials next to the clients DB (key_dir)
+                key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
+                console_path = os.path.join(key_dir, "admin_console.txt")
+                with open(console_path, "w", encoding="utf-8") as console_file:
                     console_file.write("=== ADMIN CREDENTIALS CREATED ===\n")
                     console_file.write(f"Admin Client ID: {admin_id}\n")
                     console_file.write(f"Admin Secret: {admin_secret}\n")
                     console_file.write(f"Admin Token: {admin_id}|{admin_secret}\n")
                     console_file.write("=== SAVE THESE CREDENTIALS ===\n")
-                logger.warning("Admin credentials saved to admin_console.txt")
+                logger.warning(f"Admin credentials saved to {console_path}")
             except Exception as e:
                 logger.error(f"Failed to save console output: {e}")
 
@@ -541,8 +544,10 @@ def _ensure_admin_exists():
 
                 from app.utils.path_validator import safe_open
 
+                # Save credentials next to the clients DB so they are colocated with the DB and key
+                key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
                 creds_file = "admin_credentials.txt"
-                with safe_open(creds_file, os.getcwd(), "w", encoding="utf-8") as f:
+                with safe_open(creds_file, key_dir, "w", encoding="utf-8") as f:
                     f.write(f"Flouds AI Admin Credentials\n")
                     f.write(f"Generated: {datetime.now().isoformat()}\n")
                     f.write(f"\n")
@@ -554,13 +559,12 @@ def _ensure_admin_exists():
                     f.write(f"\n")
                     f.write(f"Example:\n")
                     f.write(
-                        f'curl -H "Authorization: Bearer {admin_id}|{admin_secret}" \\\n'
+                        f'curl -H "Authorization: Bearer {admin_id}|{admin_secret}" \\\n+'
                     )
                     f.write(f"  http://localhost:19690/api/v1/admin/clients\n")
 
-                logger.warning(
-                    f"Admin credentials saved to: {os.path.abspath(creds_file)}"
-                )
+                creds_path = os.path.join(key_dir, creds_file)
+                logger.warning(f"Admin credentials saved to: {creds_path}")
             except Exception as e:
                 logger.error(f"Failed to save admin credentials to file: {e}")
         else:

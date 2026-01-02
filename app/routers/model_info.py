@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from app.logger import get_logger
-from app.models.model_info_response import ModelInfoResponse
+from app.models.model_info_response import ModelDetails, ModelInfoResponse
 from app.services.base_nlp_service import BaseNLPService
 from app.utils.path_validator import validate_safe_path
 
@@ -259,6 +259,8 @@ class ModelInfoService:
             details=ModelDetails(),
         )
 
+        response.details.model_name = model_name
+
         # Check if model exists in config
         config = BaseNLPService._get_model_config(model_name)
         if not config:
@@ -342,10 +344,19 @@ class ModelInfoService:
         return response
 
 
-@router.get("/model/info", response_model=ModelInfoResponse, tags=["Model Information"])
+@router.get(
+    "/model/info",
+    response_model=ModelInfoResponse,
+    response_model_exclude_none=True,
+    tags=["Model Information"],
+)
 async def get_model_info(
-    model: str = Query(..., description="Name of the model to check")
-) -> ModelInfoResponse:
+    model: str = Query(..., description="Name of the model to check"),
+    property_name: Optional[str] = Query(
+        None,
+        description="Optional property name from `details` to return (returns its value or null).",
+    ),
+):
     """
     Get comprehensive model information including availability and parameters.
 
@@ -359,7 +370,77 @@ async def get_model_info(
     - File information (encoder, decoder, optimized versions)
     """
     try:
-        return ModelInfoService.get_model_info(model)
+        response = ModelInfoService.get_model_info(model)
+
+        # If caller requested a specific property, return only that property's value
+        if property_name:
+            # Safely convert details to dict
+            try:
+                details_dict = (
+                    response.details.model_dump()
+                    if hasattr(response.details, "model_dump")
+                    else response.details.dict()
+                )
+            except Exception:
+                # Fallback: try to treat details as a mapping
+                details_dict = (
+                    dict(response.details) if isinstance(response.details, dict) else {}
+                )
+
+            # Support nested lookups using dot notation, e.g. 'auto_detected_params.dimension'
+            parts = property_name.split(".") if property_name else []
+
+            # Traverse details_dict to get the deepest value, return None if any key missing
+            cur = details_dict
+            value = None
+            for p in parts:
+                if isinstance(cur, dict) and p in cur:
+                    cur = cur[p]
+                else:
+                    cur = None
+                    break
+            value = cur
+
+            # Normalize empty containers to None so callers receive a null for missing values
+            if isinstance(value, (dict, list)) and len(value) == 0:
+                value = None
+
+            # Build nested payload (not used directly) and prepare explicit JSON response
+            def build_nested(keys, val):
+                if not keys:
+                    return val
+                return {keys[0]: build_nested(keys[1:], val)}
+
+            payload = build_nested(parts, value)
+
+            # Prepare explicit JSON response so we can include JSON `null` for missing values
+            from fastapi.responses import JSONResponse
+
+            prop_value = value if value is not None else None
+
+            # Update message to reflect property retrieval or absence
+            if value is not None:
+                msg = f"Property '{property_name}' retrieved"
+                success_flag = True
+            else:
+                msg = f"Property '{property_name}' not found"
+                success_flag = False
+
+            json_payload = {
+                "success": success_flag,
+                "message": msg,
+                "model": response.model,
+                "time_taken": getattr(response, "time_taken", 0.0),
+                "warnings": response.warnings or [],
+                "results": {
+                    "property_name": property_name,
+                    "property_value": prop_value,
+                },
+            }
+
+            return JSONResponse(content=json_payload)
+
+        return response
     except Exception as e:
         logger.error(f"Error getting model info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
