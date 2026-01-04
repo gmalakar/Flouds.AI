@@ -11,7 +11,7 @@ import os
 import re
 import time
 import unicodedata
-from typing import Any, List
+from typing import Any, List, Optional, cast
 
 import numpy as np
 from numpy import ndarray
@@ -251,7 +251,7 @@ class SentenceTransformer(BaseNLPService):
     @staticmethod
     def _find_matching_input(
         model_input_names: List[str], candidates: List[str]
-    ) -> str:
+    ) -> Optional[str]:
         """Find first matching input name from candidates in model inputs."""
         for candidate in candidates:
             if candidate in model_input_names:
@@ -306,8 +306,8 @@ class SentenceTransformer(BaseNLPService):
     def _process_embedding_output(
         embedding: ndarray,
         model_config: Any,
-        attention_mask: ndarray,
-        projected_dimension: int,
+        attention_mask: Optional[ndarray],
+        projected_dimension: Optional[int],
         **kwargs,
     ) -> ndarray:
         """Process embedding output with pooling, normalization, and projection."""
@@ -334,8 +334,9 @@ class SentenceTransformer(BaseNLPService):
             sanitize_for_log(pooling_strategy),
             sanitize_for_log(str(embedding.shape)),
         )
+        # PoolingStrategies.apply expects an ndarray for attention_mask; cast to satisfy type checker
         embedding = PoolingStrategies.apply(
-            embedding, pooling_strategy, attention_mask, force_pooling
+            embedding, pooling_strategy, cast(ndarray, attention_mask), force_pooling
         )
         logger.debug("After pooling: shape=%s", sanitize_for_log(str(embedding.shape)))
 
@@ -553,11 +554,11 @@ class SentenceTransformer(BaseNLPService):
     def _embed_text_local(
         text: str,
         model: str,
-        projected_dimension: int,
-        join_chunks: bool = False,
-        join_by_pooling_strategy: str = None,
-        output_large_text_upon_join: bool = False,
-        request_params: dict = None,
+        projected_dimension: Optional[int],
+        join_chunks: Optional[bool] = False,
+        join_by_pooling_strategy: Optional[str] = None,
+        output_large_text_upon_join: Optional[bool] = False,
+        request_params: Optional[dict] = None,
         **kwargs: Any,
     ) -> ChunkEmbeddingResult:
         """Core embedding logic for text processing."""
@@ -697,15 +698,14 @@ class SentenceTransformer(BaseNLPService):
     @staticmethod
     def _get_model_path(model: str, model_config: Any) -> str:
         """Get validated model path."""
-        return validate_safe_path(
-            os.path.join(
-                SentenceTransformer._root_path,
-                "models",
-                getattr(model_config, "embedder_task", "fe"),
-                model,
-            ),
-            SentenceTransformer._root_path,
+        root = SentenceTransformer._root_path
+        if not root:
+            raise ModelLoadError("SentenceTransformer root path is not configured")
+
+        model_dir = os.path.join(
+            root, "models", getattr(model_config, "embedder_task", "fe"), model
         )
+        return validate_safe_path(model_dir, root)
 
     @staticmethod
     def _load_tokenizer(model_to_use_path: str, model_config: Any) -> Any:
@@ -790,7 +790,7 @@ class SentenceTransformer(BaseNLPService):
         return session
 
     @staticmethod
-    def _get_native_dimension_from_session(session: Any) -> int:
+    def _get_native_dimension_from_session(session: Any) -> Optional[int]:
         """Extract the native embedding dimension from ONNX session output shape."""
         try:
             outputs = session.get_outputs()
@@ -828,13 +828,19 @@ class SentenceTransformer(BaseNLPService):
     @staticmethod
     def _get_embedding_model_path(model_to_use_path: str, model_config: Any) -> str:
         """Get the path to the embedding model file."""
+        if not model_to_use_path:
+            raise ModelLoadError(
+                "Model path is not provided to _get_embedding_model_path"
+            )
+
+        root = SentenceTransformer._root_path
+        if not root:
+            raise ModelLoadError("SentenceTransformer root path is not configured")
+
         model_filename = SentenceTransformer._get_model_filename(
             model_config, is_embedding=True
         )
-        return validate_safe_path(
-            os.path.join(model_to_use_path, model_filename),
-            SentenceTransformer._root_path,
-        )
+        return validate_safe_path(os.path.join(model_to_use_path, model_filename), root)
 
     @staticmethod
     def _get_model_filename(
@@ -876,7 +882,7 @@ class SentenceTransformer(BaseNLPService):
         model_config: Any,
         tokenizer: Any,
         session: Any,
-        projected_dimension: int,
+        projected_dimension: Optional[int],
         **kwargs,
     ) -> List[EmbededChunk]:
         """Process text chunks into embeddings."""
@@ -885,7 +891,16 @@ class SentenceTransformer(BaseNLPService):
             embedding_result = SentenceTransformer._process_single_chunk(
                 chunk, model_config, tokenizer, session, projected_dimension, **kwargs
             )
-            results.append(EmbededChunk(vector=embedding_result.vector, chunk=chunk))
+            results.append(
+                EmbededChunk(
+                    vector=embedding_result.vector,
+                    chunk=chunk,
+                    joined_chunk=False,
+                    only_vector=False,
+                    item_number=None,
+                    content_as=None,
+                )
+            )
         return results
 
     @staticmethod
@@ -894,16 +909,23 @@ class SentenceTransformer(BaseNLPService):
         model_config: Any,
         tokenizer: Any,
         session: Any,
-        projected_dimension: int,
+        projected_dimension: Optional[int],
         **kwargs,
     ) -> Any:
         """Process a single text chunk into embedding."""
+        # If projected_dimension is None, fall back to model_config.dimension or default
+        pd = (
+            projected_dimension
+            if projected_dimension is not None
+            else getattr(model_config, "dimension", DEFAULT_PROJECTED_DIMENSION)
+        )
+
         embedding_result = SentenceTransformer._small_text_embedding(
             small_text=chunk,
             model_config=model_config,
             tokenizer=tokenizer,
             session=session,
-            projected_dimension=projected_dimension,
+            projected_dimension=pd,
             **kwargs,
         )
         if not embedding_result.success:
@@ -914,13 +936,15 @@ class SentenceTransformer(BaseNLPService):
     def _join_chunk_embeddings(
         chunk_results: List[EmbededChunk],
         original_text: str,
-        join_by_pooling_strategy: str,
+        join_by_pooling_strategy: Optional[str],
         model_config: Any,
-        output_large_text_upon_join: bool,
+        output_large_text_upon_join: Optional[bool],
     ) -> List[EmbededChunk]:
         """Join chunk embeddings using specified pooling strategy."""
-        pooling_strategy = join_by_pooling_strategy or getattr(
-            model_config, "pooling_strategy", "mean"
+        pooling_strategy = (
+            join_by_pooling_strategy
+            if join_by_pooling_strategy is not None
+            else getattr(model_config, "pooling_strategy", "mean")
         )
 
         if pooling_strategy not in ["mean", "max", "first", "last"]:
@@ -930,11 +954,14 @@ class SentenceTransformer(BaseNLPService):
             chunk_results, pooling_strategy
         )
 
+        out_large = bool(output_large_text_upon_join)
         return [
             EmbededChunk(
                 vector=merged_vector,
                 joined_chunk=True,
-                only_vector=not output_large_text_upon_join,
-                chunk="" if not output_large_text_upon_join else original_text,
+                only_vector=not out_large,
+                chunk="" if not out_large else original_text,
+                item_number=None,
+                content_as=None,
             )
         ]

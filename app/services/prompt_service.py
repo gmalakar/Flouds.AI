@@ -10,7 +10,7 @@ import re
 import time
 from asyncio import TimeoutError as AsyncTimeoutError
 from asyncio import gather, get_event_loop, run
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, cast
 
 import numpy as np
 import onnxruntime as ort
@@ -198,7 +198,9 @@ class PromptProcessor(BaseNLPService):
             logger.debug(f"Loading model from path: {model_to_use_path}")
             model = PromptProcessor._models.get_or_add(
                 model_to_use_path,
-                lambda: ORTModelForSeq2SeqLM.from_pretrained(
+                # Cast to Any to avoid static analyzer complaining when ORTModelForSeq2SeqLM
+                # may be None at import-time; runtime check above prevents reaching this.
+                lambda: cast(Any, ORTModelForSeq2SeqLM).from_pretrained(
                     model_to_use_path, use_cache=False
                 ),
             )
@@ -254,6 +256,7 @@ class PromptProcessor(BaseNLPService):
             message="Prompt processed successfully",
             model=request.model or DEFAULT_MODEL,
             results=[],
+            time_taken=0.0,
         )
 
         try:
@@ -822,10 +825,10 @@ class PromptProcessor(BaseNLPService):
     def _sample_next_token(
         logits_arr: ndarray,
         temperature: float,
-        top_k: int = None,
-        top_p: float = None,
-        generated_ids: list = None,
-        repetition_penalty: float = None,
+        top_k: Optional[int] = None,
+        top_p: Optional[float] = None,
+        generated_ids: Optional[list] = None,
+        repetition_penalty: Optional[float] = None,
     ) -> int:
         """Sample next token from logits with top_k, top_p, and repetition penalty."""
         if logits_arr.ndim == 3:
@@ -836,7 +839,11 @@ class PromptProcessor(BaseNLPService):
             logits = logits_arr
 
         # Apply repetition penalty
-        if repetition_penalty and repetition_penalty != 1.0 and generated_ids:
+        if (
+            repetition_penalty is not None
+            and repetition_penalty != 1.0
+            and generated_ids
+        ):
             for token_id in set(generated_ids):
                 if token_id < len(logits):
                     if logits[token_id] < 0:
@@ -848,7 +855,7 @@ class PromptProcessor(BaseNLPService):
             logits = logits / temperature
 
             # Apply top_k filtering
-            if top_k and top_k > 0:
+            if top_k is not None and top_k > 0:
                 top_k_indices = np.argpartition(logits, -top_k)[-top_k:]
                 filtered_logits = np.full_like(logits, -np.inf)
                 filtered_logits[top_k_indices] = logits[top_k_indices]
@@ -857,7 +864,7 @@ class PromptProcessor(BaseNLPService):
             probs = PromptProcessor._softmax(logits)
 
             # Apply top_p (nucleus) filtering
-            if top_p and top_p < 1.0:
+            if top_p is not None and top_p < 1.0:
                 sorted_indices = np.argsort(probs)[::-1]
                 sorted_probs = probs[sorted_indices]
                 cumsum_probs = np.cumsum(sorted_probs)
@@ -1065,8 +1072,9 @@ class PromptProcessor(BaseNLPService):
         response = PromptResponse(
             success=True,
             message="Batch prompt processing completed successfully",
-            model=request.model,
+            model=request.model or DEFAULT_MODEL,
             results=[],
+            time_taken=0.0,
         )
 
         try:
@@ -1085,6 +1093,7 @@ class PromptProcessor(BaseNLPService):
                             model=request.model,
                             input=text,
                             temperature=getattr(request, "temperature", None),
+                            tenant_code=request.tenant_code,
                         ),
                     )
                     for text in request.inputs
@@ -1094,16 +1103,19 @@ class PromptProcessor(BaseNLPService):
             finally:
                 # Don't close the running event loop - it's managed by FastAPI
                 pass
-
             for idx, result in enumerate(results):
-                if isinstance(result, Exception) or (result and not result.success):
-                    logger.error(
-                        f"Error in input {idx}: {getattr(result, 'message', str(result))}"
-                    )
+                # Handle exceptions and objects without `success` safely
+                if isinstance(result, Exception) or (
+                    hasattr(result, "success") and not getattr(result, "success")
+                ):
+                    err_msg = getattr(result, "message", str(result))
+                    logger.error(f"Error in input {idx}: {err_msg}")
                     response.success = False
-                    response.message = f"Error in input {idx}: {getattr(result, 'message', str(result))}"
+                    response.message = f"Error in input {idx}: {err_msg}"
                 else:
-                    response.results.append(result.summary)
+                    summary_val = getattr(result, "summary", None)
+                    if summary_val is not None:
+                        response.results.append(summary_val)
 
         except (ValueError, TypeError) as e:
             response.success = False

@@ -4,20 +4,23 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
+from app.dependencies.auth import common_headers
 from app.logger import get_logger
-from app.utils.key_manager import key_manager
+from app.modules.key_manager import Client, key_manager
 from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("admin")
 router = APIRouter(prefix="/admin")
 
 
-def verify_admin_access(request: Request):
+def verify_admin_access(
+    request: Request, tenant: dict[str, Any] = Depends(common_headers)
+) -> bool:
     """Verify client has admin access using optimized checks."""
     try:
         # Fast path: check client_id directly with admin cache
@@ -28,8 +31,10 @@ def verify_admin_access(request: Request):
                 detail="Authentication required",
             )
 
-        # Use optimized admin check
-        if not key_manager.is_admin(client_id):
+        tenant_code: str = tenant.get("tenant_code", "") if tenant else ""
+
+        # Use optimized admin check (tenant-aware)
+        if not key_manager.is_admin(client_id, tenant_code):
             logger.warning(
                 "Non-admin client attempted admin access: %s",
                 sanitize_for_log(client_id),
@@ -61,7 +66,7 @@ class ClientListResponse(BaseModel):
 @router.post("/generate-key", response_model=ClientKeyResponse)
 async def generate_client_key(
     req: ClientKeyRequest, request: Request, _: bool = Depends(verify_admin_access)
-):
+) -> dict[str, str]:
     """Generate API key for a client."""
     try:
         # For now, return message since we're using JSON file approach
@@ -93,5 +98,8 @@ async def remove_client(
 @router.get("/clients", response_model=ClientListResponse)
 async def list_clients(request: Request, _: bool = Depends(verify_admin_access)):
     """List all clients with API keys."""
-    clients = list(key_manager.clients.keys())
+    # `key_manager.clients` is already annotated as `dict[str, Client]`,
+    # so use it directly and rely on the annotation for static analysis.
+    clients_dict: dict[str, Client] = key_manager.clients
+    clients: List[str] = [str(k) for k in clients_dict.keys()]
     return ClientListResponse(clients=clients)

@@ -16,6 +16,7 @@ black>=24.3.0
 isort>=5.13.0
 flake8>=7.0.0
 mypy>=1.8.0
+pyright
 
 # Pre-commit hooks
 pre-commit>=3.6.0

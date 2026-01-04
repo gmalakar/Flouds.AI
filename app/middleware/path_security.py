@@ -7,11 +7,12 @@
 """Middleware for path security validation."""
 
 import re
-from typing import Any
+from typing import Any, Awaitable, Callable, cast
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
@@ -41,7 +42,7 @@ COMPILED_PATTERNS = [
 class PathSecurityMiddleware(BaseHTTPMiddleware):
     """Middleware to detect and block path traversal attempts in requests."""
 
-    def __init__(self, app):
+    def __init__(self, app: ASGIApp):
         super().__init__(app)
         logger.info("Path security middleware initialized")
 
@@ -57,16 +58,20 @@ class PathSecurityMiddleware(BaseHTTPMiddleware):
                     )
                     return True
         elif isinstance(value, dict):
-            for key, val in value.items():
+            d = cast(dict[str, Any], value)
+            for key, val in d.items():
                 if self._scan_value(val, f"{path}.{key}"):
                     return True
         elif isinstance(value, list):
-            for i, val in enumerate(value):
+            lst = cast(list[Any], value)
+            for i, val in enumerate(lst):
                 if self._scan_value(val, f"{path}[{i}]"):
                     return True
         return False
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Process request and scan for path traversal attempts."""
 
         # Skip health checks and static content

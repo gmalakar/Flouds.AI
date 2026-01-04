@@ -1,0 +1,12 @@
+{
+    "include": [
+        "app/**"
+    ],
+    "exclude": [
+        "tests/**"
+    ],
+    "venvPath": ".",
+    "venv": ".venv",
+    "typeCheckingMode": "basic",
+    "reportMissingTypeStubs": false
+}

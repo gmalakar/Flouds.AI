@@ -1,19 +1,46 @@
 # =============================================================================
 # File: base_request.py
-# Date: 2025-06-10
-# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# Lightweight BaseRequest adapted from canonical implementation
 # =============================================================================
+from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.requests import Request
+
+from app.utils.input_validator import validate_tenant_code
 
 
 class BaseRequest(BaseModel):
     """
-    Request model for text summarization.
+    Base request model that includes optional `tenant_code` handling.
     """
 
-    model: str = Field(
-        ...,
-        min_length=1,
-        description="The model name to use. This field is required and cannot be empty.",
+    tenant_code: Optional[str] = Field(
+        None,
+        description="The tenant for which the request is made. If omitted, it will be resolved from the incoming request headers.",
     )
+
+    model_config = ConfigDict(extra="allow")
+
+    @field_validator("tenant_code")
+    @classmethod
+    def validate_tenant_code_field(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return validate_tenant_code(v)
+
+    def resolve_tenant(self, request: Request) -> str:
+        if self.tenant_code:
+            return self.tenant_code
+
+        header = request.headers.get("X-Tenant-Code")
+        if not header:
+            header = getattr(request.state, "tenant_code", None)
+
+        if not header:
+            raise ValueError("Missing tenant code in request headers")
+
+        validated = validate_tenant_code(header)
+        self.tenant_code = validated
+        return validated
+        # end of canonical BaseRequest

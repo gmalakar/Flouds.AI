@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,7 @@ class ModelDetails(BaseModel):
     Detailed model information nested under the 'details' field.
     """
 
-    model_name: str = Field(
+    model_name: Optional[str] = Field(
         None,
         description="Name of the model as specified in the configuration file.",
     )
@@ -76,7 +76,7 @@ class ModelInfoResponse(BaseResponse):
 
     class ResultsModel(BaseModel):
         property_name: str = Field(
-            ..., description="Requested property name (dot notation allowed)"
+            cast(Any, ...), description="Requested property name (dot notation allowed)"
         )
         property_value: Optional[Any] = Field(
             None, description="Value of the requested property (nullable)"

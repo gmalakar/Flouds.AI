@@ -4,6 +4,8 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
+from typing import Optional
+
 import numpy as np
 
 from app.logger import get_logger
@@ -15,9 +17,20 @@ class PoolingStrategies:
 
     @staticmethod
     def should_skip_pooling(
-        embedding, attention_mask, force_pooling=False, strategy="cls"
-    ):
+        embedding: Optional[np.ndarray],
+        attention_mask: Optional[np.ndarray],
+        force_pooling: bool = False,
+        strategy: str = "cls",
+    ) -> bool:
+        """Decide whether pooling can be skipped.
+
+        Returns True when input is effectively a single embedding/token and
+        pooling can be bypassed. If `embedding` is None, do not skip pooling.
+        """
         if force_pooling:
+            return False
+
+        if embedding is None:
             return False
 
         # Skip pooling for single embeddings (1, embedding_dim) -> (embedding_dim,)
@@ -26,29 +39,42 @@ class PoolingStrategies:
 
         # Check for single-token input (excluding padding)
         if attention_mask is not None:
-            num_active_tokens = attention_mask.sum()
+            try:
+                num_active_tokens = int(attention_mask.sum())
+            except Exception:
+                num_active_tokens = 0
             if num_active_tokens == 1 and strategy in ["cls", "first"]:
                 return True
 
         return False
 
     @staticmethod
-    def mean_pooling(embedding: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
+    def mean_pooling(
+        embedding: Optional[np.ndarray], attention_mask: Optional[np.ndarray]
+    ) -> np.ndarray:
         """Mean pooling with attention mask."""
-        assert (
-            embedding.shape[:2] == attention_mask.shape
-        ), "Embedding and attention mask dimensions mismatch"
+        if embedding is None or attention_mask is None:
+            raise ValueError(
+                "mean_pooling requires non-None embedding and attention_mask"
+            )
+        if embedding.shape[:2] != attention_mask.shape:
+            raise ValueError("Embedding and attention mask dimensions mismatch")
         masked_embedding = embedding * attention_mask[..., None]
         sum_embedding = masked_embedding.sum(axis=1)
         sum_mask = attention_mask.sum(axis=1, keepdims=True)
         return sum_embedding / np.maximum(sum_mask, 1e-9)
 
     @staticmethod
-    def max_pooling(embedding: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
+    def max_pooling(
+        embedding: Optional[np.ndarray], attention_mask: Optional[np.ndarray]
+    ) -> np.ndarray:
         """Max pooling with attention mask."""
-        assert (
-            embedding.shape[:2] == attention_mask.shape
-        ), "Embedding and attention mask dimensions mismatch"
+        if embedding is None or attention_mask is None:
+            raise ValueError(
+                "max_pooling requires non-None embedding and attention_mask"
+            )
+        if embedding.shape[:2] != attention_mask.shape:
+            raise ValueError("Embedding and attention mask dimensions mismatch")
         # Set masked positions to large negative value before max
         masked_embedding = np.where(
             attention_mask[..., None].astype(bool), embedding, -1e9
@@ -57,13 +83,16 @@ class PoolingStrategies:
 
     @staticmethod
     def apply(
-        embedding: np.ndarray,
+        embedding: Optional[np.ndarray],
         strategy: str = "mean",
-        attention_mask: np.ndarray = None,
+        attention_mask: Optional[np.ndarray] = None,
         force_pooling: bool = False,
     ) -> np.ndarray:
 
         logger.debug(f"Applying pooling strategy: {strategy}")
+
+        if embedding is None:
+            raise ValueError("apply requires a non-None embedding array")
 
         if embedding.ndim == 1:
             logger.debug("Pooling has skipped 1D embedding.")
@@ -95,7 +124,7 @@ class PoolingStrategies:
                     indices = np.maximum(attention_mask.sum(axis=1) - 1, 0)
                     return embedding[0, indices[0]]  # First batch, last valid token
                 elif embedding.ndim == 2:  # (seq_len, embedding_dim)
-                    indices = np.maximum(attention_mask.sum() - 1, 0)
+                    indices = np.maximum(int(attention_mask.sum()) - 1, 0)
                     return embedding[indices]
             # Fallback without attention mask
             if embedding.ndim == 3:

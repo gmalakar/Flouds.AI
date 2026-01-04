@@ -13,7 +13,7 @@ import sys
 # Add app to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "app"))
 
-from app.utils.key_manager import key_manager
+from app.modules.key_manager import key_manager
 
 
 def main():

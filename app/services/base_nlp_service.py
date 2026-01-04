@@ -42,7 +42,8 @@ class BaseNLPService:
     configuration loading, and utility methods for ONNX-based inference.
     """
 
-    _root_path: str = APP_SETTINGS.onnx.onnx_path
+    # Ensure root path is a string to satisfy static type expectations
+    _root_path: str = str(getattr(APP_SETTINGS.onnx, "onnx_path", ""))
     _CACHE_LIMIT_ENCODER = int(os.getenv("FLOUDS_ENCODER_CACHE_MAX", "3"))
 
     _encoder_sessions: ConcurrentDict = ConcurrentDict(
@@ -239,6 +240,19 @@ class BaseNLPService:
     def clear_encoder_sessions() -> None:
         """Clear cached ONNX encoder sessions (useful for testing/reloading)."""
         BaseNLPService._encoder_sessions.clear()
+
+    # Public wrappers to avoid external modules accessing protected members directly
+    @staticmethod
+    def get_model_config(model_to_use: str) -> Any:
+        """Public wrapper around protected `_get_model_config` to allow callers to
+        access model configuration without referencing protected methods.
+        """
+        return BaseNLPService._get_model_config(model_to_use)
+
+    @classmethod
+    def get_root_path(cls) -> str:
+        """Public accessor for the internal `_root_path` attribute."""
+        return cls._root_path
 
     @staticmethod
     def clear_thread_tokenizers() -> None:

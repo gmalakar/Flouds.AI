@@ -6,7 +6,7 @@
 
 """Centralized cache management for performance optimization."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import psutil
 
@@ -47,7 +47,7 @@ class CacheManager:
             return {}
 
     @staticmethod
-    def should_clear_cache(threshold_gb: float = None) -> bool:
+    def should_clear_cache(threshold_gb: Optional[float] = None) -> bool:
         """Check if cache should be cleared based on available memory."""
         import os
 
@@ -57,7 +57,7 @@ class CacheManager:
         return available_gb < threshold_gb
 
     @staticmethod
-    def cleanup_unused_caches(max_age_seconds: float = None):
+    def cleanup_unused_caches(max_age_seconds: Optional[float] = None):
         """Clean up unused cache entries older than max_age_seconds, with logging."""
         if max_age_seconds is None:
             max_age_seconds = APP_SETTINGS.monitoring.cache_cleanup_max_age_seconds
@@ -125,7 +125,7 @@ class CacheManager:
             logger.error(f"Failed to clear caches: {e}")
 
     @staticmethod
-    def check_and_clear_cache_if_needed(threshold_gb: float = None) -> bool:
+    def check_and_clear_cache_if_needed(threshold_gb: Optional[float] = None) -> bool:
         """Check memory and clear caches if needed. Returns True if cache was cleared."""
         if threshold_gb is None:
             import os
@@ -150,7 +150,7 @@ class CacheManager:
         return False
 
     @staticmethod
-    def get_all_cache_stats() -> Dict[str, any]:
+    def get_all_cache_stats() -> Dict[str, Any]:
         """Get comprehensive cache statistics."""
         from app.config.config_loader import ConfigLoader
 
@@ -179,7 +179,7 @@ class CacheManager:
         logger.info("All caches cleared")
 
     @staticmethod
-    def warm_up_caches(model_names: List[str] = None):
+    def warm_up_caches(model_names: Optional[List[str]] = None):
         """Warm up caches with commonly used models."""
         if not model_names:
             # Default models to warm up
@@ -190,7 +190,7 @@ class CacheManager:
         logger.info("Cache warm-up completed")
 
     @staticmethod
-    def get_cache_health() -> Dict[str, any]:
+    def get_cache_health() -> Dict[str, Any]:
         """Get cache health metrics."""
         stats = CacheManager.get_all_cache_stats()
 

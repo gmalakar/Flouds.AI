@@ -7,7 +7,7 @@
 import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from app.logger import get_logger
 
@@ -33,7 +33,7 @@ class PerformanceTracker:
             self.metrics[operation].append(duration)
             self.counters[operation] += 1
 
-    def get_stats(self, operation: str) -> Optional[Dict]:
+    def get_stats(self, operation: str) -> Optional[Dict[str, Any]]:
         """Get performance statistics for an operation."""
         if operation not in self.metrics or not self.metrics[operation]:
             return None

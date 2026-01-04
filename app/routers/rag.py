@@ -29,9 +29,12 @@ async def generate_answer(request: RAGRequest) -> PromptResponse:
         # Format prompt for T5/summarization model
         prompt = f"{request.instruction}\nQuestion: {request.query}\nContext: {request.context}\nAnswer:"
 
-        # Convert to prompt request
+        # Convert to prompt request, carry tenant context through
         prompt_request = PromptRequest(
-            model=request.model, input=prompt, temperature=request.temperature
+            model=request.model,
+            input=prompt,
+            temperature=request.temperature,
+            tenant_code=request.tenant_code,
         )
 
         # Use existing prompt processor service

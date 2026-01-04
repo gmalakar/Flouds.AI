@@ -4,6 +4,8 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
+from typing import Any, cast
+
 from pydantic import Field
 
 from app.models.base_response import BaseResponse
@@ -15,7 +17,8 @@ class PromptResponse(BaseResponse):
     """
 
     results: list[str] = Field(
-        ..., description="The generated text results and related metadata as an object."
+        cast(Any, ...),
+        description="The generated text results and related metadata as an object.",
     )
 
 

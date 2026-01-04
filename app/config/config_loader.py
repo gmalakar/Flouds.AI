@@ -7,7 +7,7 @@
 import json
 import os
 import sys
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from app.config.appsettings import AppSettings
 from app.config.onnx_config import OnnxConfig
@@ -19,6 +19,10 @@ from app.exceptions import (
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
 
+# `validate_safe_path` intentionally not used here; keep import for future path checks
+# (If you prefer, remove the import to silence linter warnings.)
+# from app.utils.path_validator import validate_safe_path
+
 logger = get_logger("config_loader")
 
 
@@ -29,18 +33,46 @@ class ConfigLoader:
 
     @staticmethod
     def get_app_settings() -> AppSettings:
+        """Load AppSettings from `appsettings.json`, apply environment overrides,
+        and return a populated AppSettings instance.
+
+        This follows the canonical pattern used in FloudsVector: it validates
+        config file paths, supports an environment-specific override file, and
+        applies a consistent set of environment variable overrides.
         """
-        Loads AppSettings from appsettings.json and environment-specific override in the same folder.
-        Performs a deep merge for nested config sections.
-        """
-        data = ConfigLoader._load_config_data("appsettings.json", True)
+
+        # Load base config with optional env-specific override (deep merge)
+        data: Dict[str, Any] = ConfigLoader._load_config_data("appsettings.json", True)
         ConfigLoader.__appsettings = AppSettings(**data)
-        # Set production mode
-        ConfigLoader.__appsettings.app.is_production = os.getenv(
-            "FLOUDS_API_ENV", "Enterprise"
-        ).lower() in ["production", "enterprise"]
-        # set ONNX_ROOT
-        # ONNX paths (allow None for development)
+
+        # Determine environment and set production flag
+        env = os.getenv("FLOUDS_API_ENV", "Production").lower()
+        ConfigLoader.__appsettings.app.is_production = env == "production"
+
+        # Server overrides (support common env names)
+        server_port = os.getenv("FLOUDS_PORT", os.getenv("SERVER_PORT"))
+        if server_port is not None:
+            try:
+                ConfigLoader.__appsettings.server.port = int(server_port)
+            except ValueError:
+                logger.warning(
+                    f"Invalid SERVER PORT value: {server_port}; using config value"
+                )
+
+        server_host = os.getenv("FLOUDS_HOST", os.getenv("SERVER_HOST"))
+        if server_host:
+            ConfigLoader.__appsettings.server.host = server_host
+
+        # Debug mode
+        debug_val = os.getenv("APP_DEBUG_MODE")
+        if debug_val is not None:
+            ConfigLoader.__appsettings.app.debug = str(debug_val).lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+
+        # ONNX settings (allow override via env)
         ConfigLoader.__appsettings.onnx.onnx_path = os.getenv(
             "FLOUDS_ONNX_ROOT", ConfigLoader.__appsettings.onnx.onnx_path
         )
@@ -60,118 +92,92 @@ class ConfigLoader:
                     "ONNX config file is required in production. Set FLOUDS_ONNX_CONFIG_FILE environment variable."
                 )
                 sys.exit(1)
-        ConfigLoader.__appsettings.server.port = int(
-            os.getenv("SERVER_PORT", ConfigLoader.__appsettings.server.port)
-        )
-        ConfigLoader.__appsettings.server.host = os.getenv(
-            "SERVER_HOST", ConfigLoader.__appsettings.server.host
-        )
+
+        # Model session provider override
         ConfigLoader.__appsettings.server.session_provider = os.getenv(
             "FLOUDS_MODEL_SESSION_PROVIDER",
             ConfigLoader.__appsettings.server.session_provider,
         )
-        ConfigLoader.__appsettings.app.debug = (
-            os.getenv(
-                "APP_DEBUG_MODE", "1" if ConfigLoader.__appsettings.app.debug else "0"
-            )
-            == "1"
-        )
 
-        ConfigLoader.__appsettings.rate_limiting.enabled = (
-            os.getenv(
-                "FLOUDS_RATE_LIMIT_ENABLED",
-                str(ConfigLoader.__appsettings.rate_limiting.enabled),
-            ).lower()
-            == "true"
-        )
-        ConfigLoader.__appsettings.rate_limiting.requests_per_minute = int(
-            os.getenv(
-                "FLOUDS_RATE_LIMIT_PER_MINUTE",
-                ConfigLoader.__appsettings.rate_limiting.requests_per_minute,
+        # Rate limiting overrides
+        sec_val = os.getenv("FLOUDS_RATE_LIMIT_ENABLED")
+        if sec_val is not None:
+            ConfigLoader.__appsettings.rate_limiting.enabled = str(sec_val).lower() in (
+                "1",
+                "true",
+                "yes",
             )
-        )
-        ConfigLoader.__appsettings.rate_limiting.requests_per_hour = int(
-            os.getenv(
-                "FLOUDS_RATE_LIMIT_PER_HOUR",
-                ConfigLoader.__appsettings.rate_limiting.requests_per_hour,
-            )
-        )
-        ConfigLoader.__appsettings.onnx.model_cache_size = int(
-            os.getenv(
-                "FLOUDS_MODEL_CACHE_SIZE",
-                ConfigLoader.__appsettings.onnx.model_cache_size,
-            )
-        )
-        ConfigLoader.__appsettings.app.max_request_size = int(
-            os.getenv(
-                "FLOUDS_MAX_REQUEST_SIZE",
-                ConfigLoader.__appsettings.app.max_request_size,
-            )
-        )
-        ConfigLoader.__appsettings.app.request_timeout = int(
-            os.getenv(
-                "FLOUDS_REQUEST_TIMEOUT", ConfigLoader.__appsettings.app.request_timeout
-            )
-        )
 
-        # Parse CORS origins from environment
-        cors_origins = os.getenv("FLOUDS_CORS_ORIGINS")
-        if cors_origins:
-            ConfigLoader.__appsettings.app.cors_origins = [
-                origin.strip() for origin in cors_origins.split(",")
+        rpm = os.getenv("FLOUDS_RATE_LIMIT_PER_MINUTE")
+        if rpm is not None:
+            try:
+                ConfigLoader.__appsettings.rate_limiting.requests_per_minute = int(rpm)
+            except ValueError:
+                logger.warning(f"Invalid rate limit per minute: {rpm}")
+
+        rph = os.getenv("FLOUDS_RATE_LIMIT_PER_HOUR")
+        if rph is not None:
+            try:
+                ConfigLoader.__appsettings.rate_limiting.requests_per_hour = int(rph)
+            except ValueError:
+                logger.warning(f"Invalid rate limit per hour: {rph}")
+
+        # Misc overrides
+        mcache = os.getenv("FLOUDS_MODEL_CACHE_SIZE")
+        if mcache is not None:
+            try:
+                ConfigLoader.__appsettings.onnx.model_cache_size = int(mcache)
+            except ValueError:
+                logger.warning(f"Invalid model cache size: {mcache}")
+
+        max_req = os.getenv("FLOUDS_MAX_REQUEST_SIZE")
+        if max_req is not None:
+            try:
+                ConfigLoader.__appsettings.app.max_request_size = int(max_req)
+            except ValueError:
+                logger.warning(f"Invalid max request size: {max_req}")
+
+        req_timeout = os.getenv("FLOUDS_REQUEST_TIMEOUT")
+        if req_timeout is not None:
+            try:
+                ConfigLoader.__appsettings.app.request_timeout = int(req_timeout)
+            except ValueError:
+                logger.warning(f"Invalid request timeout: {req_timeout}")
+
+        # CORS origins are seeded/overridden at application startup (see app/main.py)
+        # and therefore are intentionally not read here from the environment.
+
+        # Security enabled flag
+        sec_flag = os.getenv("FLOUDS_SECURITY_ENABLED")
+        if sec_flag is not None:
+            ConfigLoader.__appsettings.security.enabled = str(sec_flag).lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+
+        # Trusted hosts from env
+        trusted_hosts = os.getenv("FLOUDS_TRUSTED_HOSTS")
+        if trusted_hosts:
+            ConfigLoader.__appsettings.security.trusted_hosts = [
+                h.strip() for h in trusted_hosts.split(",") if h.strip()
             ]
 
-        # Security settings
-        ConfigLoader.__appsettings.security.enabled = (
-            os.getenv(
-                "FLOUDS_SECURITY_ENABLED",
-                str(ConfigLoader.__appsettings.security.enabled),
-            ).lower()
-            == "true"
-        )
-
-        # Monitoring settings
-        ConfigLoader.__appsettings.monitoring.enable_metrics = (
-            os.getenv(
-                "FLOUDS_ENABLE_METRICS",
-                str(ConfigLoader.__appsettings.monitoring.enable_metrics),
-            ).lower()
-            == "true"
-        )
-        ConfigLoader.__appsettings.monitoring.memory_threshold_mb = int(
-            os.getenv(
-                "FLOUDS_MEMORY_THRESHOLD_MB",
-                ConfigLoader.__appsettings.monitoring.memory_threshold_mb,
-            )
-        )
-        ConfigLoader.__appsettings.monitoring.cpu_threshold_percent = int(
-            os.getenv(
-                "FLOUDS_CPU_THRESHOLD_PERCENT",
-                ConfigLoader.__appsettings.monitoring.cpu_threshold_percent,
-            )
-        )
-
-        ConfigLoader.__appsettings.monitoring.cache_cleanup_max_age_seconds = int(
-            os.getenv(
-                "FLOUDS_CACHE_CLEANUP_MAX_AGE_SECONDS",
-                ConfigLoader.__appsettings.monitoring.cache_cleanup_max_age_seconds,
-            )
-        )
-        # Clients database path
-        ConfigLoader.__appsettings.security.clients_db_path = os.getenv(
-            "FLOUDS_CLIENTS_DB", ConfigLoader.__appsettings.security.clients_db_path
-        )
+        # Clients DB path override
+        clients_db = os.getenv("FLOUDS_CLIENTS_DB")
+        if clients_db:
+            ConfigLoader.__appsettings.security.clients_db_path = clients_db
 
         # Validate and create critical paths
         ConfigLoader._validate_paths()
 
-        # logger.debug("Loaded AppSettings: %s", ConfigLoader.__appsettings)
+        logger.info(f"Loaded AppSettings for environment: {env}")
         return ConfigLoader.__appsettings
 
     @staticmethod
     def _validate_paths():
         """Validate and create critical directories."""
-        settings = ConfigLoader.__appsettings
+        settings: AppSettings = cast(AppSettings, ConfigLoader.__appsettings)
 
         # Only validate ONNX paths in production
         if settings.app.is_production:
@@ -262,13 +268,16 @@ class ConfigLoader:
         Loads OnnxConfig with caching and automatic cache invalidation.
         Cache is invalidated when config file is modified.
         """
-        config_file_name = ConfigLoader.__appsettings.onnx.config_file
+        settings: AppSettings = cast(AppSettings, ConfigLoader.__appsettings)
+        config_file_name = settings.onnx.config_file
 
         # Check if cache needs refresh
         if ConfigLoader._should_refresh_cache(config_file_name):
             ConfigLoader._refresh_onnx_cache(config_file_name)
 
-        if key not in ConfigLoader.__onnx_config_cache:
+        if ConfigLoader.__onnx_config_cache is None or (
+            key not in ConfigLoader.__onnx_config_cache
+        ):
             raise MissingConfigError(
                 f"Model config '{key}' not found in onnx_config.json"
             )
@@ -287,10 +296,11 @@ class ConfigLoader:
             return True
 
     @staticmethod
-    def _refresh_onnx_cache(config_file_name: str):
+    def _refresh_onnx_cache(config_file_name: str) -> None:
         """Refresh the ONNX configuration cache."""
         try:
-            data = ConfigLoader._load_config_data(config_file_name)
+            raw = ConfigLoader._load_config_data(config_file_name)
+            data = cast(Dict[str, Dict[str, Any]], raw)
             # Filter out documentation/metadata keys that start with underscore
             ConfigLoader.__onnx_config_cache = {
                 k: OnnxConfig(**v) for k, v in data.items() if not k.startswith("_")
@@ -310,7 +320,9 @@ class ConfigLoader:
             raise CacheInvalidationError(f"Cannot refresh config cache: {e}")
 
     @staticmethod
-    def _load_config_data(config_file_name: str, check_env_file: bool = False) -> dict:
+    def _load_config_data(
+        config_file_name: str, check_env_file: bool = False
+    ) -> Dict[str, Any]:
         """
         Loads a config file and merges with environment-specific override if present.
         Performs a deep merge for nested config sections.
@@ -320,15 +332,15 @@ class ConfigLoader:
 
         logger.debug(f"Loading config from {config_file_name}")
 
-        def deep_update(d, u):
+        def deep_update(d: Dict[str, Any], u: Dict[str, Any]) -> None:
             for k, v in u.items():
                 if isinstance(v, dict) and isinstance(d.get(k), dict):
-                    deep_update(d[k], v)
+                    deep_update(d[k], v)  # type: ignore[arg-type]
                 else:
                     d[k] = v
 
         with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            data = cast(Dict[str, Any], json.load(f))
 
         # Merge environment-specific config if requested and it exists (deep merge)
         if check_env_file:
@@ -339,7 +351,7 @@ class ConfigLoader:
             logger.debug(f"Loading config from {env_file}")
             try:
                 with open(env_path, "r", encoding="utf-8") as f:
-                    env_data = json.load(f)
+                    env_data = cast(Dict[str, Any], json.load(f))
                 deep_update(data, env_data)
             except (OSError, FileNotFoundError):
                 logger.warning(
@@ -370,7 +382,7 @@ class ConfigLoader:
         logger.info("Configuration cache cleared")
 
     @staticmethod
-    def get_cache_stats() -> Dict[str, any]:
+    def get_cache_stats() -> Dict[str, Any]:
         """Get cache statistics for monitoring."""
         return {
             "onnx_configs_cached": (

@@ -3,7 +3,7 @@
 # Date: 2025-12-21
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
-from typing import Dict, List, Optional
+from typing import Any, List, cast
 
 from pydantic import BaseModel, Field
 
@@ -23,7 +23,7 @@ class ExtractedResponse(BaseModel):
         description="A message providing additional information about the operation.",
     )
     results: List[ExtractedFileContent] = Field(
-        ..., description="A list of extracted file contents."
+        cast(Any, ...), description="A list of extracted file contents."
     )
     time_taken: float = Field(
         0.0, description="The time taken to complete the operation in seconds."

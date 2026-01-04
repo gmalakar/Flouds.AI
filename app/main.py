@@ -10,15 +10,18 @@ import sys
 import warnings
 from contextlib import asynccontextmanager
 
-from app.middleware import auth
+from app.dependencies import auth
 
 # Suppress PyTorch ONNX warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
 
 print("Starting imports...")
 import gc
+from types import FrameType
+from typing import Optional
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
+from fastapi.security import HTTPBearer
 
 print("FastAPI imported")
 
@@ -30,14 +33,15 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
 from app.app_init import APP_SETTINGS
+from app.dependencies.auth import AuthMiddleware, common_headers
 from app.exceptions import FloudsBaseException
 from app.logger import get_logger
-from app.middleware.auth import AuthMiddleware
 from app.middleware.path_security import PathSecurityMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_validation import RequestValidationMiddleware
 from app.routers import (
     admin,
+    config,
     embedder,
     extract_embed,
     extractor,
@@ -47,10 +51,12 @@ from app.routers import (
     sendprompt,
     summarizer,
 )
+from app.services import config_service
 from app.utils.background_cleanup import (
     start_background_cleanup,
     stop_background_cleanup,
 )
+from app.utils.enhance_openapi import setup_enhanced_openapi
 from app.utils.error_handler import ErrorHandler
 from app.utils.log_sanitizer import sanitize_for_log
 
@@ -61,6 +67,63 @@ logger = get_logger("main")
 async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
     # Startup
+    logger.info("Initializing configuration service and applying DB settings")
+    try:
+        # Ensure config DB/table exists and load runtime settings
+        config_service.init_db()
+        config_service.load_and_apply_settings()
+        # DB-first seeding/override behavior for CORS and Trusted Hosts.
+        # If FLOUDS_CONFIG_OVERRIDE=="1", env values overwrite DB at startup.
+        # Otherwise, env values only seed the DB when DB has no value.
+        from os import getenv
+        from typing import List, Optional
+
+        def _parse_list_env(val: Optional[str]) -> Optional[List[str]]:
+            if val is None:
+                return None
+            if val.strip() == "*":
+                return ["*"]
+            return [s.strip() for s in val.split(",") if s.strip()]
+
+        cors_env = _parse_list_env(getenv("FLOUDS_CORS_ORIGINS"))
+        trusted_env = _parse_list_env(getenv("FLOUDS_TRUSTED_HOSTS"))
+        override = getenv("FLOUDS_CONFIG_OVERRIDE") == "1"
+
+        # If override requested, write env -> DB. Otherwise seed DB only when empty.
+        try:
+            if override:
+                if cors_env is not None:
+                    config_service.set_cors_origins(cors_env)
+                    logger.info("Applied CORS origins from env (override)")
+                if trusted_env is not None:
+                    config_service.set_trusted_hosts(trusted_env)
+                    logger.info("Applied trusted hosts from env (override)")
+                config_service.load_and_apply_settings()
+            else:
+                # Load current DB values to determine if seeding is needed
+                existing_cors = config_service.get_cors_origins()
+                existing_trusted = config_service.get_trusted_hosts()
+                seeded = False
+                if (not existing_cors or len(existing_cors) == 0) and cors_env:
+                    config_service.set_cors_origins(cors_env)
+                    logger.info("Seeded CORS origins from env into DB")
+                    seeded = True
+                if (not existing_trusted or len(existing_trusted) == 0) and trusted_env:
+                    config_service.set_trusted_hosts(trusted_env)
+                    logger.info("Seeded trusted hosts from env into DB")
+                    seeded = True
+                if seeded:
+                    config_service.load_and_apply_settings()
+                else:
+                    # No seeding/override requested — apply whatever is in DB
+                    config_service.load_and_apply_settings()
+        except Exception:
+            logger.exception(
+                "Failed to seed/override config from env; falling back to DB values"
+            )
+    except Exception as e:
+        logger.exception("Failed to initialize config service: %s", e)
+
     logger.info("Starting background cleanup service")
     start_background_cleanup(cleanup_interval=60.0, max_age_seconds=60.0)
 
@@ -79,7 +142,27 @@ app = FastAPI(
     docs_url="/api/v1/docs",
     redoc_url="/api/v1/redoc",
     lifespan=lifespan,
+    # Keep a non-blocking HTTPBearer at app-level so the OpenAPI "Authorize"
+    # control is available, but don't add `common_headers` here because it
+    # injects header parameters into every endpoint (including public ones
+    # like `/health`). Attach `common_headers` only to secured routers below.
+    dependencies=[Depends(HTTPBearer(auto_error=False))],
 )
+
+
+# Use centralized enhanced OpenAPI generator so docs/metadata match
+# the FloudsVector project. This replaces the ad-hoc `_custom_openapi`.
+setup_enhanced_openapi(app)
+
+
+# Ensure a named HTTP Bearer security scheme is present in OpenAPI so Swagger
+# Authorize control consistently sets the Authorization header when used.
+
+
+# Keep non-blocking HTTPBearer at app-level so OpenAPI shows Authorize
+# app.dependency_overrides = getattr(app, "dependency_overrides", {})
+# app_deps = [Depends(HTTPBearer(auto_error=False))]
+# app.dependencies = getattr(app, "dependencies", []) + app_deps
 
 
 # Global exception handlers
@@ -134,7 +217,8 @@ async def memory_error_handler(request: Request, exc: MemoryError):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Handle unexpected exceptions."""
-    error_response = ErrorHandler.handle_exception(
+    # Let the ErrorHandler process the exception (logging/telemetry)
+    ErrorHandler.handle_exception(
         exc, f"request to {request.url}", include_traceback=True
     )
     return JSONResponse(
@@ -156,6 +240,21 @@ if APP_SETTINGS.app.is_production:
 
 # Add path security middleware (first for early detection)
 app.add_middleware(PathSecurityMiddleware)
+
+# Add tenant security middleware to enforce trusted hosts and CORS origins
+# Configure and add middleware
+# Use tenant-aware middleware for CORS and Trusted Host enforcement
+# Register CORS first so browser preflight and CORS headers are handled
+# before TrustedHost enforces server-side host restrictions. This ensures
+# browsers receive correct CORS responses while trusted-host remains a
+# server-side safety net.
+from app.middleware.tenant_security import (
+    TenantCorsMiddleware,
+    TenantTrustedHostMiddleware,
+)
+
+app.add_middleware(TenantCorsMiddleware)
+app.add_middleware(TenantTrustedHostMiddleware)
 
 # Add authentication middleware
 app.add_middleware(AuthMiddleware)
@@ -182,34 +281,73 @@ if APP_SETTINGS.rate_limiting.enabled:
 
 # Include routers
 app.include_router(
-    summarizer.router, prefix="/api/v1/summarizer", tags=["Text Summarization"]
+    summarizer.router,
+    prefix="/api/v1/summarizer",
+    tags=["Text Summarization"],
+    dependencies=[Depends(common_headers)],
 )
-app.include_router(embedder.router, prefix="/api/v1/embedder", tags=["Text Embedding"])
 app.include_router(
-    rag.router, prefix="/api/v1/rag", tags=["RAG (Retrieval-Augmented Generation)"]
+    embedder.router,
+    prefix="/api/v1/embedder",
+    tags=["Text Embedding"],
+    dependencies=[Depends(common_headers)],
+)
+app.include_router(
+    rag.router,
+    prefix="/api/v1/rag",
+    tags=["RAG (Retrieval-Augmented Generation)"],
+    dependencies=[Depends(common_headers)],
 )
 app.include_router(health.router, prefix="/api/v1", tags=["Health & Monitoring"])
-app.include_router(admin.router, prefix="/api/v1", tags=["Administration"])
-app.include_router(model_info.router, prefix="/api/v1", tags=["Model Information"])
-app.include_router(sendprompt.router, prefix="/api/v1", tags=["Prompt Processing"])
-
 app.include_router(
-    auth.router, prefix="/api/v1/secure-endpoint", tags=["Secure Endpoint"]
+    admin.router,
+    prefix="/api/v1",
+    tags=["Administration"],
+    dependencies=[Depends(common_headers)],
+)
+app.include_router(
+    config.router,
+    prefix="/api/v1",
+    tags=["Configuration"],
+    dependencies=[Depends(common_headers)],
+)
+app.include_router(
+    model_info.router,
+    prefix="/api/v1",
+    tags=["Model Information"],
+    dependencies=[Depends(common_headers)],
+)
+app.include_router(
+    sendprompt.router,
+    prefix="/api/v1",
+    tags=["Prompt Processing"],
+    dependencies=[Depends(common_headers)],
 )
 
 app.include_router(
-    extractor.router, prefix="/api/v1/extractor", tags=["Text Extraction"]
+    auth.router,
+    prefix="/api/v1/secure-endpoint",
+    tags=["Secure Endpoint"],
+    dependencies=[Depends(common_headers)],
+)
+
+app.include_router(
+    extractor.router,
+    prefix="/api/v1/extractor",
+    tags=["Text Extraction"],
+    dependencies=[Depends(common_headers)],
 )
 
 app.include_router(
     extract_embed.router,
     prefix="/api/v1/extract-embed",
     tags=["Extract and Embed"],
+    dependencies=[Depends(common_headers)],
 )
 
 
 @app.get("/")
-def root() -> dict:
+def root() -> dict[str, str]:
     """Root endpoint for health check."""
     return {
         "message": "Flouds AI API is running",
@@ -219,17 +357,15 @@ def root() -> dict:
 
 
 @app.get("/api/v1")
-def api_v1_root() -> dict:
+def api_v1_root() -> dict[str, str]:
     """API v1 root endpoint."""
     return {"message": "Flouds AI API v1", "version": "v1", "docs": "/api/v1/docs"}
 
 
 @app.get("/favicon.ico")
-def favicon():
+def favicon() -> JSONResponse:
     """Return empty response for favicon requests."""
-    from fastapi.responses import Response
-
-    return Response(status_code=204)
+    return JSONResponse(status_code=204, content=None)
 
 
 def cleanup_handlers():
@@ -242,7 +378,7 @@ def cleanup_handlers():
     logging.shutdown()
 
 
-def signal_handler(signum, frame):
+def signal_handler(signum: int, frame: Optional[FrameType]) -> None:
     """Handle shutdown signals gracefully."""
     logger.info(f"Received signal {signum}, shutting down gracefully...")
     cleanup_handlers()

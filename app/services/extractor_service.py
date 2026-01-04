@@ -211,9 +211,10 @@ class ExtractorService:
                 slides = []
                 for slide in prs.slides:
                     slide_text = [
-                        ExtractorService._normalize_whitespace(shape.text)
+                        ExtractorService._normalize_whitespace(
+                            getattr(shape, "text", "")
+                        )
                         for shape in slide.shapes
-                        if hasattr(shape, "text")
                     ]
                     slides.append("\n".join(slide_text))
             return [
