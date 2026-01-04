@@ -50,8 +50,20 @@ class MonitoringConfig(BaseModel):
 
 
 class SecurityConfig(BaseModel):
+    """
+    Security configuration settings.
+    """
+
     enabled: bool = Field(default=False)
-    clients_db_path: str = Field(default="clients.db")
+    clients_db_path: str = Field(default="/app/data/clients.db")
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="List of allowed CORS origins. Use '*' to allow all.",
+    )
+    trusted_hosts: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="List of trusted hostnames for TrustedHostMiddleware. Use '*' to allow all.",
+    )
 
 
 class AppSettings(BaseModel):

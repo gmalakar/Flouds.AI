@@ -31,13 +31,22 @@ def test_openapi_contains_model_info_and_response_matches_model():
 
     # call the endpoint for a non-existent model (safe path)
     # include a valid token from key_manager so AuthMiddleware permits the request
-    from app.utils.key_manager import key_manager
+    from app.modules.key_manager import key_manager
 
     tokens = key_manager.get_all_tokens()
     auth_header = {}
     if tokens:
         token = next(iter(tokens))
-        auth_header = {"Authorization": f"Bearer {token}"}
+        # derive tenant code from client record when available; default to 'master'
+        try:
+            client_id = token.split("|", 1)[0]
+            tenant = (
+                getattr(key_manager.clients.get(client_id), "tenant_code", "")
+                or "master"
+            )
+        except Exception:
+            tenant = "master"
+        auth_header = {"Authorization": f"Bearer {token}", "X-Tenant-Code": tenant}
 
     resp = client.get(
         "/api/v1/model/info",

@@ -4,11 +4,14 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
+import logging
 import time
 from threading import RLock
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
-logger = None  # Will be set by caller to avoid circular imports
+logger: Optional[logging.Logger] = (
+    None  # Will be set by caller to avoid circular imports
+)
 
 
 class ConcurrentDict:
@@ -24,7 +27,7 @@ class ConcurrentDict:
         on_evict: Optional[Callable[[Any, Any], None]] = None,
     ):
         self._lock = RLock()
-        self._dict = {}
+        self._dict: Dict[Any, Any] = {}
         self._access_times: Dict[Any, float] = {}
         self._created_for = created_for
         self._max_size = max_size if (max_size is None or max_size > 0) else None
@@ -121,7 +124,8 @@ class ConcurrentDict:
             return
         # Evict based on oldest access time
         while len(self._dict) > self._max_size and self._access_times:
-            lru_key = min(self._access_times, key=self._access_times.get)
+            # Use items() with explicit key function to satisfy static type checkers
+            lru_key = min(self._access_times.items(), key=lambda kv: kv[1])[0]
             evicted_value = self._dict.pop(lru_key, None)
             self._access_times.pop(lru_key, None)
             # Invoke optional callback for cleanup (e.g., release ONNX sessions)
@@ -139,22 +143,24 @@ class ConcurrentDict:
         Remove items not accessed for max_age_seconds. Returns count of removed items.
         """
         current_time = time.time()
-        keys_to_remove = []
+        keys_to_remove: List[Any] = []
 
         with self._lock:
-            for key, access_time in self._access_times.items():
+            # Iterate over a snapshot of items to avoid runtime mutation issues
+            for key, access_time in list(self._access_times.items()):
                 if current_time - access_time > max_age_seconds:
                     keys_to_remove.append(key)
 
             for key in keys_to_remove:
-                del self._dict[key]
-                del self._access_times[key]
+                # Use pop with default to be safe if concurrent modifications occurred
+                self._dict.pop(key, None)
+                self._access_times.pop(key, None)
 
         return len(keys_to_remove)
 
     @staticmethod
     def add_missing_from_other(
-        target: "ConcurrentDict", source: "ConcurrentDict"
+        target: Optional["ConcurrentDict"], source: "ConcurrentDict"
     ) -> "ConcurrentDict":
         """
         Thread-safe: Adds only missing key-value pairs from source to target ConcurrentDict.
@@ -162,14 +168,16 @@ class ConcurrentDict:
         Existing keys in target are not overwritten.
         Returns the updated target ConcurrentDict.
         """
-        if not isinstance(target, ConcurrentDict) and target is not None:
-            raise TypeError("target must be a ConcurrentDict or None")
-        if not isinstance(source, ConcurrentDict):
-            raise TypeError("source must be a ConcurrentDict")
+        # Allow `target` to be None (create new dict) or a ConcurrentDict.
         if target is None:
             target = ConcurrentDict()
+        # `source` must be a ConcurrentDict (type enforced by annotation at call sites).
         with target._lock, source._lock:
-            for key, value in source._dict.items():
+            # Iterate over a snapshot to avoid concurrent mutation issues and
+            # make element types explicit for static checkers.
+            for kv in list(source._dict.items()):
+                key: Any = kv[0]
+                value: Any = kv[1]
                 if key not in target._dict:
                     target._dict[key] = value
         return target

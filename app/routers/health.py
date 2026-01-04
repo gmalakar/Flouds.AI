@@ -43,13 +43,15 @@ async def detailed_health_check():
         memory_info = MemoryMonitor.get_memory_info()
         from app.app_init import APP_SETTINGS
 
-        onnx_path = APP_SETTINGS.onnx.onnx_path
+        onnx_path = getattr(APP_SETTINGS.onnx, "onnx_path", None)
 
+        disk_free = 0
         try:
             import shutil
 
-            disk_free = shutil.disk_usage(onnx_path).free / 1024 / 1024
-        except:
+            if onnx_path:
+                disk_free = shutil.disk_usage(onnx_path).free / 1024 / 1024
+        except Exception:
             disk_free = 0
 
         model_cache_size = (
@@ -67,7 +69,7 @@ async def detailed_health_check():
         health_status["models"] = {
             "cached_models": model_cache_size,
             "encoder_sessions": encoder_sessions,
-            "onnx_path_exists": os.path.exists(onnx_path),
+            "onnx_path_exists": os.path.exists(onnx_path) if onnx_path else False,
         }
         health_status["disk_space_mb"] = disk_free
 
@@ -85,13 +87,13 @@ async def readiness_check():
 
         # Only check ONNX path in production
         if APP_SETTINGS.app.is_production:
-            onnx_path = APP_SETTINGS.onnx.onnx_path
-            if not os.path.exists(onnx_path):
+            onnx_path = getattr(APP_SETTINGS.onnx, "onnx_path", None)
+            if not onnx_path or not os.path.exists(onnx_path):
                 raise HTTPException(status_code=503, detail="ONNX path not accessible")
 
         # Check if authentication is properly configured
         if APP_SETTINGS.security.enabled:
-            from app.utils.key_manager import key_manager
+            from app.modules.key_manager import key_manager
 
             if not key_manager.get_all_tokens():
                 raise HTTPException(status_code=503, detail="No API keys configured")

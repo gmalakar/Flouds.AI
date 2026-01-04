@@ -14,12 +14,21 @@ client = TestClient(app)
 def _auth_header():
     # include a valid token from key_manager so AuthMiddleware permits the request
     try:
-        from app.utils.key_manager import key_manager
+        from app.modules.key_manager import key_manager
 
         tokens = key_manager.get_all_tokens()
         if tokens:
             token = next(iter(tokens))
-            return {"Authorization": f"Bearer {token}"}
+            # Derive tenant from client record when available; default to 'master'
+            try:
+                client_id = token.split("|", 1)[0]
+                tenant = (
+                    getattr(key_manager.clients.get(client_id), "tenant_code", "")
+                    or "master"
+                )
+            except Exception:
+                tenant = "master"
+            return {"Authorization": f"Bearer {token}", "X-Tenant-Code": tenant}
     except Exception:
         pass
     return {}

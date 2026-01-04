@@ -62,10 +62,11 @@ class OnnxConfig(BaseModel):
     prepend_text: str = Field(default="summarize: ")
     chunk_logic: str = Field(default="sentence")
     chunk_overlap: int = Field(default=1)
-    chunk_size: int = Field(default=None)  # For fixed chunking
+    chunk_size: Optional[int] = Field(default=None)  # For fixed chunking
     legacy_tokenizer: bool = Field(
         default=False
     )  # Use legacy tokenizer for older models
     lowercase: bool = Field(default=False)  # Convert text to lowercase
     remove_emojis: bool = Field(default=False)  # Remove emojis and non-ASCII characters
     force_pooling: bool = Field(default=False)  # Force pooling for embeddings
+    vocab_size: Optional[int] = Field(default=None)

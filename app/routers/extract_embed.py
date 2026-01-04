@@ -152,9 +152,15 @@ async def extract_and_embed(request: ExtractEmbedRequest) -> EmbeddingBatchRespo
             extracted_contents=extracted_contents,
             model=request.model,
             projected_dimension=request.projected_dimension,
-            join_chunks=request.join_chunks,
+            join_chunks=(
+                request.join_chunks if request.join_chunks is not None else False
+            ),
             join_by_pooling_strategy=request.join_by_pooling_strategy,
-            output_large_text_upon_join=request.output_large_text_upon_join,
+            output_large_text_upon_join=(
+                request.output_large_text_upon_join
+                if request.output_large_text_upon_join is not None
+                else False
+            ),
             pooling_strategy=request.pooling_strategy,
             max_length=request.max_length,
             chunk_logic=request.chunk_logic,

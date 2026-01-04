@@ -32,10 +32,10 @@ class TestSpecificExceptions:
         import os
         import tempfile
 
-        from app.utils.key_manager import KeyManager
+        from app.modules.key_manager import KeyManager
 
         # Test database connection error with invalid path
-        with patch("app.utils.key_manager.sqlite3.connect") as mock_connect:
+        with patch("app.modules.key_manager.sqlite3.connect") as mock_connect:
             mock_connect.side_effect = OSError("Permission denied")
 
             with pytest.raises(DatabaseConnectionError):

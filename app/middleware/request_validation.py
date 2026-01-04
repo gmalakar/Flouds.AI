@@ -5,10 +5,12 @@
 # =============================================================================
 
 import time
+from typing import Awaitable, Callable
 
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from starlette.types import ASGIApp
 
 from app.app_init import APP_SETTINGS
 from app.logger import get_logger
@@ -20,12 +22,14 @@ logger = get_logger("request_validation")
 class RequestValidationMiddleware(BaseHTTPMiddleware):
     """Middleware for request validation, size limits, and timeout handling."""
 
-    def __init__(self, app):
+    def __init__(self, app: ASGIApp):
         super().__init__(app)
         self.max_request_size = APP_SETTINGS.app.max_request_size
         self.request_timeout = APP_SETTINGS.app.request_timeout
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Process request with validation and timeout."""
 
         # Skip validation for health checks and docs

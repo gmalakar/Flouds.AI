@@ -67,9 +67,9 @@ class HealthService:
         try:
             from app.app_init import APP_SETTINGS
 
-            onnx_path = APP_SETTINGS.onnx.onnx_path
-            if not os.path.exists(onnx_path):
-                logger.warning(f"ONNX path not found: {onnx_path}")
+            onnx_path = getattr(APP_SETTINGS.onnx, "onnx_path", None)
+            if not onnx_path or not os.path.exists(onnx_path):
+                logger.warning(f"ONNX path not found or not configured: {onnx_path}")
                 return "unhealthy"
 
             # Check if we can access model cache
@@ -95,7 +95,7 @@ class HealthService:
             if not APP_SETTINGS.security.enabled:
                 return "healthy"  # Auth disabled is valid
 
-            from app.utils.key_manager import key_manager
+            from app.modules.key_manager import key_manager
 
             if not key_manager.get_all_tokens():
                 logger.warning("Authentication enabled but no API keys configured")

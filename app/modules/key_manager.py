@@ -1,7 +1,6 @@
 # =============================================================================
-# File: key_manager.py
-# Date: 2025-01-27
-# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# File: key_manager.py (moved from app/utils)
+# Tenant-aware KeyManager moved to canonical `app.modules` package.
 # =============================================================================
 
 import base64
@@ -9,7 +8,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import Optional, Set
+from typing import Optional, Set, Tuple
 
 from cryptography.fernet import Fernet
 
@@ -34,9 +33,20 @@ class Client:
 class KeyManager:
     """Manages client credentials using SQLite with encryption."""
 
-    def __init__(self, db_path: str = None):
-        self.db_path = None
-        self.clients = {}
+    def __init__(self, db_path: Optional[str] = None):
+        # Resolve DB path early and ensure it's a string for path operations
+        try:
+            from app.app_init import APP_SETTINGS
+
+            resolved = db_path or getattr(
+                APP_SETTINGS.security, "clients_db_path", "clients.db"
+            )
+        except Exception:
+            # Fallback if APP_SETTINGS not available during import-time
+            resolved = db_path or "clients.db"
+
+        self.db_path: str = str(resolved)
+        self.clients: dict[str, Client] = {}
         self._token_cache: Set[str] = set()
         self._admin_cache: Set[str] = set()
 
@@ -109,6 +119,7 @@ class KeyManager:
                         client_id TEXT PRIMARY KEY,
                         client_secret TEXT NOT NULL,
                         client_type TEXT NOT NULL DEFAULT 'api_user',
+                        tenant_code TEXT NOT NULL DEFAULT '',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
@@ -141,6 +152,13 @@ class KeyManager:
             # Handle "file is not a database" error (e.g., TinyDB file)
             logger.warning(f"Database corruption detected: {e}")
             self._recover_database()
+        except sqlite3.OperationalError as e:
+            # Try to recover from corrupted database or operational issues
+            if "malformed" in str(e).lower() or "corrupt" in str(e).lower():
+                logger.warning(f"Database operational error: {e}")
+                self._recover_database()
+            else:
+                raise DatabaseConnectionError(f"Cannot initialize database: {e}")
         except sqlite3.DatabaseError as e:
             # Handle "file is not a database" error (e.g., TinyDB file)
             error_msg = str(e).lower()
@@ -150,13 +168,6 @@ class KeyManager:
                 or "corrupt" in error_msg
             ):
                 logger.warning(f"Database file is corrupted or wrong format: {e}")
-                self._recover_database()
-            else:
-                raise DatabaseConnectionError(f"Cannot initialize database: {e}")
-        except sqlite3.OperationalError as e:
-            # Try to recover from corrupted database
-            if "malformed" in str(e).lower() or "corrupt" in str(e).lower():
-                logger.warning(f"Database operational error: {e}")
                 self._recover_database()
             else:
                 raise DatabaseConnectionError(f"Cannot initialize database: {e}")
@@ -193,6 +204,7 @@ class KeyManager:
                         client_id TEXT PRIMARY KEY,
                         client_secret TEXT NOT NULL,
                         client_type TEXT NOT NULL DEFAULT 'api_user',
+                        tenant_code TEXT NOT NULL DEFAULT '',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
@@ -227,6 +239,9 @@ class KeyManager:
         if key_env:
             return base64.urlsafe_b64decode(key_env.encode())
 
+        if not self.db_path:
+            raise DatabaseConnectionError("DB path not configured for KeyManager")
+
         key_dir = os.path.dirname(os.path.abspath(self.db_path))
         key_file = os.path.join(key_dir, ".encryption_key")
 
@@ -249,7 +264,7 @@ class KeyManager:
         return key
 
     @lru_cache(maxsize=1000)
-    def _parse_token(self, token: str) -> Optional[tuple[str, str]]:
+    def _parse_token(self, token: str) -> Optional[Tuple[str, str]]:
         """Parse and cache token parsing results."""
         if "|" not in token:
             return None
@@ -259,7 +274,9 @@ class KeyManager:
         except (ValueError, IndexError):
             return None
 
-    def authenticate_client(self, token: str) -> Optional[Client]:
+    def authenticate_client(
+        self, token: str, tenant_code: str = ""
+    ) -> Optional[Client]:
         """Authenticate client using client_id|client_secret format."""
         try:
             parsed = self._parse_token(token)
@@ -270,6 +287,9 @@ class KeyManager:
             client = self.clients.get(client_id)
 
             if client and client.client_secret == client_secret:
+                # enforce tenant_code match when provided
+                if tenant_code and getattr(client, "tenant_code", "") != tenant_code:
+                    return None
                 return client
             return None
         except (ValueError, TypeError) as e:
@@ -279,16 +299,41 @@ class KeyManager:
             logger.error("Authentication error: %s", str(e))
             return None
 
-    def is_admin(self, client_id: str) -> bool:
-        """Check if client is admin using cache."""
-        return client_id in self._admin_cache
+    def is_admin(self, client_id: str, tenant_code: str = "") -> bool:
+        """Check if client is admin for given tenant.
+
+        - superadmin is admin everywhere
+        - admin is admin for its tenant (or globally if tenant_code not provided)
+        """
+        client = self.clients.get(client_id)
+        if not client:
+            return False
+        if getattr(client, "client_type", "") == "superadmin":
+            return True
+        if getattr(client, "client_type", "") == "admin":
+            if not tenant_code:
+                return True
+            return getattr(client, "tenant_code", "") == tenant_code
+        return False
+
+    def is_super_admin(self, client_id: str) -> bool:
+        """Return True if the given client_id corresponds to a superadmin."""
+        client = self.clients.get(client_id)
+        if not client:
+            return False
+        return getattr(client, "client_type", "") == "superadmin"
 
     def get_all_tokens(self) -> Set[str]:
         """Get all valid tokens in client_id|client_secret format."""
         return self._token_cache.copy()
 
     def add_client(
-        self, client_id: str, client_secret: str, client_type: str = "api_user"
+        self,
+        client_id: str,
+        client_secret: str,
+        client_type: str = "api_user",
+        tenant_code: str = "",
+        created_by: Optional[str] = None,
     ) -> bool:
         """Add new client to database."""
         try:
@@ -301,19 +346,21 @@ class KeyManager:
                 # Use INSERT OR REPLACE for upsert behavior
                 cursor.execute(
                     """
-                    INSERT OR REPLACE INTO clients (client_id, client_secret, client_type)
-                    VALUES (?, ?, ?)
+                    INSERT OR REPLACE INTO clients (client_id, client_secret, client_type, tenant_code)
+                    VALUES (?, ?, ?, ?)
                 """,
-                    (client_id, encrypted_secret, client_type),
+                    (client_id, encrypted_secret, client_type, tenant_code),
                 )
 
             # Update in-memory cache
             self.clients[client_id] = Client(client_id, client_secret, client_type)
+            # attach tenant_code attribute to client object for runtime checks
+            setattr(self.clients[client_id], "tenant_code", tenant_code)
 
             # Update token and admin caches
             token = f"{client_id}|{client_secret}"
             self._token_cache.add(token)
-            if client_type == "admin":
+            if client_type in ("admin", "superadmin"):
                 self._admin_cache.add(client_id)
 
             # Clear LRU cache
@@ -373,7 +420,8 @@ class KeyManager:
     def load_clients(self):
         """Load clients from SQLite database."""
         try:
-            self.clients = {}
+            # Clear existing clients while preserving the annotated type
+            self.clients.clear()
 
             if not os.path.exists(self.db_path):
                 logger.info(
@@ -383,12 +431,22 @@ class KeyManager:
 
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
+                # Try to include tenant_code if present in schema; fall back if column missing
+                try:
+                    cursor.execute(
+                        """
+                        SELECT client_id, client_secret, client_type, tenant_code
+                        FROM clients
                     """
-                    SELECT client_id, client_secret, client_type 
-                    FROM clients
-                """
-                )
+                    )
+                except sqlite3.OperationalError:
+                    # Older DB without tenant_code column
+                    cursor.execute(
+                        """
+                        SELECT client_id, client_secret, client_type
+                        FROM clients
+                    """
+                    )
 
                 rows = cursor.fetchall()
 
@@ -401,6 +459,9 @@ class KeyManager:
                         client_id = row["client_id"]
                         encrypted_secret = row["client_secret"]
                         client_type = row["client_type"]
+                        tenant_code = (
+                            row["tenant_code"] if "tenant_code" in row.keys() else ""
+                        )
 
                         # Decrypt secret
                         try:
@@ -416,12 +477,13 @@ class KeyManager:
                             )
 
                         client = Client(client_id, client_secret, client_type)
+                        setattr(client, "tenant_code", tenant_code)
                         self.clients[client_id] = client
 
                         # Update caches
                         token = f"{client_id}|{client_secret}"
                         self._token_cache.add(token)
-                        if client_type == "admin":
+                        if client_type in ("admin", "superadmin"):
                             self._admin_cache.add(client_id)
 
                     except DecryptionError:
@@ -510,66 +572,126 @@ key_manager = KeyManager()
 
 # Initialize with default admin if no admin exists
 def _ensure_admin_exists():
-    # Check if any admin user exists
-    admin_exists = any(
-        client.client_type == "admin" for client in key_manager.clients.values()
-    )
+    # Ensure a superadmin exists. If none exists, create a bootstrap superadmin
+    # account. This account has global admin privileges across tenants.
+    if any(
+        getattr(c, "client_type", "") == "superadmin"
+        for c in key_manager.clients.values()
+    ):
+        return
 
-    if not admin_exists:
-        from secrets import token_urlsafe
+    from datetime import datetime
+    from secrets import token_urlsafe
 
-        admin_id = "admin"
+    from app.utils.path_validator import safe_open
+
+    admin_id = "admin"
+    while True:
         admin_secret = token_urlsafe(32)
+        if ":" not in admin_secret and "|" not in admin_secret:
+            break
 
-        if key_manager.add_client(admin_id, admin_secret, "admin"):
-            # Save credentials to console file
-            try:
-                # write credentials next to the clients DB (key_dir)
-                key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
-                console_path = os.path.join(key_dir, "admin_console.txt")
-                with open(console_path, "w", encoding="utf-8") as console_file:
-                    console_file.write("=== ADMIN CREDENTIALS CREATED ===\n")
-                    console_file.write(f"Admin Client ID: {admin_id}\n")
-                    console_file.write(f"Admin Secret: {admin_secret}\n")
-                    console_file.write(f"Admin Token: {admin_id}|{admin_secret}\n")
-                    console_file.write("=== SAVE THESE CREDENTIALS ===\n")
-                logger.warning(f"Admin credentials saved to {console_path}")
-            except Exception as e:
-                logger.error(f"Failed to save console output: {e}")
+    if key_manager.add_client(admin_id, admin_secret, "admin"):
+        # Save credentials to console file next to DB
+        try:
+            key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
+            console_file_path = os.path.join(key_dir, "admin_console.txt")
+            with safe_open(
+                console_file_path, key_dir, "w", encoding="utf-8"
+            ) as console_file:
+                console_file.writelines(
+                    [
+                        "=== ADMIN CREDENTIALS CREATED ===\n",
+                        f"Admin Client ID: {admin_id}\n",
+                        f"Admin Secret: {admin_secret}\n",
+                        f"Admin Token: {admin_id}|{admin_secret}\n",
+                        "=== SAVE THESE CREDENTIALS ===\n",
+                    ]
+                )
+            logger.warning(
+                "Admin credentials saved to %s", sanitize_for_log(console_file_path)
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to save admin console to %s: %s",
+                sanitize_for_log(key_manager.db_path),
+                str(e),
+            )
 
-            # Write to admin credentials file
-            try:
-                import os
-                from datetime import datetime
-
-                from app.utils.path_validator import safe_open
-
-                # Save credentials next to the clients DB so they are colocated with the DB and key
-                key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
-                creds_file = "admin_credentials.txt"
-                with safe_open(creds_file, key_dir, "w", encoding="utf-8") as f:
-                    f.write(f"Flouds AI Admin Credentials\n")
-                    f.write(f"Generated: {datetime.now().isoformat()}\n")
-                    f.write(f"\n")
-                    f.write(f"Client ID: {admin_id}\n")
-                    f.write(f"Client Secret: {admin_secret}\n")
-                    f.write(f"\n")
-                    f.write(f"Usage:\n")
-                    f.write(f"Authorization: Bearer {admin_id}|{admin_secret}\n")
-                    f.write(f"\n")
-                    f.write(f"Example:\n")
-                    f.write(
-                        f'curl -H "Authorization: Bearer {admin_id}|{admin_secret}" \\\n+'
-                    )
-                    f.write(f"  http://localhost:19690/api/v1/admin/clients\n")
-
-                creds_path = os.path.join(key_dir, creds_file)
-                logger.warning(f"Admin credentials saved to: {creds_path}")
-            except Exception as e:
-                logger.error(f"Failed to save admin credentials to file: {e}")
-        else:
-            logger.error("Failed to create admin user")
+        # Also write a detailed credentials file
+        try:
+            key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
+            creds_file = "admin_credentials.txt"
+            with safe_open(creds_file, key_dir, "w", encoding="utf-8") as f:
+                f.write("Flouds AI Admin Credentials\n")
+                f.write(f"Generated: {datetime.now().isoformat()}\n")
+                f.write("\n")
+                f.write(f"Client ID: {admin_id}\n")
+                f.write(f"Client Secret: {admin_secret}\n")
+                f.write("\n")
+                f.write("Usage:\n")
+                f.write(f"Authorization: Bearer {admin_id}|{admin_secret}\n")
+                f.write("\n")
+                f.write("Example:\n")
+                f.write(
+                    f'curl -H "Authorization: Bearer {admin_id}|{admin_secret}" \\\n+'
+                )
+                f.write("  http://localhost:19690/api/v1/admin/clients\n")
+            creds_path = os.path.join(key_dir, creds_file)
+            logger.warning(
+                "Admin credentials saved to: %s", sanitize_for_log(creds_path)
+            )
+        except Exception as e:
+            logger.error("Failed to save admin credentials to file: %s", str(e))
+    else:
+        logger.error("Failed to create admin user")
 
 
 # Ensure admin exists on module load
+def _ensure_superadmin_exists():
+    """Ensure a global superadmin exists on first run."""
+    super_exists = any(
+        getattr(client, "client_type", "") == "superadmin"
+        for client in key_manager.clients.values()
+    )
+
+    if not super_exists:
+        from secrets import token_urlsafe
+
+        from app.utils.path_validator import safe_open
+
+        super_id = "superadmin"
+        while True:
+            super_secret = token_urlsafe(32)
+            if ":" not in super_secret and "|" not in super_secret:
+                break
+
+        if key_manager.add_client(super_id, super_secret, "superadmin", "master"):
+            # Save credentials to console file
+            try:
+                key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
+                console_path = os.path.join(key_dir, "superadmin_console.txt")
+                with safe_open(
+                    console_path, key_dir, "w", encoding="utf-8"
+                ) as console_file:
+                    console_file.writelines(
+                        [
+                            "=== SUPERADMIN CREDENTIALS CREATED ===\n",
+                            f"Superadmin Client ID: {super_id}\n",
+                            f"Superadmin Secret: {super_secret}\n",
+                            f"Superadmin Token: {super_id}|{super_secret}\n",
+                            "=== SAVE THESE CREDENTIALS ===\n",
+                        ]
+                    )
+                logger.warning(
+                    "Superadmin credentials saved to %s", sanitize_for_log(console_path)
+                )
+            except Exception as e:
+                logger.error("Failed to save superadmin console output: %s", str(e))
+        else:
+            logger.error("Failed to create superadmin user")
+
+
+_ensure_superadmin_exists()
+
 _ensure_admin_exists()

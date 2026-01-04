@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import Union
+from typing import Any, Union, cast
 
 from pydantic import BaseModel, Field
 
@@ -16,11 +16,11 @@ class FileRequest(BaseModel):
     """
 
     file_content: Union[str, bytes] = Field(
-        ...,
+        cast(Any, ...),
         description="File content to extract. Accepts base64 string or raw bytes.",
     )
     extention: str = Field(
-        ...,
+        cast(Any, ...),
         min_length=1,
         description="The file extension. This field is required and cannot be empty.",
     )

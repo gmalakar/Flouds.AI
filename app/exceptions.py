@@ -5,12 +5,13 @@
 # =============================================================================
 
 """Custom exceptions for Flouds AI application."""
+from typing import Optional
 
 
 class FloudsBaseException(Exception):
     """Base exception for all Flouds AI errors."""
 
-    def __init__(self, message: str, error_code: str = None):
+    def __init__(self, message: str, error_code: Optional[str] = None):
         self.message = message
         self.error_code = error_code or self.__class__.__name__
         super().__init__(self.message)

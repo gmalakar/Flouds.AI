@@ -9,13 +9,18 @@ import logging
 import os
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
+from typing import Optional
 
 
-def get_logger(name: str = None) -> logging.Logger:
+def get_logger(name: Optional[str] = None) -> logging.Logger:
     # Auto-detect caller if name not provided
     if name is None:
-        frame = inspect.currentframe().f_back
-        filename = frame.f_code.co_filename
+        frame = inspect.currentframe()
+        caller = frame.f_back if frame and getattr(frame, "f_back", None) else frame
+        if caller and getattr(caller, "f_code", None):
+            filename = caller.f_code.co_filename
+        else:
+            filename = __file__
         name = os.path.splitext(os.path.basename(filename))[0]
 
     # Return logger with caller-specific name

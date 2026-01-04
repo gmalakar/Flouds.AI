@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import Optional
+from typing import Any, Optional, cast
 
 from pydantic import Field
 
@@ -14,9 +14,15 @@ from app.models.base_request import BaseRequest
 class RAGRequest(BaseRequest):
     """Request model for RAG (Retrieval-Augmented Generation)."""
 
-    query: str = Field(..., description="The question or query to answer")
+    model: str = Field(
+        cast(Any, ...),
+        min_length=1,
+        description="The model to use for RAG generation.",
+    )
+
+    query: str = Field(cast(Any, ...), description="The question or query to answer")
     context: str = Field(
-        ..., description="Retrieved context/chunks for answering the query"
+        cast(Any, ...), description="Retrieved context/chunks for answering the query"
     )
     instruction: Optional[str] = Field(
         default="Answer the question based on the context below:",

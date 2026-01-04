@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from pydantic import Field
 
@@ -18,7 +18,7 @@ class EmbeddingResponse(BaseResponse):
     """
 
     results: List[EmbededChunk] = Field(
-        ..., description="Embedding chunks for the input text."
+        cast(Any, ...), description="Embedding chunks for the input text."
     )
     used_parameters: Optional[Dict[str, Any]] = Field(
         default_factory=dict,
@@ -32,7 +32,7 @@ class EmbeddingBatchResponse(BaseResponse):
     """
 
     results: List[EmbededChunk] = Field(
-        ..., description="Embedding chunks for all input texts in the batch."
+        cast(Any, ...), description="Embedding chunks for all input texts in the batch."
     )
     used_parameters: Optional[Dict[str, Any]] = Field(
         default_factory=dict,

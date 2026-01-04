@@ -4,11 +4,15 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
+from typing import Any, cast
+
 from pydantic import BaseModel, Field
 
 
 class ExtractedFileContent(BaseModel):
-    content: str = Field(..., description="The extracted file content as text.")
+    content: str = Field(
+        cast(Any, ...), description="The extracted file content as text."
+    )
 
     item_number: int = Field(
         0,

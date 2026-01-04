@@ -20,7 +20,9 @@ logger = get_logger("background_cleanup")
 class BackgroundCleanup:
     """Background service for automatic cache cleanup."""
 
-    def __init__(self, cleanup_interval: float = 60.0, max_age_seconds: float = None):
+    def __init__(
+        self, cleanup_interval: float = 60.0, max_age_seconds: Optional[float] = None
+    ):
         self.cleanup_interval = cleanup_interval
         self.max_age_seconds = max_age_seconds
         self._stop_event = threading.Event()
@@ -68,7 +70,7 @@ _background_cleanup: Optional[BackgroundCleanup] = None
 
 
 def start_background_cleanup(
-    cleanup_interval: float = 60.0, max_age_seconds: float = None
+    cleanup_interval: float = 60.0, max_age_seconds: Optional[float] = None
 ):
     """Start the global background cleanup service."""
     global _background_cleanup

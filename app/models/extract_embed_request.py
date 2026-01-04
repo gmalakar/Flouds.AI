@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import Union
+from typing import Optional, Union, cast
 
 from pydantic import Field
 
@@ -18,13 +18,18 @@ class ExtractEmbedRequest(EmbeddingBaseRequest):
     """
 
     file_content: Union[str, bytes] = Field(
-        ...,
+        default=cast(Union[str, bytes], ...),
         description="File content to extract. Accepts base64 string or raw bytes.",
     )
     extention: str = Field(
-        ...,
+        default=cast(str, ...),
         min_length=1,
         description="The file extension. This field is required and cannot be empty.",
+    )
+
+    model: Optional[str] = Field(
+        default=None,
+        description="Optional model name or identifier to use for embedding when extracting files.",
     )
 
     class Config:

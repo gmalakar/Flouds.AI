@@ -26,18 +26,30 @@ class MemoryMonitor:
     @staticmethod
     def get_memory_info() -> Dict[str, Any]:
         """Get current memory usage information."""
-        if not PSUTIL_AVAILABLE:
+        if not PSUTIL_AVAILABLE or psutil is None:
             return {"rss_mb": 0.0, "vms_mb": 0.0, "percent": 0.0, "available_mb": 0.0}
 
-        process = psutil.Process()
-        memory_info = process.memory_info()
+        try:
+            process = psutil.Process()
+            memory_info = process.memory_info()
 
-        return {
-            "rss_mb": memory_info.rss / 1024 / 1024,  # Resident Set Size
-            "vms_mb": memory_info.vms / 1024 / 1024,  # Virtual Memory Size
-            "percent": process.memory_percent(),
-            "available_mb": psutil.virtual_memory().available / 1024 / 1024,
-        }
+            virtual_mem = (
+                psutil.virtual_memory() if hasattr(psutil, "virtual_memory") else None
+            )
+
+            return {
+                "rss_mb": memory_info.rss / 1024 / 1024,  # Resident Set Size
+                "vms_mb": memory_info.vms / 1024 / 1024,  # Virtual Memory Size
+                "percent": process.memory_percent(),
+                "available_mb": (
+                    (virtual_mem.available / 1024 / 1024)
+                    if virtual_mem is not None
+                    else 0.0
+                ),
+            }
+        except Exception as e:
+            logger.debug(f"psutil memory query failed: {e}")
+            return {"rss_mb": 0.0, "vms_mb": 0.0, "percent": 0.0, "available_mb": 0.0}
 
     @staticmethod
     def check_memory_threshold(threshold_mb: int = 1000) -> bool:

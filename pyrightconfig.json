@@ -1,0 +1,17 @@
+{
+    "venvPath": ".",
+    "venv": ".venv",
+    "pythonVersion": "3.12",
+    "typeCheckingMode": "basic",
+    // Let Pyright show missing imports instead of hanging
+    "reportMissingImports": true,
+    "reportOptionalMemberAccess": true,
+    "exclude": [
+        "onnx_loaders/**",
+        "onnx/**",
+        "logs/**",
+        ".env/**",
+        "data/**",
+        "tests/**/data/**"
+    ]
+}

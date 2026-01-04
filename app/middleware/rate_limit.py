@@ -6,11 +6,12 @@
 
 import time
 from collections import defaultdict, deque
-from typing import Deque, Dict, Tuple
+from typing import Awaitable, Callable, Deque, Dict, List, Tuple
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
@@ -24,7 +25,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         requests_per_minute: int = 60,
         requests_per_hour: int = 1000,
         cleanup_interval: int = 300,
@@ -69,7 +70,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return
 
         cutoff_time = current_time - 3600  # 1 hour ago
-        ips_to_remove = []
+        ips_to_remove: List[str] = []
 
         # Batch cleanup operations
         for ip, timestamps in self.request_history.items():
@@ -95,7 +96,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self, ip: str, current_time: float
     ) -> Tuple[bool, str, int, int]:
         """Check if IP is rate limited. Returns (is_limited, message, minute_count, hour_count)."""
-        timestamps = self.request_history[ip]
+        timestamps: Deque[float] = self.request_history[ip]
 
         # Remove old timestamps in one pass
         hour_ago = current_time - 3600
@@ -132,7 +133,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         return False, "", minute_count, hour_count
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Process request with rate limiting."""
 
         # Skip rate limiting for health checks and docs
@@ -188,7 +191,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
 
         # Record this request
-        timestamps = self.request_history[client_ip]
+        timestamps: Deque[float] = self.request_history[client_ip]
         timestamps.append(current_time)
 
         # Ensure deque doesn't exceed size limit
