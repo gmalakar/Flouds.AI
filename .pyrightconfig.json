@@ -3,7 +3,18 @@
         "app/**"
     ],
     "exclude": [
-        "tests/**"
+        "tests/**",
+        "data/**",
+        "logs/**",
+        "onnx/**",
+        "onnx_loaders/**",
+        ".env/**",
+        "tests/**/data/**",
+        ".venv/**",
+        "venv/**",
+        ".git/**",
+        "build/**",
+        "dist/**"
     ],
     "venvPath": ".",
     "venv": ".venv",

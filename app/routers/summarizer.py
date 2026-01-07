@@ -11,7 +11,7 @@ from app.exceptions import FloudsBaseException
 from app.logger import get_logger
 from app.models.prompt_request import PromptBatchRequest, PromptRequest
 from app.models.prompt_response import PromptResponse
-from app.services.prompt_service import PromptProcessor
+from app.services.prompt_service import DEFAULT_MODEL, PromptProcessor
 from app.utils.error_handler import ErrorHandler
 from app.utils.log_sanitizer import sanitize_for_log
 
@@ -32,11 +32,23 @@ async def summarize(request: PromptRequest) -> PromptResponse:
         summary: PromptResponse = PromptProcessor.process_prompt(request)
         return summary
     except FloudsBaseException as e:
-        status_code = ErrorHandler.get_http_status(e)
-        raise HTTPException(status_code=status_code, detail=e.message)
+        # Return consistent PromptResponse structure for known errors
+        return PromptResponse(
+            success=False,
+            message=e.message,
+            model=request.model or DEFAULT_MODEL,
+            results=[],
+            time_taken=0.0,
+        )
     except Exception as e:
         logger.exception("Unexpected error in summarization endpoint")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        return PromptResponse(
+            success=False,
+            message="Internal server error",
+            model=request.model or DEFAULT_MODEL,
+            results=[],
+            time_taken=0.0,
+        )
 
 
 @router.post("/summarize_batch", response_model=PromptResponse)
@@ -48,8 +60,19 @@ async def summarize_batch(
         summary: PromptResponse = await PromptProcessor.summarize_batch_async(request)
         return summary
     except FloudsBaseException as e:
-        status_code = ErrorHandler.get_http_status(e)
-        raise HTTPException(status_code=status_code, detail=e.message)
+        return PromptResponse(
+            success=False,
+            message=e.message,
+            model=request.model or DEFAULT_MODEL,
+            results=[],
+            time_taken=0.0,
+        )
     except Exception as e:
         logger.exception("Unexpected error in batch summarization endpoint")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        return PromptResponse(
+            success=False,
+            message="Internal server error",
+            model=request.model or DEFAULT_MODEL,
+            results=[],
+            time_taken=0.0,
+        )

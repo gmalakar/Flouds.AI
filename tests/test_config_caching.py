@@ -88,7 +88,7 @@ class TestConfigCaching:
             mock_get_config.return_value = mock_config
 
             # Clear cache first
-            BaseNLPService.clear_model_config_cache()
+            BaseNLPService._clear_model_config_cache()
 
             # First call should load from ConfigLoader
             config1 = BaseNLPService._get_model_config("test-model")
@@ -127,7 +127,7 @@ class TestConfigCaching:
 
     def test_cache_warm_up(self):
         """Test cache warm-up functionality."""
-        with patch.object(BaseNLPService, "_get_model_config") as mock_get_config:
+        with patch.object(ConfigLoader, "get_onnx_config") as mock_get_config:
             mock_get_config.return_value = Mock()
 
             # Test warm-up with specific models
@@ -140,14 +140,12 @@ class TestConfigCaching:
 
     def test_cache_clear_all(self):
         """Test clearing all caches."""
-        with patch.object(
-            ConfigLoader, "clear_cache"
-        ) as mock_clear_config, patch.object(
-            BaseNLPService, "clear_encoder_sessions"
-        ) as mock_clear_sessions, patch.object(
-            BaseNLPService, "clear_thread_tokenizers"
-        ) as mock_clear_tokenizers, patch.object(
-            BaseNLPService, "clear_model_config_cache"
+        with patch.object(ConfigLoader, "clear_cache") as mock_clear_config, patch(
+            "app.utils.cache_manager.clear_encoder_sessions"
+        ) as mock_clear_sessions, patch(
+            "app.utils.cache_manager.clear_thread_tokenizers"
+        ) as mock_clear_tokenizers, patch(
+            "app.utils.cache_manager.clear_model_config_cache"
         ) as mock_clear_model_config:
 
             CacheManager.clear_all_caches()

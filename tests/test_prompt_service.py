@@ -5,6 +5,11 @@
 # =============================================================================
 
 
+# Add robust isolation fixtures to ensure any event loop or background
+# tasks created during tests are cancelled and closed to avoid ResourceWarning
+# on test teardown. We provide both a sync and async autouse fixture so that
+# both synchronous and asynchronous tests are cleaned up.
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,10 +18,65 @@ import pytest
 from pydantic import ValidationError
 
 
-# Add the isolation fixture here
 @pytest.fixture(autouse=True)
-def _isolate_tests(monkeypatch):
-    pass
+def _cleanup_sync_tests():
+    """Cleanup for synchronous tests: cancel remaining tasks, shutdown
+    async generators and close the loop if it's not running.
+    """
+    yield
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        # No event loop present; nothing to do
+        return
+
+    # If an event loop is running, assume the async autouse fixture will
+    # handle cleanup for async tests and skip sync-level cleanup.
+    if loop.is_running():
+        return
+
+    try:
+        tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            # Best-effort
+            pass
+    except Exception:
+        # Swallow any cleanup error to avoid hiding test failures
+        pass
+
+    try:
+        if not loop.is_closed():
+            loop.close()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_async_tests():
+    """Cleanup for asynchronous tests: cancel background tasks and
+    shutdown async generators after test completes.
+    """
+    yield
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+    for t in tasks:
+        t.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        await loop.shutdown_asyncgens()
+    except Exception:
+        pass
 
 
 from app.models.prompt_response import PromptResponse
@@ -79,6 +139,9 @@ class DummyModelException(DummyModel):
 def dummy_model_config():
     class DummyConfig:
         summarization_task = "s2s"
+        # New-style tasks declaration for capability checks
+        tasks = ["summarization", "prompt"]
+        model_folder_name = "s2s/dummy-model"
         encoder_onnx_model = "encoder_model.onnx"
         decoder_onnx_model = "decoder_model.onnx"
         special_tokens_map_path = "special_tokens_map.json"

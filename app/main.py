@@ -30,32 +30,27 @@ gc.collect()
 print("Memory cleanup completed")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.app_init import APP_SETTINGS
 from app.dependencies.auth import AuthMiddleware, common_headers
 from app.exceptions import FloudsBaseException
 from app.logger import get_logger
-from app.middleware.path_security import PathSecurityMiddleware
-from app.middleware.rate_limit import RateLimitMiddleware
-from app.middleware.request_validation import RequestValidationMiddleware
-from app.routers import (
-    admin,
-    config,
-    embedder,
-    extract_embed,
-    extractor,
-    health,
-    model_info,
-    rag,
-    sendprompt,
-    summarizer,
-)
+
+# Compatibility guard: some Optimum/ORT versions removed internal attribute
+# `_is_stateful` expected by older code paths. Set a safe default on startup
+# so downstream code that expects this attribute won't fail with AttributeError.
+try:
+    from optimum.onnxruntime import ORTModelForSeq2SeqLM
+
+    if not hasattr(ORTModelForSeq2SeqLM, "_is_stateful"):
+        setattr(ORTModelForSeq2SeqLM, "_is_stateful", False)
+except Exception:
+    # Optimum not installed or import failed; nothing to patch.
+    pass
+from app.app_routing import setup_routing
+from app.app_startup import lifespan
 from app.services import config_service
-from app.utils.background_cleanup import (
-    start_background_cleanup,
-    stop_background_cleanup,
-)
 from app.utils.enhance_openapi import setup_enhanced_openapi
 from app.utils.error_handler import ErrorHandler
 from app.utils.log_sanitizer import sanitize_for_log
@@ -63,75 +58,7 @@ from app.utils.log_sanitizer import sanitize_for_log
 logger = get_logger("main")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage application lifespan events."""
-    # Startup
-    logger.info("Initializing configuration service and applying DB settings")
-    try:
-        # Ensure config DB/table exists and load runtime settings
-        config_service.init_db()
-        config_service.load_and_apply_settings()
-        # DB-first seeding/override behavior for CORS and Trusted Hosts.
-        # If FLOUDS_CONFIG_OVERRIDE=="1", env values overwrite DB at startup.
-        # Otherwise, env values only seed the DB when DB has no value.
-        from os import getenv
-        from typing import List, Optional
-
-        def _parse_list_env(val: Optional[str]) -> Optional[List[str]]:
-            if val is None:
-                return None
-            if val.strip() == "*":
-                return ["*"]
-            return [s.strip() for s in val.split(",") if s.strip()]
-
-        cors_env = _parse_list_env(getenv("FLOUDS_CORS_ORIGINS"))
-        trusted_env = _parse_list_env(getenv("FLOUDS_TRUSTED_HOSTS"))
-        override = getenv("FLOUDS_CONFIG_OVERRIDE") == "1"
-
-        # If override requested, write env -> DB. Otherwise seed DB only when empty.
-        try:
-            if override:
-                if cors_env is not None:
-                    config_service.set_cors_origins(cors_env)
-                    logger.info("Applied CORS origins from env (override)")
-                if trusted_env is not None:
-                    config_service.set_trusted_hosts(trusted_env)
-                    logger.info("Applied trusted hosts from env (override)")
-                config_service.load_and_apply_settings()
-            else:
-                # Load current DB values to determine if seeding is needed
-                existing_cors = config_service.get_cors_origins()
-                existing_trusted = config_service.get_trusted_hosts()
-                seeded = False
-                if (not existing_cors or len(existing_cors) == 0) and cors_env:
-                    config_service.set_cors_origins(cors_env)
-                    logger.info("Seeded CORS origins from env into DB")
-                    seeded = True
-                if (not existing_trusted or len(existing_trusted) == 0) and trusted_env:
-                    config_service.set_trusted_hosts(trusted_env)
-                    logger.info("Seeded trusted hosts from env into DB")
-                    seeded = True
-                if seeded:
-                    config_service.load_and_apply_settings()
-                else:
-                    # No seeding/override requested — apply whatever is in DB
-                    config_service.load_and_apply_settings()
-        except Exception:
-            logger.exception(
-                "Failed to seed/override config from env; falling back to DB values"
-            )
-    except Exception as e:
-        logger.exception("Failed to initialize config service: %s", e)
-
-    logger.info("Starting background cleanup service")
-    start_background_cleanup(cleanup_interval=60.0, max_age_seconds=60.0)
-
-    yield
-
-    # Shutdown
-    logger.info("Stopping background cleanup service")
-    stop_background_cleanup()
+# lifespan extracted to `app.app_startup.lifespan`
 
 
 app = FastAPI(
@@ -232,118 +159,11 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Add security middleware
-if APP_SETTINGS.app.is_production:
-    app.add_middleware(
-        TrustedHostMiddleware, allowed_hosts=["*"]  # Configure based on your deployment
-    )
+# Configure middleware and routers (moved to app/app_routing.py)
+from app.app_routing import setup_routing
 
-# Add path security middleware (first for early detection)
-app.add_middleware(PathSecurityMiddleware)
-
-# Add tenant security middleware to enforce trusted hosts and CORS origins
-# Configure and add middleware
-# Use tenant-aware middleware for CORS and Trusted Host enforcement
-# Register CORS first so browser preflight and CORS headers are handled
-# before TrustedHost enforces server-side host restrictions. This ensures
-# browsers receive correct CORS responses while trusted-host remains a
-# server-side safety net.
-from app.middleware.tenant_security import (
-    TenantCorsMiddleware,
-    TenantTrustedHostMiddleware,
-)
-
-app.add_middleware(TenantCorsMiddleware)
-app.add_middleware(TenantTrustedHostMiddleware)
-
-# Add authentication middleware
-app.add_middleware(AuthMiddleware)
-
-# Add request validation middleware
-app.add_middleware(RequestValidationMiddleware)
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=APP_SETTINGS.app.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Add rate limiting middleware
-if APP_SETTINGS.rate_limiting.enabled:
-    app.add_middleware(
-        RateLimitMiddleware,
-        requests_per_minute=APP_SETTINGS.rate_limiting.requests_per_minute,
-        requests_per_hour=APP_SETTINGS.rate_limiting.requests_per_hour,
-    )
-
-# Include routers
-app.include_router(
-    summarizer.router,
-    prefix="/api/v1/summarizer",
-    tags=["Text Summarization"],
-    dependencies=[Depends(common_headers)],
-)
-app.include_router(
-    embedder.router,
-    prefix="/api/v1/embedder",
-    tags=["Text Embedding"],
-    dependencies=[Depends(common_headers)],
-)
-app.include_router(
-    rag.router,
-    prefix="/api/v1/rag",
-    tags=["RAG (Retrieval-Augmented Generation)"],
-    dependencies=[Depends(common_headers)],
-)
-app.include_router(health.router, prefix="/api/v1", tags=["Health & Monitoring"])
-app.include_router(
-    admin.router,
-    prefix="/api/v1",
-    tags=["Administration"],
-    dependencies=[Depends(common_headers)],
-)
-app.include_router(
-    config.router,
-    prefix="/api/v1",
-    tags=["Configuration"],
-    dependencies=[Depends(common_headers)],
-)
-app.include_router(
-    model_info.router,
-    prefix="/api/v1",
-    tags=["Model Information"],
-    dependencies=[Depends(common_headers)],
-)
-app.include_router(
-    sendprompt.router,
-    prefix="/api/v1",
-    tags=["Prompt Processing"],
-    dependencies=[Depends(common_headers)],
-)
-
-app.include_router(
-    auth.router,
-    prefix="/api/v1/secure-endpoint",
-    tags=["Secure Endpoint"],
-    dependencies=[Depends(common_headers)],
-)
-
-app.include_router(
-    extractor.router,
-    prefix="/api/v1/extractor",
-    tags=["Text Extraction"],
-    dependencies=[Depends(common_headers)],
-)
-
-app.include_router(
-    extract_embed.router,
-    prefix="/api/v1/extract-embed",
-    tags=["Extract and Embed"],
-    dependencies=[Depends(common_headers)],
-)
+# Centralized routing + middleware setup
+setup_routing(app)
 
 
 @app.get("/")
@@ -363,9 +183,11 @@ def api_v1_root() -> dict[str, str]:
 
 
 @app.get("/favicon.ico")
-def favicon() -> JSONResponse:
+def favicon() -> Response:
     """Return empty response for favicon requests."""
-    return JSONResponse(status_code=204, content=None)
+    # 204 must not include a response body; return a bare Response to avoid
+    # mismatches between Content-Length and actual body length.
+    return Response(status_code=204)
 
 
 def cleanup_handlers():

@@ -1,0 +1,19 @@
+# Development dependencies
+# Install with: pip install -r onnx_loaders/requirements-onnx-loaders.txt
+# Core model and transformer stack
+sentence-transformers>=2.6.0
+transformers>=4.36,<4.49
+torch>=2.1.0  # ✅ 2.5.0 is too new for many ONNX tools
+
+# ONNX and Optimum
+# The `onnx` Python package requirement is kept broad; ONNX Runtime
+# version is the primary compatibility concern for loading runtime models.
+onnx>=1.15.0,<2.0.0
+optimum[onnxruntime]>=2.1.0,<3.0.0
+onnxruntime>=1.18.0,<1.23.0
+
+# Supporting libraries
+numpy>=1.24.4,<2.0.0
+huggingface_hub<=0.25.1
+psutil
+accelerate

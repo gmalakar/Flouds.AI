@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="700" viewBox="0 0 900 700" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .box { fill: #f8fafc; stroke: #374151; stroke-width: 1.5px; rx: 8px; }
+    .optional-box { fill: #fef3c7; stroke: #d97706; stroke-width: 1.5px; rx: 8px; stroke-dasharray: 5,5; }
+    .arrow { stroke: #0f172a; stroke-width: 2px; fill: none; marker-end: url(#arrowhead);} 
+    .text { font-family: Arial, Helvetica, sans-serif; font-size: 13px; fill: #0f172a; }
+    .title { font-weight: bold; font-size: 16px; }
+    .optional-text { fill: #d97706; font-style: italic; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#0f172a"/>
+    </marker>
+  </defs>
+
+  <text x="28" y="34" class="text title">Embedding Pipeline — Flow Diagram</text>
+
+  <!-- Tokenize -->
+  <rect x="40" y="70" width="220" height="70" class="box"/>
+  <text x="60" y="100" class="text">1. Tokenization</text>
+  <text x="60" y="120" class="text">`input_ids`, `attention_mask`</text>
+
+  <!-- Prepare ONNX Inputs -->
+  <rect x="320" y="70" width="240" height="70" class="box"/>
+  <text x="340" y="100" class="text">2. Prepare ONNX Inputs</text>
+  <text x="340" y="120" class="text">resolve names, add batch dim, dtypes</text>
+
+  <!-- ONNX Session -->
+  <rect x="600" y="70" width="220" height="70" class="box"/>
+  <text x="620" y="100" class="text">3. ONNX Session</text>
+  <text x="620" y="120" class="text">cached session → run</text>
+
+  <!-- Arrow row 1 -->
+  <path d="M 260 105 L 320 105" class="arrow"/>
+  <path d="M 560 105 L 600 105" class="arrow"/>
+
+  <!-- Pooling -->
+  <rect x="320" y="220" width="240" height="70" class="box"/>
+  <text x="340" y="250" class="text">4. Pooling</text>
+  <text x="340" y="270" class="text">mean / max / cls / last (mask normalized)</text>
+
+  <!-- Projection -->
+  <rect x="320" y="360" width="240" height="70" class="box"/>
+  <text x="340" y="390" class="text">5. Projection</text>
+  <text x="340" y="410" class="text">deterministic, cached `proj:{in}x{out}` (float32)</text>
+
+  <!-- Normalization -->
+  <rect x="600" y="360" width="220" height="70" class="box"/>
+  <text x="620" y="390" class="text">6. Normalization</text>
+  <text x="620" y="410" class="text">hybrid: np.linalg.norm / element-wise</text>
+
+  <!-- Quantization (optional) -->
+  <rect x="460" y="500" width="240" height="70" class="optional-box"/>
+  <text x="480" y="530" class="text optional-text">7. Quantization (optional)</text>
+  <text x="480" y="550" class="text">int8 / uint8 / binary (4x-32x reduction)</text>
+
+  <!-- Arrows down -->
+  <path d="M 720 140 L 720 220" class="arrow"/>
+  <path d="M 440 140 L 440 220" class="arrow"/>
+  <path d="M 440 290 L 440 360" class="arrow"/>
+  <path d="M 560 395 L 600 395" class="arrow"/>
+  <path d="M 710 430 L 710 470 L 580 470 L 580 500" class="arrow"/>
+
+  <!-- Caching & Constants box -->
+  <rect x="40" y="600" width="820" height="70" class="box"/>
+  <text x="60" y="630" class="text">Caches & Constants: `cache_registry` (ONNX sessions, projection matrices) | `constants.py` (`NORM_EPS`, `MASK_SUM_EPS`, `MASK_NEG_INF`, `RANDOM_SEED`)</text>
+  <text x="60" y="650" class="text">Config: Model defaults in `onnx_config.json` | Request-level overrides in `EmbeddingRequest` (quantize, quantize_type, normalize, pooling_strategy, etc.)</text>
+
+  <!-- Footer note -->
+  <text x="40" y="685" class="text">Notes: Deterministic projection uses `RANDOM_SEED=42` | Lazy initialization (no import-time side effects) | Quantization preserves similarity ranking</text>
+
+</svg>

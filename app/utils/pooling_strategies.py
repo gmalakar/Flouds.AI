@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 
 from app.logger import get_logger
+from app.utils.constants import MASK_NEG_INF, MASK_SUM_EPS
 
 logger = get_logger("pooling_strategies")
 
@@ -62,7 +63,7 @@ class PoolingStrategies:
         masked_embedding = embedding * attention_mask[..., None]
         sum_embedding = masked_embedding.sum(axis=1)
         sum_mask = attention_mask.sum(axis=1, keepdims=True)
-        return sum_embedding / np.maximum(sum_mask, 1e-9)
+        return sum_embedding / np.maximum(sum_mask, MASK_SUM_EPS)
 
     @staticmethod
     def max_pooling(
@@ -77,7 +78,7 @@ class PoolingStrategies:
             raise ValueError("Embedding and attention mask dimensions mismatch")
         # Set masked positions to large negative value before max
         masked_embedding = np.where(
-            attention_mask[..., None].astype(bool), embedding, -1e9
+            attention_mask[..., None].astype(bool), embedding, MASK_NEG_INF
         )
         return masked_embedding.max(axis=1)
 

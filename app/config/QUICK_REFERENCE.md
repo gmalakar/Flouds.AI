@@ -16,13 +16,13 @@
 - `encoder_onnx_model` - Model file path
 - `chunk_logic` - "sentence" / "paragraph" / "fixed"
 
-### Embedding Models (embedder_task: "fe")
-- `embedder_task: "fe"`
+### Embedding Models (models with `"embedding"` in `tasks`)
+- `tasks`: include `"embedding"`
 - `normalize` - true/false
 - `pooling_strategy` - "mean"/"max"/"first"/"last"
 
-### Generation Models (summarization_task: "s2s" or "llm")
-- `summarization_task` - "s2s" / "llm"
+### Generation Models (models with `"summarization"` or `"language_model"` in `tasks`)
+- `tasks`: include `"summarization"` or `"language_model"`
 - `pad_token_id`
 - `eos_token_id`
 - `decoder_start_token_id` (seq2seq only)
@@ -33,7 +33,7 @@
 ```json
 {
     "max_length": 512,
-    "embedder_task": "fe",
+    "tasks": ["embedding"],
     "normalize": true,
     "pooling_strategy": "mean",
     "chunk_logic": "sentence",
@@ -47,7 +47,7 @@
     "max_length": 512,
     "pad_token_id": 50256,
     "eos_token_id": 50256,
-    "summarization_task": "llm",
+    "tasks": ["language_model"],
     "chunk_logic": "sentence",
     "encoder_onnx_model": "model.onnx",
     "encoder_only": true

@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,8 +36,14 @@ class OnnxConfig(BaseModel):
     normalize: bool = True
     eos_token_id: int = Field(default=1)
     bos_token_id: Optional[int] = Field(default=None)
-    summarization_task: str = Field(default="s2s")
-    embedder_task: str = Field(default="fe")
+    # Legacy fields `summarization_task` and `embedder_task` removed.
+    # Use `tasks: List[str]` to declare supported capabilities (e.g. ['embedding','prompt']).
+    # Optional explicit folder name for the model under the `models/` directory.
+    # When set, this value should be used as the relative folder name to locate
+    # the model files instead of deriving the folder from task/type.
+    model_folder_name: Optional[str] = Field(default=None)
+    # Explicit list of supported tasks for this model. Examples: ["embedding", "prompt", "llm", "summarization"]
+    tasks: List[str] = Field(default_factory=list)
     outputnames: OutputNames = Field(default_factory=OutputNames)
     decoder_inputnames: DecoderInputNames = Field(default_factory=DecoderInputNames)
     pad_token_id: int = 0
@@ -47,6 +53,9 @@ class OnnxConfig(BaseModel):
     encoder_optimized_onnx_model: str = Field(default="model_optimized.onnx")
     decoder_optimized_onnx_model: str = Field(default="decoder_model_optimized.onnx")
     use_optimized: bool = Field(default=False)
+    # Note: Existence flags are stored in the runtime model metadata cache
+    # (see `BaseNLPService._set_model_metadata`) rather than on the
+    # configuration object itself.
     special_tokens_map_path: str = Field(default="special_tokens_map.json")
     generation_config_path: str = Field(default="generation_config.json")
     num_beams: int = 4
@@ -70,3 +79,10 @@ class OnnxConfig(BaseModel):
     remove_emojis: bool = Field(default=False)  # Remove emojis and non-ASCII characters
     force_pooling: bool = Field(default=False)  # Force pooling for embeddings
     vocab_size: Optional[int] = Field(default=None)
+    quantize: bool = Field(default=False)  # Enable output quantization
+    quantize_type: str = Field(default="int8")  # Quantization type: int8, uint8, binary
+    forced_bos_token_id: Optional[int] = Field(
+        default=None
+    )  # Forced BOS token ID for generation
+    # Preferred limit on newly generated tokens (recommended over total `max_length`)
+    max_new_tokens: Optional[int] = Field(default=None)

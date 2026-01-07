@@ -56,8 +56,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         self.public_endpoints = frozenset(
             [
-                # root "/" would match all paths as a prefix; avoid that.
-                "/api/v1",
+                # Avoid overly-broad prefixes that mark entire API as public.
+                # Only include specific public endpoints so `/api/v1/*` remains protected.
                 "/api/v1/metrics",
                 "/favicon.ico",
                 # OpenAPI and docs should be public so tooling/tests can fetch specs
@@ -66,20 +66,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 "/docs",
                 "/redoc",
                 "/docs/oauth2-redirect",
-                # also allow the /api/v1 variants explicitly in the whitelist
+                # explicit /api/v1 variants
                 "/api/v1/openapi.json",
                 "/api/v1/openapi.yaml",
                 "/api/v1/docs",
                 "/api/v1/redoc",
                 "/api/v1/docs/oauth2-redirect",
-                # prefix entries for health and openapi/docs endpoints
+                # health endpoint (explicit)
+                "/api/v1/health",
                 "/api/v1/health/",
-                "/openapi",
-                "/docs",
-                "/redoc",
-                "/api/v1/openapi",
-                "/api/v1/docs",
-                "/api/v1/redoc",
             ]
         )
 

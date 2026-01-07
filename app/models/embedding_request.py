@@ -88,6 +88,16 @@ class EmbeddingBaseRequest(BaseRequest):
         description="Use optimized ONNX model if available. Overrides model config if provided.",
     )
 
+    quantize: Optional[bool] = Field(
+        default=None,
+        description="Enable embedding quantization for reduced storage/memory. Overrides model config if provided.",
+    )
+
+    quantize_type: Optional[str] = Field(
+        default=None,
+        description="Quantization type: 'int8' (4x compression), 'uint8' (4x compression), 'binary' (32x compression). Overrides model config if provided.",
+    )
+
 
 class EmbeddingRequest(EmbeddingBaseRequest):
     """

@@ -6,14 +6,37 @@
 
 """Centralized cache management for performance optimization."""
 
+import os
+import time
 from typing import Any, Dict, List, Optional
 
 import psutil
 
+# Throttle expensive memory queries to at most once per this interval (seconds).
+# Configurable via environment variable `FLOUDS_MEMORY_CHECK_INTERVAL` (seconds).
+_MIN_MEMORY_CHECK_INTERVAL: float = float(
+    os.getenv("FLOUDS_MEMORY_CHECK_INTERVAL", "5")
+)
+# Module-level cache for last memory check to avoid repeated psutil calls
+_LAST_MEMORY_CHECK: float = 0.0
+_CACHED_AVAILABLE_GB: float = 0.0
+
+from typing import cast
+
 from app.app_init import APP_SETTINGS
 from app.exceptions import CacheInvalidationError
 from app.logger import get_logger
-from app.services.base_nlp_service import BaseNLPService
+from app.modules.concurrent_dict import ConcurrentDict
+from app.services.cache_registry import (
+    clear_decoder_sessions,
+    clear_encoder_sessions,
+    clear_model_config_cache,
+    clear_models,
+    clear_special_tokens,
+    clear_thread_tokenizers,
+    get_cache_stats,
+    warm_up_model_configs,
+)
 
 logger = get_logger("cache_manager")
 
@@ -25,8 +48,16 @@ class CacheManager:
     def get_available_memory_gb() -> float:
         """Get available memory in GB."""
         try:
+            global _LAST_MEMORY_CHECK, _CACHED_AVAILABLE_GB
+            now = time.time()
+            # Return cached value when checks are within the configured interval
+            if now - _LAST_MEMORY_CHECK < _MIN_MEMORY_CHECK_INTERVAL:
+                return _CACHED_AVAILABLE_GB
+
             memory = psutil.virtual_memory()
-            return memory.available / (1024**3)
+            _CACHED_AVAILABLE_GB = memory.available / (1024**3)
+            _LAST_MEMORY_CHECK = now
+            return _CACHED_AVAILABLE_GB
         except Exception as e:
             logger.error(f"Failed to get memory info: {e}")
             return 0.0
@@ -63,38 +94,38 @@ class CacheManager:
             max_age_seconds = APP_SETTINGS.monitoring.cache_cleanup_max_age_seconds
 
         try:
-            from app.services.base_nlp_service import BaseNLPService
-            from app.services.prompt_service import PromptProcessor
-
-            # Cleanup encoder sessions
-            encoder_cleaned = BaseNLPService._encoder_sessions.cleanup_unused(
-                max_age_seconds
+            # Cleanup encoder, decoder and model caches directly from registry
+            # Use registry getters which ensure initialization and return
+            # properly typed ConcurrentDict instances.
+            from app.services.cache_registry import (
+                get_decoder_sessions,
+                get_encoder_sessions,
+                get_models_cache,
             )
+
+            encoder_sessions = get_encoder_sessions()
+            encoder_cleaned = encoder_sessions.cleanup_unused(max_age_seconds)
             if encoder_cleaned > 0:
                 logger.info(
                     f"Cleaned up {encoder_cleaned} unused encoder sessions "
-                    f"(cache size now: {BaseNLPService._encoder_sessions.size()})"
+                    f"(cache size now: {encoder_sessions.size()})"
                 )
 
-            # Cleanup summarizer sessions if they exist
-            decoder_cleaned = 0
-            models_cleaned = 0
-            if hasattr(PromptProcessor, "_decoder_sessions"):
-                decoder_cleaned = PromptProcessor._decoder_sessions.cleanup_unused(
-                    max_age_seconds
+            decoder_sessions = get_decoder_sessions()
+            decoder_cleaned = decoder_sessions.cleanup_unused(max_age_seconds)
+            if decoder_cleaned > 0:
+                logger.info(
+                    f"Cleaned up {decoder_cleaned} unused decoder sessions "
+                    f"(cache size now: {decoder_sessions.size()})"
                 )
-                if decoder_cleaned > 0:
-                    logger.info(
-                        f"Cleaned up {decoder_cleaned} unused decoder sessions "
-                        f"(cache size now: {PromptProcessor._decoder_sessions.size()})"
-                    )
-            if hasattr(PromptProcessor, "_models"):
-                models_cleaned = PromptProcessor._models.cleanup_unused(max_age_seconds)
-                if models_cleaned > 0:
-                    logger.info(
-                        f"Cleaned up {models_cleaned} unused models "
-                        f"(cache size now: {PromptProcessor._models.size()})"
-                    )
+
+            models_cache = get_models_cache()
+            models_cleaned = models_cache.cleanup_unused(max_age_seconds)
+            if models_cleaned > 0:
+                logger.info(
+                    f"Cleaned up {models_cleaned} unused models "
+                    f"(cache size now: {models_cache.size()})"
+                )
 
             total_cleaned = encoder_cleaned + decoder_cleaned + models_cleaned
             if total_cleaned > 0:
@@ -107,17 +138,15 @@ class CacheManager:
     def clear_model_caches():
         """Clear all model-related caches."""
         try:
-            # Import here to avoid circular imports
-            from app.services.base_nlp_service import BaseNLPService
-            from app.services.prompt_service import PromptProcessor
+            # Clear summarizer-related caches and registry caches directly
+            # to avoid importing PromptProcessor and creating circular imports.
+            clear_decoder_sessions()
+            clear_models()
+            clear_special_tokens()
 
-            # Clear summarizer caches
-            PromptProcessor.clear_model_cache()
-
-            # Clear base service caches
-            BaseNLPService.clear_encoder_sessions()
-            BaseNLPService.clear_thread_tokenizers()
-            BaseNLPService.clear_model_config_cache()
+            # Also clear thread-local tokenizers and model-config cache
+            clear_thread_tokenizers()
+            clear_model_config_cache()
 
             logger.info("All model caches cleared")
 
@@ -156,7 +185,7 @@ class CacheManager:
 
         stats = {
             "config_loader": ConfigLoader.get_cache_stats(),
-            "base_nlp_service": BaseNLPService.get_cache_stats(),
+            "base_nlp_service": get_cache_stats(),
             "timestamp": __import__("time").time(),
         }
         return stats
@@ -171,11 +200,14 @@ class CacheManager:
 
         ConfigLoader.clear_cache()
 
-        # Clear NLP service caches
-        BaseNLPService.clear_encoder_sessions()
-        BaseNLPService.clear_thread_tokenizers()
-        BaseNLPService.clear_model_config_cache()
-
+        # Clear NLP service caches via cache registry helpers to avoid
+        # importing BaseNLPService and creating a circular import.
+        clear_encoder_sessions()
+        clear_decoder_sessions()
+        clear_models()
+        clear_special_tokens()
+        clear_thread_tokenizers()
+        clear_model_config_cache()
         logger.info("All caches cleared")
 
     @staticmethod
@@ -186,7 +218,9 @@ class CacheManager:
             model_names = ["t5-small", "all-MiniLM-L6-v2", "sentence-t5-base"]
 
         logger.info(f"Warming up caches for {len(model_names)} models")
-        BaseNLPService.warm_up_cache(model_names)
+        # Use registry-level warm-up to avoid importing BaseNLPService here
+        # and prevent circular imports.
+        warm_up_model_configs(model_names)
         logger.info("Cache warm-up completed")
 
     @staticmethod
