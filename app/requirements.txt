@@ -1,26 +1,8 @@
-# Core FastAPI and server
-fastapi>=0.116.1
-uvicorn[standard]>=0.32.0
-python-multipart>=0.0.6
 
-# ML and ONNX dependencies (strict for compatibility)
-onnx>=1.16.0,<1.19.0
-transformers>=4.51.0
-numpy>=1.26.0,<2.0.0
+# Include production requirements (keep a single source of truth)
+-r requirements-prod.txt
 
-# Data validation and processing
-pydantic>=2.10.0
-nltk>=3.9
-
-# System monitoring
-psutil>=5.9.6
-
-# Cryptography for key encryption
-cryptography>=42.0.0
-
-# Document Loaders (MIT/BSD licenses)
-pdfplumber>=0.10.0
-python-docx>=1.1.0
-beautifulsoup4>=4.12.0
-python-pptx>=0.6.21
-openpyxl>=3.1.0
+# ONNX Runtime (CPU): loosened to allow Optimum compatibility
+# Use a version compatible with `optimum[onnxruntime]>=2.1.0`.
+# If you need GPU support, replace with `onnxruntime-gpu` in your environment.
+onnxruntime>=1.18.0,<1.23.0

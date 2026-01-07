@@ -5,7 +5,7 @@
 # =============================================================================
 
 import os
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Union, cast
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -23,41 +23,65 @@ class ModelInfoService:
     """Service for retrieving model information and availability."""
 
     @staticmethod
-    def _get_model_type(config: Any) -> str:
-        """Determine model type from configuration."""
-        if hasattr(config, "embedder_task"):
-            return "embedding"
-        elif hasattr(config, "summarization_task"):
-            task = getattr(config, "summarization_task", "")
-            if task == "llm":
-                return "language_model"
-            elif task == "s2s":
-                return "summarization"
-        return "unknown"
+    def _get_model_type(config: Any) -> List[str]:
+        """Determine model tasks from configuration and return ALL declared tasks.
+
+        Returns a list of lower-cased task names (e.g. ['embedding', 'prompt']).
+        Only the explicit `tasks` list in the model configuration is considered.
+        """
+        tasks: List[str] = []
+
+        # Prefer explicit `tasks` list in config.
+        if hasattr(config, "tasks") and getattr(config, "tasks"):
+            try:
+                tasks = [str(t).lower() for t in getattr(config, "tasks")]
+            except Exception:
+                tasks = []
+
+        # Ensure unique, normalized ordering
+        normalized = []
+        for t in tasks:
+            lt = str(t).lower()
+            if lt not in normalized:
+                normalized.append(lt)
+        return normalized
 
     @staticmethod
-    def get_model_type(config: Any) -> str:
-        """Public wrapper for `_get_model_type` to avoid protected-member warnings."""
+    def get_model_type(config: Any) -> List[str]:
+        """Public wrapper for `_get_model_type` to avoid protected-member warnings.
+
+        Returns a list of tasks.
+        """
         return ModelInfoService._get_model_type(config)
 
     @staticmethod
-    def _get_required_params(model_type: str) -> List[str]:
-        """Get list of required parameters based on model type."""
-        common_required = ["max_length", "chunk_logic", "encoder_onnx_model"]
+    def _get_required_params(model_type: Union[str, List[str]]) -> List[str]:
+        """Get list of required parameters based on one or more model types.
 
-        if model_type == "embedding":
-            return common_required + ["embedder_task", "normalize", "pooling_strategy"]
-        elif model_type in ["summarization", "language_model"]:
-            return common_required + [
-                "summarization_task",
-                "pad_token_id",
-                "eos_token_id",
-            ]
-        return common_required
+        If a list is provided, returns the union of required params for all types.
+        """
+        common_required = {"max_length", "chunk_logic", "encoder_onnx_model"}
+
+        types: List[str] = (
+            [model_type] if isinstance(model_type, str) else list(model_type or [])
+        )
+
+        required = set(common_required)
+        if "embedding" in types:
+            required.update({"normalize", "pooling_strategy"})
+        if any(t in types for t in ["summarization", "language_model"]):
+            required.update({"pad_token_id", "eos_token_id"})
+
+        return list(required)
 
     @staticmethod
-    def _get_default_params(model_type: str) -> Dict[str, Any]:
-        """Get default parameter values for specific model type."""
+    def _get_default_params(model_type: Union[str, List[str]]) -> Dict[str, Any]:
+        """Get default parameter values for specific model type or combination of types.
+
+        When multiple types are provided, defaults are merged with embedding-specific
+        defaults taking effect when `embedding` is present, and generation defaults
+        taking effect when `summarization` or `language_model` is present.
+        """
         # Common defaults for all models
         common_defaults: Dict[str, Any] = {
             "legacy_tokenizer": False,
@@ -67,14 +91,17 @@ class ModelInfoService:
             "use_optimized": False,
         }
 
-        # Embedding-specific defaults
-        if model_type == "embedding":
-            return {**common_defaults, "force_pooling": False}
+        types: List[str] = (
+            [model_type] if isinstance(model_type, str) else list(model_type or [])
+        )
 
-        # Summarization and language model defaults
-        elif model_type in ["summarization", "language_model"]:
-            return {
-                **common_defaults,
+        defaults: Dict[str, Any] = dict(common_defaults)
+
+        if "embedding" in types:
+            defaults.update({"force_pooling": False})
+
+        if any(t in types for t in ["summarization", "language_model"]):
+            gen_defaults = {
                 "use_seq2seqlm": False,
                 "min_length": 0,
                 "num_beams": 1,
@@ -85,16 +112,21 @@ class ModelInfoService:
                 "top_p": 1.0,
                 "repetition_penalty": 1.0,
             }
+            defaults.update(gen_defaults)
 
-        return common_defaults
+        return defaults
 
     @staticmethod
     def _filter_config_params(
-        config_params: Dict[str, Any], model_type: str
+        config_params: Dict[str, Any], model_type: Union[str, List[str]]
     ) -> Dict[str, Any]:
-        """Filter configuration parameters to only include relevant ones for the model type."""
+        """Filter configuration parameters to only include relevant ones for the model type(s).
+
+        When multiple types are provided, the allowed params are the union for all
+        relevant types.
+        """
         # Parameters relevant to all models
-        common_params = [
+        common_params = {
             "max_length",
             "chunk_logic",
             "chunk_overlap",
@@ -105,22 +137,20 @@ class ModelInfoService:
             "use_optimized",
             "lowercase",
             "remove_emojis",
-        ]
+        }
 
         # Embedding-specific parameters
-        embedding_params = [
-            "embedder_task",
+        embedding_params = {
             "normalize",
             "pooling_strategy",
             "force_pooling",
             "inputnames",
             "outputnames",
             "dimension",
-        ]
+        }
 
         # Summarization/Language model specific parameters
-        generation_params = [
-            "summarization_task",
+        generation_params = {
             "pad_token_id",
             "eos_token_id",
             "bos_token_id",
@@ -143,20 +173,22 @@ class ModelInfoService:
             "prepend_text",
             "encoder_only",
             "use_t5_encoder",
-        ]
+        }
 
-        # Determine which parameters to include
-        if model_type == "embedding":
-            allowed_params = common_params + embedding_params
-        elif model_type in ["summarization", "language_model"]:
-            allowed_params = common_params + generation_params
-        else:
-            allowed_params = common_params
+        types: List[str] = (
+            [model_type] if isinstance(model_type, str) else list(model_type or [])
+        )
+
+        allowed = set(common_params)
+        if "embedding" in types:
+            allowed.update(embedding_params)
+        if any(t in types for t in ["summarization", "language_model"]):
+            allowed.update(generation_params)
 
         # Filter the config params with explicit typing to help static checkers
         filtered: Dict[str, Any] = {}
         for k, v in config_params.items():
-            if k in allowed_params:
+            if k in allowed:
                 filtered[str(k)] = v
         return filtered
 
@@ -307,15 +339,12 @@ class ModelInfoService:
         model_type = ModelInfoService._get_model_type(config)
         details["model_type"] = model_type
 
-        # Get model path (internal use only, not returned)
-        task_folder = getattr(
-            config, "embedder_task", "llm" if model_type == "language_model" else "s2s"
-        )
+        # Resolve model path using BaseNLPService resolver which respects
+        # `model_folder_name` and falls back to task-based folders.
         try:
-            root_path = getattr(cast(Any, BaseNLPService), "_root_path", "")
-            model_path = validate_safe_path(
-                os.path.join(root_path, "models", task_folder, model_name), root_path
-            )
+            model_path = BaseNLPService._get_model_path(model_name)
+            if not model_path:
+                raise Exception("Could not resolve model path")
         except Exception as e:
             response["success"] = False
             response["message"] = f"Invalid model path: {e}"
@@ -470,7 +499,11 @@ async def get_model_info(
 
 @router.get("/models/list", tags=["Model Information"])
 @router.post("/models/list", tags=["Model Information"])
-async def list_models() -> Dict[str, Any]:
+async def list_models(
+    for_task: Optional[str] = Query(
+        None, description="Optional task filter (e.g. 'embedding', 'prompt')"
+    )
+) -> Dict[str, Any]:
     """
     List all available models in the configuration.
 
@@ -494,13 +527,43 @@ async def list_models() -> Dict[str, Any]:
         )
 
         models_list: List[Dict[str, str]] = []
+        filter_task = str(for_task).lower() if for_task else None
         for mn, cfg_obj in all_configs.items():
             # Normalize model name to str for safe string ops
             model_name = str(mn)
             if model_name.startswith("_"):
                 continue
             model_type = cast(Any, ModelInfoService)._get_model_type(cfg_obj)
-            models_list.append({"name": model_name, "type": str(model_type)})
+            # Normalize model_type into a list of lower-cased tokens (handle
+            # lists, comma-separated strings, and other unexpected shapes).
+            try:
+                if isinstance(model_type, (list, tuple)):
+                    type_list = [str(t).lower() for t in model_type]
+                elif isinstance(model_type, str):
+                    type_list = [
+                        p.strip().lower() for p in model_type.split(",") if p.strip()
+                    ]
+                else:
+                    type_list = []
+            except Exception:
+                type_list = []
+
+            # If a task filter was provided, only include models that declare it.
+            # For backward compatibility, also check legacy fields like
+            # `embedder_task` / `summarization_task` when `tasks` is absent.
+            if filter_task:
+                # Only include models that explicitly declare the requested task
+                if filter_task not in type_list:
+                    continue
+            # Format the type for the short listing: join multiple tasks if present
+            try:
+                if isinstance(model_type, (list, tuple)):
+                    type_str = ",".join([str(t) for t in model_type])
+                else:
+                    type_str = str(model_type)
+            except Exception:
+                type_str = str(model_type)
+            models_list.append({"name": model_name, "type": type_str})
 
         return {
             "success": True,

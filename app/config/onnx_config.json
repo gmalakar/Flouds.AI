@@ -12,11 +12,41 @@
         "remove_emojis": false,
         "force_pooling": false,
         "chunk_overlap": 0,
-        "use_optimized": false
+        "use_optimized": false,
+        "encoder_optimized_onnx_model": "",
+        "decoder_optimized_onnx_model": "",
+        "special_tokens_map_path": "",       
+        "quantize": false,
+        "quantize_type": null,
+        "forced_bos_token_id": null
+    },
+    "instructor-xl": {
+        "max_length": 512,
+        "model_folder_name": "fe/instructor-xl",
+        "tasks": ["embedding"],
+        "normalize": true,
+        "pooling_strategy": "mean",
+        "chunk_logic": "sentence",
+
+        "legacy_tokenizer": false,
+        "use_t5_encoder": true,
+        "force_pooling": true,
+
+        "inputnames": {
+            "use_decoder_input": false,
+            "input": "input_ids",
+            "mask": "attention_mask",
+            "decoder_input_name": ""
+        },
+
+        "encoder_onnx_model": "model.onnx"        
     },
     "all-MiniLM-L6-v2": {
         "max_length": 256,
-        "embedder_task": "fe",
+        "model_folder_name": "fe/all-MiniLM-L6-v2",
+        "tasks": [
+            "embedding"
+        ],
         "normalize": true,
         "pooling_strategy": "mean",
         "chunk_logic": "sentence",
@@ -24,34 +54,48 @@
         "force_pooling": true,
         "encoder_onnx_model": "model.onnx",
         "use_optimized": true,
-        "   ": "model_optimized.onnx"
+        "encoder_optimized_onnx_model": "model_optimized.onnx"        
     },
     "e5-base-v2": {
         "max_length": 512,
-        "embedder_task": "fe",
+        "model_folder_name": "fe/e5-base-v2",
+
+        "tasks": [
+            "embedding"
+        ],
+
         "normalize": true,
         "pooling_strategy": "mean",
+        "force_pooling": true,
+
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
-        "force_pooling": true,
-        "encoder_onnx_model": "model.onnx",
-        "use_optimized": true,
-        "encoder_optimized_onnx_model": "model_optimized.onnx"
+
+        "encoder_onnx_model": "model.onnx"
     },
     "paraphrase-MiniLM-L6-v2": {
         "max_length": 384,
-        "embedder_task": "fe",
+        "model_folder_name": "fe/paraphrase-MiniLM-L6-v2",
+
+        "tasks": [
+            "embedding"
+        ],
+
         "normalize": true,
         "pooling_strategy": "mean",
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
-        "encoder_onnx_model": "model.onnx",
-        "use_optimized": true,
-        "encoder_optimized_onnx_model": "model_optimized.onnx"
+
+        "encoder_onnx_model": "model.onnx"
+
+        
     },
     "pleiaspico": {
         "max_length": 2048,
-        "embedder_task": "fe",
+        "model_folder_name": "fe/pleiaspico",
+        "tasks": [
+            "embedding"
+        ],
         "normalize": true,
         "pooling_strategy": "mean",
         "chunk_logic": "paragraph",
@@ -62,10 +106,14 @@
             "mask": "attention_mask"
         },
         "encoder_onnx_model": "model.onnx"
+        
     },
     "sentence-t5-base": {
         "max_length": 256,
-        "embedder_task": "fe",
+        "model_folder_name": "fe/sentence-t5-base",
+        "tasks": [
+            "embedding"
+        ],
         "normalize": true,
         "pooling_strategy": "mean",
         "chunk_logic": "sentence",
@@ -79,22 +127,36 @@
             "decoder_input_name": "decoder_input_ids"
         },
         "encoder_onnx_model": "model.onnx"
-    },
+        
+    }, 
     "t5-small": {
         "max_length": 512,
+
         "pad_token_id": 0,
         "eos_token_id": 1,
         "decoder_start_token_id": 0,
-        "summarization_task": "s2s",
+
+        "model_folder_name": "s2s/t5-small",
+
+        "tasks": [
+            "summarization",
+            "prompt"
+        ],
+
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
-        "legacy_tokenizer": true,
-        "decoder_onnx_model": "decoder_model.onnx",
+
+        "legacy_tokenizer": false,
+
         "encoder_onnx_model": "encoder_model.onnx",
+        "decoder_onnx_model": "decoder_model.onnx",
+
         "use_optimized": true,
         "encoder_optimized_onnx_model": "encoder_model_optimized.onnx",
         "decoder_optimized_onnx_model": "decoder_model_optimized.onnx",
+
         "special_tokens_map_path": "special_tokens_map.json",
+
         "num_beams": 4,
         "early_stopping": true
     },
@@ -103,7 +165,11 @@
         "pad_token_id": 0,
         "eos_token_id": 1,
         "decoder_start_token_id": 0,
-        "summarization_task": "s2s",
+        "model_folder_name": "s2s/falconsai_text_summarization",
+        "tasks": [
+            "summarization",
+            "prompt"
+        ],
         "chunk_logic": "fixed",
         "chunk_size": 256,
         "decoder_onnx_model": "decoder_model.onnx",
@@ -114,33 +180,50 @@
         "special_tokens_map_path": "special_tokens_map.json",
         "num_beams": 2,
         "early_stopping": true,
-        "use_seq2seqlm": true
+        "use_seq2seqlm": true      
     },
     "bart-large-cnn": {
         "max_length": 512,
+
         "pad_token_id": 1,
-        "eos_token_id": 1,
-        "decoder_start_token_id": 1,
-        "summarization_task": "s2s",
+        "eos_token_id": 2,
+        "decoder_start_token_id": 2,
+
+        "model_folder_name": "s2s/bart-large-cnn",
+
+        "tasks": [
+            "summarization",
+            "prompt"
+        ],
+
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
+
         "decoder_inputnames": {
             "encoder_output": "encoder_hidden_states",
             "input": "input_ids",
             "mask": "encoder_attention_mask"
         },
-        "decoder_onnx_model": "decoder_model.onnx",
+
         "encoder_onnx_model": "encoder_model.onnx",
+        "decoder_onnx_model": "decoder_model_merged.onnx",
+
         "special_tokens_map_path": "special_tokens_map.json",
         "generation_config_path": "generation_config.json",
+
         "num_beams": 4,
         "early_stopping": true,
+
         "use_seq2seqlm": true,
-        "prepend_text": ""
+        "prepend_text": "",
+        "max_new_tokens": 90
     },
     "all-mpnet-base-v2": {
         "max_length": 384,
-        "embedder_task": "fe",
+        "model_folder_name": "fe/all-mpnet-base-v2",
+        "tasks": [
+            "embedding"
+        ],
         "normalize": true,
         "pooling_strategy": "mean",
         "chunk_logic": "sentence",
@@ -151,25 +234,72 @@
         "encoder_onnx_model": "model.onnx",
         "use_optimized": true
     },
-    "distilgpt2": {
+    "pegasus-cnn_dailymail": {
         "max_length": 512,
         "min_length": 10,
+
+        "pad_token_id": 0,
+        "eos_token_id": 1,
+        "bos_token_id": 0,
+
+        "model_folder_name": "s2s/pegasus-cnn_dailymail",
+
+        "tasks": [
+            "prompt",
+            "summarization"
+        ],
+
+        "chunk_logic": "sentence",
+        "chunk_overlap": 1,
+
+        "encoder_onnx_model": "encoder_model.onnx",
+        "decoder_onnx_model": "decoder_model_merged.onnx",
+        "use_optimized": false,
+        "encoder_optimized_onnx_model": "",
+
+        "special_tokens_map_path": "special_tokens_map.json",
+
+        "num_beams": 4,
+        "do_sample": false,
+        "temperature": 1.0,
+        "top_k": 0,
+        "top_p": 1.0,
+        "repetition_penalty": 1.0,
+
+        "encoder_only": false
+    },
+    "distilgpt2": {
+        "max_length": 1024,
+        "min_length": 0,
+
         "pad_token_id": 50256,
         "eos_token_id": 50256,
         "bos_token_id": 50256,
-        "summarization_task": "llm",
+
+        "model_folder_name": "llm/distilgpt2",
+
+        "tasks": [
+            "llm",
+            "prompt",
+            "summarization"
+        ],
+
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
+
         "encoder_onnx_model": "model.onnx",
-        "use_optimized": true,
-        "encoder_optimized_onnx_model": "model_optimized.onnx",
+        "use_optimized": false,
+        "encoder_optimized_onnx_model": "",
+
         "special_tokens_map_path": "special_tokens_map.json",
+
         "num_beams": 1,
         "do_sample": true,
-        "temperature": 0.8,
+        "temperature": 1.0,
         "top_k": 50,
         "top_p": 0.95,
-        "repetition_penalty": 1.1,
-        "encoder_only": true
+        "repetition_penalty": 1.0,
+
+        "encoder_only": false
     }
 }

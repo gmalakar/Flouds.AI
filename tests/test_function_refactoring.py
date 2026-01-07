@@ -19,19 +19,21 @@ class TestSummarizerRefactoring:
 
     def test_prepare_model_resources(self):
         """Test model resource preparation."""
-        with patch.object(
-            PromptProcessor, "_get_model_config"
+        with patch(
+            "app.services.base_nlp_service.BaseNLPService._get_model_config"
         ) as mock_config, patch.object(
             PromptProcessor, "_get_tokenizer_threadsafe"
         ) as mock_tokenizer, patch(
-            "app.services.prompt_service.validate_safe_path"
-        ) as mock_path:
+            "app.services.base_nlp_service.BaseNLPService._get_model_path"
+        ) as mock_model_path:
 
             mock_config.return_value = Mock(
-                summarization_task="s2s", legacy_tokenizer=False
+                tasks=["summarization"],
+                legacy_tokenizer=False,
+                model_folder_name="test-model",
             )
             mock_tokenizer.return_value = Mock()
-            mock_path.return_value = "/safe/path"
+            mock_model_path.return_value = "/safe/path"
 
             model_path, tokenizer = PromptProcessor._prepare_model_resources(
                 mock_config.return_value, "test-model"
@@ -43,7 +45,11 @@ class TestSummarizerRefactoring:
 
     def test_build_generation_params(self):
         """Test generation parameter building."""
-        mock_config = Mock()
+        mock_config = Mock(
+            tasks=["summarization"],
+            legacy_tokenizer=False,
+            model_folder_name="test-model",
+        )
         mock_config.max_length = 256
         mock_config.min_length = 10
         mock_config.num_beams = 4
@@ -114,7 +120,8 @@ class TestEmbedderRefactoring:
         ) as mock_embedding_path:
 
             mock_config_obj = Mock()
-            mock_config_obj.embedder_task = "fe"
+            mock_config_obj.tasks = ["embedding"]
+            mock_config_obj.model_folder_name = "test-model"
             mock_config_obj.legacy_tokenizer = False
             mock_config.return_value = mock_config_obj
             mock_model_path.return_value = "/safe/model/path"

@@ -8,7 +8,7 @@ This file shows how much simpler your `onnx_config.json` can be with auto-detect
 "all-MiniLM-L6-v2": {
     "dimension": 384,
     "max_length": 256,
-    "embedder_task": "fe",
+    "tasks": ["embedding"],
     "normalize": true,
     "pooling_strategy": "mean",
     "chunk_logic": "sentence",
@@ -36,7 +36,7 @@ This file shows how much simpler your `onnx_config.json` can be with auto-detect
 ```json
 "all-MiniLM-L6-v2": {
     "max_length": 256,
-    "embedder_task": "fe",
+    "tasks": ["embedding"],
     "normalize": true,
     "pooling_strategy": "mean",
     "chunk_logic": "sentence",
@@ -70,7 +70,7 @@ This file shows how much simpler your `onnx_config.json` can be with auto-detect
     "eos_token_id": 50256,
     "bos_token_id": 50256,
     "vocab_size": 50257,
-    "summarization_task": "llm",
+    "tasks": ["language_model"],
     "chunk_logic": "sentence",
     "chunk_overlap": 1,
     "legacy_tokenizer": false,
@@ -107,7 +107,7 @@ This file shows how much simpler your `onnx_config.json` can be with auto-detect
     "pad_token_id": 50256,
     "eos_token_id": 50256,
     "bos_token_id": 50256,
-    "summarization_task": "llm",
+    "tasks": ["language_model"],
     "chunk_logic": "sentence",
     "encoder_onnx_model": "model.onnx",
     "use_optimized": true,
@@ -140,7 +140,7 @@ This file shows how much simpler your `onnx_config.json` can be with auto-detect
 ```json
 "your-new-embedding-model": {
     "max_length": 512,
-    "embedder_task": "fe",
+    "tasks": ["embedding"],
     "normalize": true,
     "pooling_strategy": "mean",
     "chunk_logic": "sentence",
@@ -155,7 +155,7 @@ This file shows how much simpler your `onnx_config.json` can be with auto-detect
     "max_length": 512,
     "pad_token_id": 50256,
     "eos_token_id": 50256,
-    "summarization_task": "llm",
+    "tasks": ["language_model"],
     "chunk_logic": "sentence",
     "encoder_onnx_model": "model.onnx",
     "encoder_only": true
@@ -186,7 +186,7 @@ Remove properties that match defaults:
 ### Step 3: Keep Required Behavioral Settings
 **Always keep these:**
 - ✅ `max_length` - Defines chunking limit
-- ✅ `embedder_task` or `summarization_task` - Model purpose
+- ✅ `tasks` - Model purpose (list of capabilities such as `embedding`, `summarization`, `language_model`, `prompt`)
 - ✅ `normalize` - Embedding normalization
 - ✅ `pooling_strategy` - How to pool embeddings
 - ✅ `chunk_logic` - Text splitting strategy

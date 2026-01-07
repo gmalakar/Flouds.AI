@@ -20,6 +20,8 @@ try:
     from optimum.onnxruntime import ORTModelForSeq2SeqLM
 except ImportError:
     ORTModelForSeq2SeqLM = None
+import hashlib
+
 from pydantic import BaseModel, Field
 
 from app.config.onnx_config import OnnxConfig
@@ -35,6 +37,11 @@ from app.models.prompt_request import PromptBatchRequest, PromptRequest
 from app.models.prompt_response import PromptResponse
 from app.modules.concurrent_dict import ConcurrentDict
 from app.services.base_nlp_service import BaseNLPService
+from app.services.cache_registry import (
+    get_decode_cache,
+    get_encoder_output_cache,
+    get_generation_cache,
+)
 from app.utils.batch_limiter import BatchLimiter
 from app.utils.log_sanitizer import sanitize_for_log
 from app.utils.path_validator import validate_safe_path
@@ -339,15 +346,24 @@ class PromptProcessor(BaseNLPService):
         model_config: OnnxConfig, model_name: str
     ) -> tuple[str, Any]:
         """Prepare model path and tokenizer."""
-        model_path = validate_safe_path(
-            os.path.join(
-                PromptProcessor._root_path,
-                "models",
-                model_config.summarization_task or "s2s",
-                model_name,
-            ),
-            PromptProcessor._root_path,
-        )
+        # Resolve model folder first (tests may patch this) and then validate
+        # availability using the supplied model_config so we don't re-fetch
+        # via the centralized getter. Skip filesystem checks here because
+        # tokenizer/session loading will perform strict validation.
+        model_path = PromptProcessor._get_model_path(model_name)
+        if not model_path:
+            raise ModelLoadError(f"Failed to resolve model path for {model_name}")
+        if not BaseNLPService._validate_model_availability(
+            model_name,
+            task="prompt",
+            perform_filesystem_check=False,
+            cfg=model_config,
+            model_path=model_path,
+        ):
+            raise ModelLoadError(
+                f"Model '{model_name}' not available or model files missing"
+            )
+
         logger.info("Using model path: %s", sanitize_for_log(model_path))
 
         use_legacy = getattr(model_config, "legacy_tokenizer", False)
@@ -513,6 +529,17 @@ class PromptProcessor(BaseNLPService):
             generate_kwargs = PromptProcessor._build_generation_params(
                 model_config, request
             )
+
+            # Some ONNX models loaded via optimum do not support PKV cache reuse.
+            # When calling `model.generate` with an Optimum ORT model, force
+            # `use_cache=False` to avoid the runtime ValueError described below.
+            try:
+                mod = getattr(model.__class__, "__module__", "") or ""
+                if "optimum" in mod or mod.startswith("optimum"):
+                    generate_kwargs.setdefault("use_cache", False)
+            except Exception:
+                # Best-effort; don't fail generation parameter building on inspection
+                pass
             input_text = PromptProcessor._prepare_input_text(request, model_config)
             inputs = tokenizer(input_text, return_tensors="pt")
 
@@ -731,18 +758,109 @@ class PromptProcessor(BaseNLPService):
     ) -> Any:
         """Run encoder inference."""
         input_names = model_config.inputnames
-        onnx_inputs = {
-            getattr(input_names, "input", "input_ids"): inputs["input_ids"].astype(
-                np.int64
-            )
-        }
+        # Normalize input arrays to numpy ndarrays before casting
+        try:
+            in_ids = np.ascontiguousarray(np.asarray(inputs["input_ids"]))
+            in_ids = in_ids.astype(np.int64)
+        except Exception:
+            in_ids = inputs["input_ids"]
+
+        onnx_inputs = {getattr(input_names, "input", "input_ids"): in_ids}
 
         if "attention_mask" in inputs:
-            onnx_inputs[getattr(input_names, "mask", "attention_mask")] = inputs[
-                "attention_mask"
-            ].astype(np.int64)
+            try:
+                mask = np.ascontiguousarray(np.asarray(inputs["attention_mask"]))
+                mask = mask.astype(np.int64)
+            except Exception:
+                mask = inputs["attention_mask"]
+            onnx_inputs[getattr(input_names, "mask", "attention_mask")] = mask
 
-        return encoder_session.run(None, onnx_inputs)
+        result = encoder_session.run(None, onnx_inputs)
+        return result
+
+    @staticmethod
+    def _hash_array(arr: np.ndarray, quantize_dtype: Any = np.float16) -> str:
+        """Hash a numpy array after optional quantization.
+
+        Returns a hex digest string. Centralized to avoid duplication in cache
+        key builders and tests.
+        """
+        try:
+            a = np.ascontiguousarray(arr.astype(quantize_dtype))
+        except Exception:
+            a = np.ascontiguousarray(np.asarray(arr))
+        h = hashlib.sha256()
+        h.update(str(a.shape).encode())
+        h.update(str(a.dtype).encode())
+        try:
+            h.update(memoryview(a))
+        except Exception:
+            h.update(a.tobytes())
+        return h.hexdigest()
+
+    @staticmethod
+    def _build_generation_cache_key(
+        decoder_session: ort.InferenceSession,
+        encoder_outputs: Any,
+        inputs: Dict,
+        token_config: Dict[str, int],
+        model_config: OnnxConfig,
+        request: PromptRequest,
+        tokenizer: Optional[Any] = None,
+    ) -> Optional[str]:
+        """Build generation cache key including hashed inputs and encoder output."""
+        try:
+            model_id = getattr(request, "model", "") or ""
+            model_version = getattr(model_config, "model_folder_name", "") or ""
+            tokenizer_id = None
+            if tokenizer is not None:
+                tokenizer_id = getattr(tokenizer, "name_or_path", None) or getattr(
+                    tokenizer, "model_max_length", None
+                )
+
+            parts = {
+                "model": model_id,
+                "model_version": model_version or "",
+                "tokenizer": tokenizer_id or "",
+                "max_length": int(token_config.get("max_length", 0)),
+                "decoder_start_token_id": int(
+                    token_config.get("decoder_start_token_id", 0)
+                ),
+                "eos_token_id": int(token_config.get("eos_token_id", 0)),
+                "tenant": getattr(request, "tenant_code", None) or "",
+            }
+
+            m = hashlib.sha256()
+            m.update(json.dumps(parts, sort_keys=True, separators=(",", ":")).encode())
+
+            if isinstance(inputs, dict) and "input_ids" in inputs:
+                ids = np.ascontiguousarray(inputs["input_ids"]).astype(np.int64)
+                m.update(b"||input_ids||")
+                m.update(str(ids.shape).encode())
+                m.update(PromptProcessor._hash_array(ids, np.int64).encode())
+
+            if isinstance(inputs, dict) and "attention_mask" in inputs:
+                mask = np.ascontiguousarray(inputs["attention_mask"]).astype(np.int8)
+                m.update(b"||attention_mask||")
+                m.update(str(mask.shape).encode())
+                m.update(PromptProcessor._hash_array(mask, np.int8).encode())
+
+            try:
+                if (
+                    isinstance(encoder_outputs, (list, tuple))
+                    and len(encoder_outputs) > 0
+                ):
+                    enc0 = np.ascontiguousarray(encoder_outputs[0])
+                    enc_digest = PromptProcessor._hash_array(enc0, np.float16)
+                    m.update(b"||enc0||")
+                    m.update(str(enc0.shape).encode())
+                    m.update(enc_digest.encode())
+            except Exception:
+                m.update(b"||enc_hash_failed||")
+
+            return m.hexdigest()
+        except Exception:
+            return None
 
     @staticmethod
     def _generate_tokens(
@@ -752,6 +870,7 @@ class PromptProcessor(BaseNLPService):
         token_config: Dict[str, int],
         model_config: OnnxConfig,
         request: PromptRequest,
+        tokenizer: Optional[Any] = None,
     ) -> List[int]:
         """Generate tokens using decoder."""
         decoder_input_names = model_config.decoder_inputnames
@@ -761,10 +880,42 @@ class PromptProcessor(BaseNLPService):
         temperature = request.temperature or getattr(model_config, "temperature", 0.0)
         summary_ids = []
 
+        # Attempt to use centralized deterministic generation cache
+        try:
+            gen_cache = get_generation_cache()
+        except Exception:
+            gen_cache = None
+
+        cache_key = None
+        if gen_cache is not None:
+            try:
+                cache_key = PromptProcessor._build_generation_cache_key(
+                    decoder_session,
+                    encoder_outputs,
+                    inputs,
+                    token_config,
+                    model_config,
+                    request,
+                    tokenizer,
+                )
+                if cache_key:
+                    cached = gen_cache.get(cache_key)
+                    if cached is not None:
+                        # Return a shallow copy to prevent caller-side mutation
+                        return list(cached)
+            except Exception:
+                pass
+
         step_start = time.time()
         step_timeout = (
             getattr(request, "timeout", DEFAULT_TIMEOUT) / token_config["max_length"]
         )
+
+        # Ensure encoder_outputs[0] is a numpy array for the decoder inputs
+        try:
+            enc0 = np.ascontiguousarray(np.asarray(encoder_outputs[0]))
+        except Exception:
+            enc0 = encoder_outputs[0]
 
         for step in range(token_config["max_length"]):
             if time.time() - step_start > step_timeout * (step + 1):
@@ -774,14 +925,22 @@ class PromptProcessor(BaseNLPService):
             decoder_inputs = {
                 getattr(
                     decoder_input_names, "encoder_output", "encoder_hidden_states"
-                ): encoder_outputs[0],
+                ): enc0,
                 getattr(decoder_input_names, "input", "input_ids"): decoder_input_ids,
             }
 
             if "attention_mask" in inputs:
-                decoder_inputs[
-                    getattr(decoder_input_names, "mask", "encoder_attention_mask")
-                ] = inputs["attention_mask"].astype(np.int64)
+                try:
+                    mask_arr = np.ascontiguousarray(
+                        np.asarray(inputs["attention_mask"])
+                    )
+                    decoder_inputs[
+                        getattr(decoder_input_names, "mask", "encoder_attention_mask")
+                    ] = mask_arr.astype(np.int64)
+                except Exception:
+                    decoder_inputs[
+                        getattr(decoder_input_names, "mask", "encoder_attention_mask")
+                    ] = inputs["attention_mask"]
 
             try:
                 decoder_outputs = decoder_session.run(None, decoder_inputs)
@@ -789,13 +948,19 @@ class PromptProcessor(BaseNLPService):
                 logger.error(f"Decoder inference error: {e}")
                 break
 
+            # Normalize decoder output to numpy array for safe indexing
+            try:
+                dec_out0 = np.ascontiguousarray(np.asarray(decoder_outputs[0]))
+            except Exception:
+                dec_out0 = decoder_outputs[0]
+
             # Get advanced sampling parameters from config
             top_k = getattr(model_config, "top_k", None)
             top_p = getattr(model_config, "top_p", None)
             repetition_penalty = getattr(model_config, "repetition_penalty", None)
 
             next_token_id = PromptProcessor._sample_next_token(
-                decoder_outputs[0],
+                dec_out0,
                 temperature,
                 top_k,
                 top_p,
@@ -822,68 +987,104 @@ class PromptProcessor(BaseNLPService):
         return summary_ids
 
     @staticmethod
+    def _apply_repetition_penalty(
+        logits: np.ndarray,
+        generated_ids: Optional[list],
+        repetition_penalty: Optional[float],
+    ) -> np.ndarray:
+        """Apply repetition penalty to logits and return modified array."""
+        try:
+            if (
+                repetition_penalty is None
+                or repetition_penalty == 1.0
+                or not generated_ids
+            ):
+                return logits
+            out = logits.copy()
+            for token_id in set(generated_ids):
+                if 0 <= token_id < out.shape[0]:
+                    if out[token_id] < 0:
+                        out[token_id] *= repetition_penalty
+                    else:
+                        out[token_id] /= repetition_penalty
+            return out
+        except Exception:
+            return logits
+
+    @staticmethod
+    def _filter_top_k(logits: np.ndarray, top_k: Optional[int]) -> np.ndarray:
+        """Keep only top_k logits, set others to -inf."""
+        try:
+            if top_k is None or top_k <= 0:
+                return logits
+            top_k_indices = np.argpartition(logits, -top_k)[-top_k:]
+            filtered = np.full_like(logits, -np.inf)
+            filtered[top_k_indices] = logits[top_k_indices]
+            return filtered
+        except Exception:
+            return logits
+
+    @staticmethod
+    def _filter_top_p(probs: np.ndarray, top_p: Optional[float]) -> np.ndarray:
+        """Apply nucleus (top-p) filtering to probability vector and renormalize."""
+        try:
+            if top_p is None or top_p >= 1.0:
+                return probs
+            sorted_indices = np.argsort(probs)[::-1]
+            sorted_probs = probs[sorted_indices]
+            cumsum_probs = np.cumsum(sorted_probs)
+            cutoff_idx = np.searchsorted(cumsum_probs, top_p) + 1
+            cutoff_idx = min(cutoff_idx, len(sorted_indices))
+            filtered = np.zeros_like(probs)
+            filtered[sorted_indices[:cutoff_idx]] = sorted_probs[:cutoff_idx]
+            if filtered.sum() > 0:
+                return filtered / filtered.sum()
+            return probs
+        except Exception:
+            return probs
+
+    @staticmethod
+    def _sample_from_probs(probs: np.ndarray) -> int:
+        try:
+            return int(np.random.choice(len(probs), p=probs))
+        except Exception:
+            return int(np.argmax(probs))
+
+    @staticmethod
     def _sample_next_token(
-        logits_arr: ndarray,
+        logits_arr: Any,
         temperature: float,
         top_k: Optional[int] = None,
         top_p: Optional[float] = None,
         generated_ids: Optional[list] = None,
         repetition_penalty: Optional[float] = None,
     ) -> int:
-        """Sample next token from logits with top_k, top_p, and repetition penalty."""
-        if logits_arr.ndim == 3:
-            logits = logits_arr[:, -1, :][0]
-        elif logits_arr.ndim == 2:
-            logits = logits_arr[-1, :]
+        """Sample next token from logits with top_k, top_p, and repetition penalty.
+
+        Delegates sub-steps to small helpers to keep this function concise
+        for the unit test that enforces function length limits.
+        """
+        # Coerce any array-like / tensor-like input to a numpy ndarray
+        arr = np.asarray(logits_arr)
+        if arr.ndim == 3:
+            logits = arr[0, -1, :]
+        elif arr.ndim == 2:
+            logits = arr[-1, :]
         else:
-            logits = logits_arr
+            logits = arr
 
-        # Apply repetition penalty
-        if (
-            repetition_penalty is not None
-            and repetition_penalty != 1.0
-            and generated_ids
-        ):
-            for token_id in set(generated_ids):
-                if token_id < len(logits):
-                    if logits[token_id] < 0:
-                        logits[token_id] *= repetition_penalty
-                    else:
-                        logits[token_id] /= repetition_penalty
+        logits = PromptProcessor._apply_repetition_penalty(
+            logits, generated_ids, repetition_penalty
+        )
 
-        if temperature > 0.0:
-            logits = logits / temperature
-
-            # Apply top_k filtering
-            if top_k is not None and top_k > 0:
-                top_k_indices = np.argpartition(logits, -top_k)[-top_k:]
-                filtered_logits = np.full_like(logits, -np.inf)
-                filtered_logits[top_k_indices] = logits[top_k_indices]
-                logits = filtered_logits
-
-            probs = PromptProcessor._softmax(logits)
-
-            # Apply top_p (nucleus) filtering
-            if top_p is not None and top_p < 1.0:
-                sorted_indices = np.argsort(probs)[::-1]
-                sorted_probs = probs[sorted_indices]
-                cumsum_probs = np.cumsum(sorted_probs)
-
-                # Find cutoff index
-                cutoff_idx = np.searchsorted(cumsum_probs, top_p) + 1
-                cutoff_idx = min(cutoff_idx, len(sorted_indices))
-
-                # Zero out probabilities beyond cutoff
-                filtered_probs = np.zeros_like(probs)
-                filtered_probs[sorted_indices[:cutoff_idx]] = sorted_probs[:cutoff_idx]
-
-                # Renormalize
-                if filtered_probs.sum() > 0:
-                    probs = filtered_probs / filtered_probs.sum()
-
-            return int(np.random.choice(len(probs), p=probs))
-        else:
+        if temperature <= 0.0:
             return int(np.argmax(logits))
+
+        logits = logits / temperature
+        logits = PromptProcessor._filter_top_k(logits, top_k)
+        probs = PromptProcessor._softmax(logits)
+        probs = PromptProcessor._filter_top_p(probs, top_p)
+        return PromptProcessor._sample_from_probs(probs)
 
     @staticmethod
     def _decode_output(
@@ -897,12 +1098,51 @@ class PromptProcessor(BaseNLPService):
             logger.warning("No valid tokens generated")
             return ""
 
+        # Attempt to use a decode cache keyed by tokenizer identity, skip flag,
+        # token ids and special_tokens set. This prevents repeated expensive
+        # decoding + post-processing for identical outputs.
+        try:
+            dec_cache = get_decode_cache()
+        except Exception:
+            dec_cache = None
+
+        cache_key = None
+        if dec_cache is not None:
+            try:
+                tokenizer_id = getattr(tokenizer, "name_or_path", None) or getattr(
+                    tokenizer, "model_max_length", None
+                )
+                parts = {
+                    "tokenizer": str(tokenizer_id) or "",
+                    "skip_special": True,
+                    "ids": list(map(int, output_ids)),
+                    "special_tokens": (
+                        sorted([t for t in special_tokens]) if special_tokens else []
+                    ),
+                }
+                m = hashlib.sha256()
+                m.update(
+                    json.dumps(parts, sort_keys=True, separators=(",", ":")).encode()
+                )
+                cache_key = m.hexdigest()
+                cached = dec_cache.get(cache_key)
+                if cached is not None:
+                    return cached
+            except Exception:
+                cache_key = None
+
         output = tokenizer.decode(output_ids, skip_special_tokens=True)
         output = PromptProcessor._remove_special_tokens(output, special_tokens)
         output = PromptProcessor._capitalize_sentences(output)
 
         if not output:
             logger.warning(f"Empty output generated for input: {input_text[:100]}")
+
+        try:
+            if cache_key and dec_cache is not None:
+                dec_cache.put(cache_key, output)
+        except Exception:
+            pass
 
         return output
 
@@ -948,19 +1188,47 @@ class PromptProcessor(BaseNLPService):
                     max_length=getattr(model_config, "max_length", DEFAULT_MAX_LENGTH),
                 )
 
-            # Run encoder inference
-            onnx_inputs = {"input_ids": inputs["input_ids"].astype(np.int64)}
-            if "attention_mask" in inputs:
-                onnx_inputs["attention_mask"] = inputs["attention_mask"].astype(
-                    np.int64
+            # Normalize tokenizer outputs to numpy arrays to avoid editor/type warnings
+            try:
+                inputs["input_ids"] = np.ascontiguousarray(
+                    np.asarray(inputs["input_ids"])
                 )
+                if "attention_mask" in inputs:
+                    inputs["attention_mask"] = np.ascontiguousarray(
+                        np.asarray(inputs["attention_mask"])
+                    )
+            except Exception:
+                # Best-effort normalization; fall back to original values on failure
+                pass
+
+            # Run encoder inference
+            try:
+                enc_in_ids = np.ascontiguousarray(np.asarray(inputs["input_ids"]))
+                enc_in_ids = enc_in_ids.astype(np.int64)
+            except Exception:
+                enc_in_ids = inputs["input_ids"]
+
+            onnx_inputs = {"input_ids": enc_in_ids}
+            if "attention_mask" in inputs:
+                try:
+                    enc_mask = np.ascontiguousarray(
+                        np.asarray(inputs["attention_mask"])
+                    )
+                    enc_mask = enc_mask.astype(np.int64)
+                except Exception:
+                    enc_mask = inputs["attention_mask"]
+                onnx_inputs["attention_mask"] = enc_mask
 
             # Add position_ids if required by the model
             seq_len = inputs["input_ids"].shape[1]
             onnx_inputs["position_ids"] = np.arange(seq_len, dtype=np.int64)[None, :]
 
             outputs = encoder_session.run(None, onnx_inputs)
-            logits = outputs[0]
+            # Ensure logits is a contiguous numpy array for safe indexing
+            try:
+                logits = np.ascontiguousarray(np.asarray(outputs[0]))
+            except Exception:
+                logits = outputs[0]
 
             # Generate next tokens
             temperature = request.temperature or getattr(
@@ -973,12 +1241,34 @@ class PromptProcessor(BaseNLPService):
                 getattr(model_config, "max_length", DEFAULT_MAX_LENGTH)
                 - inputs["input_ids"].shape[1]
             )
+            # Defensive cap: never allow extremely large generation loops.
+            if max_new_tokens is None or max_new_tokens <= 0:
+                max_new_tokens = 0
+            else:
+                max_new_tokens = int(max_new_tokens)
+            max_new_tokens = min(max_new_tokens, DEFAULT_MAX_LENGTH)
+
+            # Time-based safety: avoid long-running generation when timeout supplied
+            step_start = time.time()
+            step_timeout = getattr(request, "timeout", DEFAULT_TIMEOUT) / max(
+                1, max_new_tokens
+            )
 
             generated_ids = inputs["input_ids"][0].tolist()
 
-            for _ in range(max_new_tokens):
+            for step in range(max_new_tokens):
+                # Break if per-step timeout exceeded (defensive guard)
+                try:
+                    if time.time() - step_start > step_timeout * (step + 1):
+                        logger.warning(
+                            f"Encoder-only generation step timeout at step {step}"
+                        )
+                        break
+                except Exception:
+                    pass
+                # Pass the full logits array; the sampler will handle slicing
                 next_token_id = PromptProcessor._sample_next_token(
-                    logits[:, -1, :],
+                    logits,
                     temperature,
                     top_k,
                     top_p,
@@ -1005,7 +1295,10 @@ class PromptProcessor(BaseNLPService):
                 ]
 
                 outputs = encoder_session.run(None, onnx_inputs)
-                logits = outputs[0]
+                try:
+                    logits = np.ascontiguousarray(np.asarray(outputs[0]))
+                except Exception:
+                    logits = outputs[0]
 
             # Decode output (skip input tokens)
             output_ids = generated_ids[inputs["input_ids"].shape[1] :]

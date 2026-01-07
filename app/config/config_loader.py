@@ -32,6 +32,30 @@ class ConfigLoader:
     __appsettings: Optional[AppSettings] = None
 
     @staticmethod
+    def _getenv_first(*names: str) -> Optional[str]:
+        """Return first non-empty environment variable value for given names."""
+        for n in names:
+            v = os.getenv(n)
+            if v is not None:
+                return v
+        return None
+
+    @staticmethod
+    def _parse_bool(val: Optional[str]) -> Optional[bool]:
+        if val is None:
+            return None
+        return str(val).lower() in ("1", "true", "yes")
+
+    @staticmethod
+    def _parse_int(val: Optional[str]) -> Optional[int]:
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except ValueError:
+            return None
+
+    @staticmethod
     def get_app_settings() -> AppSettings:
         """Load AppSettings from `appsettings.json`, apply environment overrides,
         and return a populated AppSettings instance.
@@ -46,39 +70,38 @@ class ConfigLoader:
         ConfigLoader.__appsettings = AppSettings(**data)
 
         # Determine environment and set production flag
-        env = os.getenv("FLOUDS_API_ENV", "Production").lower()
-        ConfigLoader.__appsettings.app.is_production = env == "production"
+        env = ConfigLoader._getenv_first("FLOUDS_API_ENV") or "Production"
+        env_l = str(env).lower()
+        ConfigLoader.__appsettings.app.is_production = env_l == "production"
 
         # Server overrides (support common env names)
-        server_port = os.getenv("FLOUDS_PORT", os.getenv("SERVER_PORT"))
+        server_port = ConfigLoader._getenv_first("FLOUDS_PORT", "SERVER_PORT")
         if server_port is not None:
-            try:
-                ConfigLoader.__appsettings.server.port = int(server_port)
-            except ValueError:
+            parsed = ConfigLoader._parse_int(server_port)
+            if parsed is not None:
+                ConfigLoader.__appsettings.server.port = parsed
+            else:
                 logger.warning(
                     f"Invalid SERVER PORT value: {server_port}; using config value"
                 )
 
-        server_host = os.getenv("FLOUDS_HOST", os.getenv("SERVER_HOST"))
+        server_host = ConfigLoader._getenv_first("FLOUDS_HOST", "SERVER_HOST")
         if server_host:
             ConfigLoader.__appsettings.server.host = server_host
 
         # Debug mode
-        debug_val = os.getenv("APP_DEBUG_MODE")
-        if debug_val is not None:
-            ConfigLoader.__appsettings.app.debug = str(debug_val).lower() in (
-                "1",
-                "true",
-                "yes",
-            )
+        debug_val = ConfigLoader._getenv_first("APP_DEBUG_MODE")
+        parsed_debug = ConfigLoader._parse_bool(debug_val)
+        if parsed_debug is not None:
+            ConfigLoader.__appsettings.app.debug = parsed_debug
 
         # ONNX settings (allow override via env)
-        ConfigLoader.__appsettings.onnx.onnx_path = os.getenv(
-            "FLOUDS_ONNX_ROOT", ConfigLoader.__appsettings.onnx.onnx_path
-        )
-        ConfigLoader.__appsettings.onnx.config_file = os.getenv(
-            "FLOUDS_ONNX_CONFIG_FILE", ConfigLoader.__appsettings.onnx.config_file
-        )
+        onnx_root = ConfigLoader._getenv_first("FLOUDS_ONNX_ROOT")
+        if onnx_root:
+            ConfigLoader.__appsettings.onnx.onnx_path = onnx_root
+        onnx_cfg = ConfigLoader._getenv_first("FLOUDS_ONNX_CONFIG_FILE")
+        if onnx_cfg:
+            ConfigLoader.__appsettings.onnx.config_file = onnx_cfg
 
         # Only require ONNX paths in production
         if ConfigLoader.__appsettings.app.is_production:
@@ -94,77 +117,172 @@ class ConfigLoader:
                 sys.exit(1)
 
         # Model session provider override
-        ConfigLoader.__appsettings.server.session_provider = os.getenv(
-            "FLOUDS_MODEL_SESSION_PROVIDER",
-            ConfigLoader.__appsettings.server.session_provider,
-        )
+        session_provider = ConfigLoader._getenv_first("FLOUDS_MODEL_SESSION_PROVIDER")
+        if session_provider:
+            ConfigLoader.__appsettings.server.session_provider = session_provider
 
         # Rate limiting overrides
-        sec_val = os.getenv("FLOUDS_RATE_LIMIT_ENABLED")
-        if sec_val is not None:
-            ConfigLoader.__appsettings.rate_limiting.enabled = str(sec_val).lower() in (
-                "1",
-                "true",
-                "yes",
-            )
+        sec_val = ConfigLoader._getenv_first("FLOUDS_RATE_LIMIT_ENABLED")
+        parsed_sec = ConfigLoader._parse_bool(sec_val)
+        if parsed_sec is not None:
+            ConfigLoader.__appsettings.rate_limiting.enabled = parsed_sec
 
-        rpm = os.getenv("FLOUDS_RATE_LIMIT_PER_MINUTE")
-        if rpm is not None:
-            try:
-                ConfigLoader.__appsettings.rate_limiting.requests_per_minute = int(rpm)
-            except ValueError:
-                logger.warning(f"Invalid rate limit per minute: {rpm}")
+        rpm = ConfigLoader._getenv_first("FLOUDS_RATE_LIMIT_PER_MINUTE")
+        parsed_rpm = ConfigLoader._parse_int(rpm)
+        if parsed_rpm is not None:
+            ConfigLoader.__appsettings.rate_limiting.requests_per_minute = parsed_rpm
+        elif rpm is not None:
+            logger.warning(f"Invalid rate limit per minute: {rpm}")
 
-        rph = os.getenv("FLOUDS_RATE_LIMIT_PER_HOUR")
-        if rph is not None:
-            try:
-                ConfigLoader.__appsettings.rate_limiting.requests_per_hour = int(rph)
-            except ValueError:
-                logger.warning(f"Invalid rate limit per hour: {rph}")
+        rph = ConfigLoader._getenv_first("FLOUDS_RATE_LIMIT_PER_HOUR")
+        parsed_rph = ConfigLoader._parse_int(rph)
+        if parsed_rph is not None:
+            ConfigLoader.__appsettings.rate_limiting.requests_per_hour = parsed_rph
+        elif rph is not None:
+            logger.warning(f"Invalid rate limit per hour: {rph}")
 
         # Misc overrides
-        mcache = os.getenv("FLOUDS_MODEL_CACHE_SIZE")
-        if mcache is not None:
-            try:
-                ConfigLoader.__appsettings.onnx.model_cache_size = int(mcache)
-            except ValueError:
-                logger.warning(f"Invalid model cache size: {mcache}")
+        # Model cache size is managed via `cache.model_cache_max` in AppSettings
+        mcache = ConfigLoader._getenv_first("FLOUDS_MODEL_CACHE_SIZE")
+        parsed_mcache = ConfigLoader._parse_int(mcache)
+        if parsed_mcache is not None:
+            ConfigLoader.__appsettings.cache.model_cache_max = parsed_mcache
+        elif mcache is not None:
+            logger.warning(f"Invalid model cache size: {mcache}")
 
-        max_req = os.getenv("FLOUDS_MAX_REQUEST_SIZE")
-        if max_req is not None:
-            try:
-                ConfigLoader.__appsettings.app.max_request_size = int(max_req)
-            except ValueError:
-                logger.warning(f"Invalid max request size: {max_req}")
+        # Cache size overrides for runtime caches (encoder/decoder/models/special tokens)
+        enc_cache = ConfigLoader._getenv_first("FLOUDS_ENCODER_CACHE_MAX")
+        parsed_enc = ConfigLoader._parse_int(enc_cache)
+        if parsed_enc is not None:
+            ConfigLoader.__appsettings.cache.encoder_cache_max = parsed_enc
+        elif enc_cache is not None:
+            logger.warning(f"Invalid encoder cache size: {enc_cache}")
 
-        req_timeout = os.getenv("FLOUDS_REQUEST_TIMEOUT")
-        if req_timeout is not None:
-            try:
-                ConfigLoader.__appsettings.app.request_timeout = int(req_timeout)
-            except ValueError:
-                logger.warning(f"Invalid request timeout: {req_timeout}")
+        dec_cache = ConfigLoader._getenv_first("FLOUDS_DECODER_CACHE_MAX")
+        parsed_dec = ConfigLoader._parse_int(dec_cache)
+        if parsed_dec is not None:
+            ConfigLoader.__appsettings.cache.decoder_cache_max = parsed_dec
+        elif dec_cache is not None:
+            logger.warning(f"Invalid decoder cache size: {dec_cache}")
+
+        models_cache = ConfigLoader._getenv_first("FLOUDS_MODEL_CACHE_MAX")
+        parsed_models_cache = ConfigLoader._parse_int(models_cache)
+        if parsed_models_cache is not None:
+            ConfigLoader.__appsettings.cache.model_cache_max = parsed_models_cache
+        elif models_cache is not None:
+            logger.warning(f"Invalid model cache max: {models_cache}")
+
+        special_cache = ConfigLoader._getenv_first("FLOUDS_SPECIAL_TOKENS_CACHE_MAX")
+        parsed_special = ConfigLoader._parse_int(special_cache)
+        if parsed_special is not None:
+            ConfigLoader.__appsettings.cache.special_tokens_cache_max = parsed_special
+        elif special_cache is not None:
+            logger.warning(f"Invalid special tokens cache max: {special_cache}")
+
+        # Generation cache size override
+        gen_cache = ConfigLoader._getenv_first("FLOUDS_GENERATION_CACHE_MAX")
+        parsed_gen = ConfigLoader._parse_int(gen_cache)
+        if parsed_gen is not None:
+            ConfigLoader.__appsettings.cache.generation_cache_max = parsed_gen
+        elif gen_cache is not None:
+            logger.warning(f"Invalid generation cache max: {gen_cache}")
+
+        # Encoder output cache overrides
+        enc_out_cache = ConfigLoader._getenv_first("FLOUDS_ENCODER_OUTPUT_CACHE_MAX")
+        parsed_enc_out = ConfigLoader._parse_int(enc_out_cache)
+        if parsed_enc_out is not None:
+            ConfigLoader.__appsettings.cache.encoder_output_cache_max = parsed_enc_out
+        elif enc_out_cache is not None:
+            logger.warning(f"Invalid encoder output cache max: {enc_out_cache}")
+
+        enc_out_max_bytes = ConfigLoader._getenv_first(
+            "FLOUDS_ENCODER_OUTPUT_CACHE_MAX_BYTES"
+        )
+        parsed_enc_out_bytes = ConfigLoader._parse_int(enc_out_max_bytes)
+        if parsed_enc_out_bytes is not None:
+            ConfigLoader.__appsettings.cache.encoder_output_cache_max_array_bytes = (
+                parsed_enc_out_bytes
+            )
+        elif enc_out_max_bytes is not None:
+            logger.warning(
+                f"Invalid encoder output cache max bytes: {enc_out_max_bytes}"
+            )
+
+        max_req = ConfigLoader._getenv_first("FLOUDS_MAX_REQUEST_SIZE")
+        parsed_max_req = ConfigLoader._parse_int(max_req)
+        if parsed_max_req is not None:
+            ConfigLoader.__appsettings.app.max_request_size = parsed_max_req
+        elif max_req is not None:
+            logger.warning(f"Invalid max request size: {max_req}")
+
+        req_timeout = ConfigLoader._getenv_first("FLOUDS_REQUEST_TIMEOUT")
+        parsed_req_timeout = ConfigLoader._parse_int(req_timeout)
+        if parsed_req_timeout is not None:
+            ConfigLoader.__appsettings.app.request_timeout = parsed_req_timeout
+        elif req_timeout is not None:
+            logger.warning(f"Invalid request timeout: {req_timeout}")
 
         # CORS origins are seeded/overridden at application startup (see app/main.py)
         # and therefore are intentionally not read here from the environment.
 
         # Security enabled flag
-        sec_flag = os.getenv("FLOUDS_SECURITY_ENABLED")
-        if sec_flag is not None:
-            ConfigLoader.__appsettings.security.enabled = str(sec_flag).lower() in (
-                "1",
-                "true",
-                "yes",
+        sec_flag = ConfigLoader._getenv_first("FLOUDS_SECURITY_ENABLED")
+        parsed_sec_flag = ConfigLoader._parse_bool(sec_flag)
+        if parsed_sec_flag is not None:
+            ConfigLoader.__appsettings.security.enabled = parsed_sec_flag
+
+        # Background cleanup monitor overrides (enable flag and tuning)
+        bg_enabled = ConfigLoader._getenv_first(
+            "FLOUDS_BACKGROUND_CLEANUP_ENABLED", "FLOUDS_ENABLE_BACKGROUND_CLEANUP"
+        )
+        parsed_bg_enabled = ConfigLoader._parse_bool(bg_enabled)
+        if parsed_bg_enabled is not None:
+            ConfigLoader.__appsettings.monitoring.enable_background_cleanup = (
+                parsed_bg_enabled
             )
 
+        bg_interval = ConfigLoader._getenv_first(
+            "FLOUDS_BACKGROUND_CLEANUP_INTERVAL_SECONDS"
+        )
+        parsed_bg_interval = ConfigLoader._parse_int(bg_interval)
+        if parsed_bg_interval is not None:
+            ConfigLoader.__appsettings.monitoring.background_cleanup_interval_seconds = (
+                parsed_bg_interval
+            )
+        elif bg_interval is not None:
+            logger.warning(f"Invalid background cleanup interval: {bg_interval}")
+
+        bg_jitter = ConfigLoader._getenv_first(
+            "FLOUDS_BACKGROUND_CLEANUP_INITIAL_JITTER_SECONDS"
+        )
+        parsed_bg_jitter = ConfigLoader._parse_int(bg_jitter)
+        if parsed_bg_jitter is not None:
+            ConfigLoader.__appsettings.monitoring.background_cleanup_initial_jitter_seconds = (
+                parsed_bg_jitter
+            )
+        elif bg_jitter is not None:
+            logger.warning(f"Invalid background cleanup initial jitter: {bg_jitter}")
+
+        bg_max_backoff = ConfigLoader._getenv_first(
+            "FLOUDS_BACKGROUND_CLEANUP_MAX_BACKOFF_SECONDS"
+        )
+        parsed_bg_max_backoff = ConfigLoader._parse_int(bg_max_backoff)
+        if parsed_bg_max_backoff is not None:
+            ConfigLoader.__appsettings.monitoring.background_cleanup_max_backoff_seconds = (
+                parsed_bg_max_backoff
+            )
+        elif bg_max_backoff is not None:
+            logger.warning(f"Invalid background cleanup max backoff: {bg_max_backoff}")
+
         # Trusted hosts from env
-        trusted_hosts = os.getenv("FLOUDS_TRUSTED_HOSTS")
+        trusted_hosts = ConfigLoader._getenv_first("FLOUDS_TRUSTED_HOSTS")
         if trusted_hosts:
             ConfigLoader.__appsettings.security.trusted_hosts = [
                 h.strip() for h in trusted_hosts.split(",") if h.strip()
             ]
 
         # Clients DB path override
-        clients_db = os.getenv("FLOUDS_CLIENTS_DB")
+        clients_db = ConfigLoader._getenv_first("FLOUDS_CLIENTS_DB")
         if clients_db:
             ConfigLoader.__appsettings.security.clients_db_path = clients_db
 
@@ -205,6 +323,24 @@ class ConfigLoader:
                 if not os.path.isfile(settings.onnx.config_file):
                     logger.error(
                         f"ONNX config file is not a file: {settings.onnx.config_file}"
+                    )
+                    sys.exit(1)
+                # Validate that the ONNX config file is valid JSON. A malformed
+                # config is a fatal startup error.
+                try:
+                    with open(settings.onnx.config_file, "r", encoding="utf-8") as cf:
+                        json.load(cf)
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.error(
+                        "ONNX config file is not valid JSON: %s",
+                        sanitize_for_log(str(e)),
+                    )
+                    sys.exit(1)
+                except Exception as e:
+                    logger.error(
+                        "Error reading ONNX config file %s: %s",
+                        sanitize_for_log(settings.onnx.config_file),
+                        sanitize_for_log(str(e)),
                     )
                     sys.exit(1)
                 logger.info(f"Validated ONNX config file: {settings.onnx.config_file}")

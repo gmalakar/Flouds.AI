@@ -38,7 +38,7 @@ venv.bak/
 pyvenv.cfg
 .conda/
 conda-meta/
-
+MagicMock/
 # Environment and configuration files
 .env
 .env.*
@@ -84,6 +84,7 @@ logs/
 # ML models and data
 onnx/
 app/onnx/
+onnx_loaders/onnx/
 /models/
 !app/models/
 data/
@@ -155,3 +156,16 @@ admin_credentials.txt
 .encryption_key
 
 !app/models/
+
+# others (explicit any-directory matches)
+**/.encryption_key
+**/admin_credentials.txt
+**/admin_console.txt
+**/clients.db
+*.txt
+
+!**/requirements.txt
+!**/requirements-prod.txt
+!**/README.md
+!**/requirements-dev.txt
+!**/requirements-onnx-loaders.txt

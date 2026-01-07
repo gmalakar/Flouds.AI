@@ -47,7 +47,8 @@ class DummySession:
 
 
 class DummyConfig:
-    embedder_task = "fe"
+    tasks = ["embedding"]
+    model_folder_name = "dummy-model"
     encoder_onnx_model = "model.onnx"
     normalize = True
     pooling_strategy = "mean"
@@ -116,7 +117,7 @@ def test_split_text_into_chunks():
     assert len(chunks) > 0
 
 
-@patch("app.services.embedder_service.SentenceTransformer._get_model_config")
+@patch("app.services.base_nlp_service.BaseNLPService._get_model_config")
 @patch(
     "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
@@ -175,6 +176,14 @@ def test_embed_text_handles_exception(monkeypatch, dummy_model_config):
     def raise_exc(*a, **kw):
         raise Exception("fail")
 
+    # Ensure model config lookup returns our dummy config so capability
+    # checks pass and the embedding code calls the patched _embed_text_local.
+    from app.services.base_nlp_service import BaseNLPService
+
+    monkeypatch.setattr(
+        BaseNLPService, "_get_model_config", lambda model: dummy_model_config
+    )
+
     monkeypatch.setattr(SentenceTransformer, "_embed_text_local", raise_exc)
 
     req = EmbeddingRequest(
@@ -186,7 +195,7 @@ def test_embed_text_handles_exception(monkeypatch, dummy_model_config):
     assert "fail" in response.message or "Error" in response.message
 
 
-@patch("app.services.embedder_service.SentenceTransformer._get_model_config")
+@patch("app.services.base_nlp_service.BaseNLPService._get_model_config")
 @patch(
     "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
@@ -318,7 +327,7 @@ def test_normalization_after_projection():
     assert np.isclose(norm, 1.0, atol=1e-6), f"Expected unit norm, got {norm}"
 
 
-@patch("app.services.embedder_service.SentenceTransformer._get_model_config")
+@patch("app.services.base_nlp_service.BaseNLPService._get_model_config")
 @patch(
     "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
@@ -347,7 +356,7 @@ def test_dimension_used_in_response(
     assert response.used_parameters["projected_dimension"] == 128
 
 
-@patch("app.services.embedder_service.SentenceTransformer._get_model_config")
+@patch("app.services.base_nlp_service.BaseNLPService._get_model_config")
 @patch(
     "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),

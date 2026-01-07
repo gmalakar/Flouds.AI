@@ -32,6 +32,18 @@ class PromptRequest(PromptBaseRequest):
         min_length=1,
         description="The input text to be processed. Cannot be empty.",
     )
+    # Optional generation overrides per request. If provided these take
+    # precedence over model-configured generation parameters.
+    max_length: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional total maximum sequence length for generation (includes input).",
+    )
+    max_new_tokens: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional maximum number of newly generated tokens (preferred over max_length).",
+    )
 
 
 class PromptBatchRequest(PromptBaseRequest):

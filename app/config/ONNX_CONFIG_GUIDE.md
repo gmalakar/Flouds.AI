@@ -54,15 +54,17 @@ These properties define model behavior and cannot be auto-detected. They must be
 - **Example:** `"max_length": 256`
 - **Common values:** 128-512 for embeddings, 512-2048 for summarization
 
-#### **embedder_task** or **summarization_task** (REQUIRED)
-- Defines the model's primary task
-- **Values:**
-  - `"fe"` - Feature Extraction (embeddings)
-  - `"s2s"` - Sequence-to-Sequence (summarization)
-  - `"llm"` - Language Model (text generation)
-- **Example:** `"embedder_task": "fe"`
+#### **tasks** (REQUIRED)
+- Declare the model's supported capabilities as a list of task names.
+- Use explicit tasks instead of legacy single-purpose keys. Common values:
+    - `"embedding"` - Feature Extraction (embeddings)
+    - `"summarization"` - Sequence-to-Sequence summarization
+    - `"language_model"` or `"llm"` - Language model / text generation
+    - `"prompt"` - Prompt-style usage (can be used with LLMs or seq2seq)
+- **Example:** `"tasks": ["embedding"]` or `"tasks": ["summarization","embedding","prompt"]`
 
-### Embedding Model Settings (embedder_task: "fe")
+
+### Embedding Model Settings (models with `"embedding"` in `tasks`)
 
 #### **normalize** (REQUIRED)
 - Whether to L2 normalize embedding vectors
@@ -92,7 +94,7 @@ These properties define model behavior and cannot be auto-detected. They must be
 - **Example:** `"force_pooling": true`
 - **Default:** `false`
 
-### Generation Model Settings (summarization_task: "s2s" or "llm")
+### Generation Model Settings (models with `"summarization"` or `"language_model"` in `tasks`)
 
 #### **pad_token_id** (REQUIRED)
 - Token ID for padding sequences

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from app.logger import get_logger
 from app.services.base_nlp_service import BaseNLPService
+from app.services.cache_registry import get_encoder_sessions
 from app.services.health_service import HealthService
 from app.utils.cache_manager import CacheManager
 from app.utils.memory_monitor import MemoryMonitor
@@ -59,11 +60,10 @@ async def detailed_health_check():
             if hasattr(BaseNLPService, "_model_cache")
             else 0
         )
-        encoder_sessions = (
-            BaseNLPService._encoder_sessions.size()
-            if hasattr(BaseNLPService._encoder_sessions, "size")
-            else 0
-        )
+        try:
+            encoder_sessions = get_encoder_sessions().size()
+        except Exception:
+            encoder_sessions = 0
 
         health_status["memory"] = memory_info
         health_status["models"] = {

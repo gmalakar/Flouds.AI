@@ -1,0 +1,36 @@
+# Core FastAPI and server
+fastapi>=0.116.1
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.6
+
+# ML and ONNX dependencies (updated for compatibility with newer runtimes)
+# Note: tests should be run after upgrading to validate runtime behavior.
+transformers>=4.57.3,<5.0.0
+
+# Allow numpy 2.x series; many modern ML libs now support numpy 2.x.
+# Keep a liberal upper bound to avoid accidental major bumps beyond 3.x
+numpy>=1.26.4,<3.0.0
+
+# Optimum / ONNX runtime runtime stack (use newer compatible releases)
+optimum[onnxruntime]>=2.1.0,<3.0.0
+
+# Hugging Face hub and supporting packages
+# Filesystem spec for data backends (kept current)
+# fsspec removed to avoid increasing Docker image size when not needed
+
+# Data validation and processing
+pydantic>=2.10.0
+nltk>=3.9
+
+# System monitoring
+psutil>=5.9.6
+
+# Cryptography for key encryption
+cryptography>=42.0.0
+
+# Document Loaders (MIT/BSD licenses)
+pdfplumber>=0.10.0
+python-docx>=1.1.0
+beautifulsoup4>=4.12.0
+python-pptx>=0.6.21
+openpyxl>=3.1.0

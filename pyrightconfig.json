@@ -12,6 +12,11 @@
         "logs/**",
         ".env/**",
         "data/**",
-        "tests/**/data/**"
+        "tests/**/data/**",
+        ".venv/**",
+        "venv/**",
+        "milvus/**",
+        "node_modules/**",
+        "__pycache__/**"
     ]
 }
