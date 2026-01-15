@@ -1,3 +1,9 @@
+# =============================================================================
+# File: __init__.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 """Module package for migrated modules from FloudsVector.Py canonical layout.
 
 Expose commonly used submodules to avoid __all__ mismatches reported by static

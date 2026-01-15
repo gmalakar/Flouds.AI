@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
 ARG GPU=false
+ARG TORCH_VERSION=2.9.1
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -19,6 +20,8 @@ ENV PYTHONUNBUFFERED=1 \
     FLOUDS_CLIENTS_DB=/flouds-ai/data/clients.db \
     # Pip behavior
     PIP_NO_CACHE_DIR=1 \
+    PIP_NO_COMPILE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     # Cache sizing defaults (can be tuned via env)
     FLOUDS_ENCODER_CACHE_MAX=5 \
     FLOUDS_DECODER_CACHE_MAX=5 \
@@ -56,39 +59,71 @@ ENV PYTHONUNBUFFERED=1 \
 # secrets, Docker secrets, or environment injection) so they are not baked
 # into the image.
 
-# Upgrade pip to fix CVE vulnerabilities (pip <=25.2 affected)
-RUN python -m pip install --upgrade "pip>=25.3"
 WORKDIR ${PYTHONPATH}
 
 # Copy requirements first for better layer caching
-# We install only the minimal runtime requirements by default (`requirements-prod.txt`).
-# To include heavy ML extras (transformers/optimum), build with --build-arg INSTALL_ML=true
 COPY app/requirements-prod.txt requirements-prod.txt
 
-# Install dependencies in single layer
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+# Install dependencies in single optimized layer
+RUN set -ex \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
     && apt-get install -y --only-upgrade tar \
+    # Upgrade pip to fix CVE vulnerabilities (pip <=25.2 affected)
+    && python -m pip install --upgrade --no-cache-dir "pip>=25.3" \
+    # Install PyTorch (CPU or GPU)
     && if [ "$GPU" = "true" ]; then \
-    echo "Installing ONNX Runtime GPU (version range >=1.18.0,<1.23.0)..."; \
-    pip install --no-cache-dir --prefer-binary "onnxruntime-gpu>=1.18.0,<1.23.0"; \
+        echo "Installing GPU PyTorch and ONNX Runtime GPU..."; \
+        pip install --no-cache-dir --prefer-binary "torch==${TORCH_VERSION}" || true; \
+        pip install --no-cache-dir --prefer-binary "onnxruntime-gpu>=1.18.0,<1.23.0"; \
     else \
-    echo "Installing ONNX Runtime CPU (version range >=1.18.0,<1.23.0)..."; \
-    pip install --no-cache-dir --prefer-binary "onnxruntime>=1.18.0,<1.23.0"; \
+        echo "Installing CPU PyTorch and ONNX Runtime CPU..."; \
+        pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+            "torch==${TORCH_VERSION}+cpu" || true; \
+        pip install --no-cache-dir --prefer-binary "onnxruntime>=1.18.0,<1.23.0"; \
     fi \
+    # Install all required dependencies from requirements-prod.txt
     && pip install --no-cache-dir -r requirements-prod.txt \
+    # Aggressive cleanup to minimize layer size
     && apt-get purge -y build-essential \
-    && apt-get autoremove -y \
+    && apt-get autoremove -y --purge \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/* /root/.pip-cache \
-    && find /usr/local -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local -type d -name "test" -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local -type f -name "*.pyc" -delete \
-    && find /usr/local -type f -name "*.pyo" -delete \
-    && find /usr/local -type f \( -name "*.dist-info" -o -name "*.egg-info" \) -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local/lib/python*/site-packages -maxdepth 2 -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local/lib/python*/site-packages -maxdepth 2 -type d -name "examples" -exec rm -rf {} + 2>/dev/null || true
+    && rm -rf \
+        /var/lib/apt/lists/* \
+        /root/.cache \
+        /tmp/* \
+        /root/.pip-cache \
+        /usr/share/doc/* \
+        /usr/share/man/* \
+        /usr/share/locale/* \
+        /usr/share/info/* \
+        /var/cache/apt/* \
+        /var/log/* \
+    # Remove Python compiled bytecode and cache directories
+    && find /usr/local -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local -type f -name '*.pyc' -delete \
+    && find /usr/local -type f -name '*.pyo' -delete \
+    # Remove test directories and files
+    && find /usr/local -type d -name test -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local -type d -name tests -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local/lib/python*/site-packages -maxdepth 2 -type d -name tests -exec rm -rf {} + 2>/dev/null || true \
+    # Remove examples and documentation directories
+    && find /usr/local -type d -name examples -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local/lib/python*/site-packages -maxdepth 2 -type d -name examples -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local -type d -name idle_test -exec rm -rf {} + 2>/dev/null || true \
+    # Remove package metadata that's not needed at runtime
+    && find /usr/local -type f \( -name '*.dist-info' -o -name '*.egg-info' \) -exec rm -rf {} + 2>/dev/null || true \
+    # Remove static libraries and archives
+    && find /usr/local -type f -name '*.a' -delete \
+    # Remove pip cache and build artifacts
+    && rm -rf /root/.cargo /root/.rustup \
+    # Strip debugging symbols from shared libraries
+    && find /usr/local -type f -name '*.so*' -exec strip --strip-unneeded {} + 2>/dev/null || true \
+    # Remove any remaining temporary build files
+    && find /usr/local -type f -name '*.c' -delete 2>/dev/null || true \
+    && find /usr/local -type f -name '*.h' ! -name 'pyconfig.h' -delete 2>/dev/null || true
 
 # Copy application code
 COPY app ./app
@@ -100,6 +135,6 @@ RUN mkdir -p "$FLOUDS_ONNX_ROOT" "$FLOUDS_LOG_PATH" "$(dirname "$FLOUDS_CLIENTS_
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD python /flouds-ai/app/healthcheck.py || exit 1
 
-EXPOSE 19690
+EXPOSE $FLOUDS_PORT
 
 CMD ["python", "-m", "app.main"]

@@ -1,3 +1,9 @@
+# =============================================================================
+# File: test_model_availability_flags.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import os
 from types import SimpleNamespace
 from unittest.mock import patch

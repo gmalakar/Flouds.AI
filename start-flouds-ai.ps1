@@ -318,14 +318,6 @@ foreach ($key in $envVars.Keys) {
     }
 }
 
-# Add cache tuning environment variables with defaults (only if not already in .env)
-$cacheDefaults = @{
-    "FLOUDS_ENCODER_CACHE_MAX"        = "3"
-    "FLOUDS_DECODER_CACHE_MAX"        = "3"
-    "FLOUDS_MODEL_CACHE_MAX"          = "2"
-    "FLOUDS_SPECIAL_TOKENS_CACHE_MAX" = "8"
-    "FLOUDS_CACHE_MEMORY_THRESHOLD"   = "1.0"
-}
 
 foreach ($key in $cacheDefaults.Keys) {
     if (-not $envVars.ContainsKey($key)) {

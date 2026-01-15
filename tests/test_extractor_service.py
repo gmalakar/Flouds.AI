@@ -4,11 +4,6 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-# =============================================================================
-# File: test_extractor_service.py
-# Date: 2025-01-27
-# Copyright (c) 2025 Goutam Malakar. All rights reserved.
-# =============================================================================
 
 import base64
 from unittest.mock import AsyncMock, MagicMock, patch

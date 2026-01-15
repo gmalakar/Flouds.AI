@@ -1,3 +1,9 @@
+# =============================================================================
+# File: tenant_config_service.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 """Tenant/global configuration service.
 
 Provides accessors for trusted hosts and CORS origins. Currently reads from

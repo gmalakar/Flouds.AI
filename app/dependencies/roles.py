@@ -1,3 +1,9 @@
+# =============================================================================
+# File: roles.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 """
 Simple role dependency helpers (example).
 

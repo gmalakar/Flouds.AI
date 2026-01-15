@@ -1,3 +1,9 @@
+# =============================================================================
+# File: tenant_security.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import re
 from typing import List, Optional
 from urllib.parse import urlparse

@@ -1,3 +1,9 @@
+# =============================================================================
+# File: test_decode_cache.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 from types import SimpleNamespace
 
 import numpy as np

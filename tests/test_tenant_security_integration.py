@@ -1,3 +1,9 @@
+# =============================================================================
+# File: test_tenant_security_integration.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

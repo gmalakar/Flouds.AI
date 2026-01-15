@@ -1,3 +1,9 @@
+# =============================================================================
+# File: sitecustomize.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 """Test-time logging guard.
 
 This module is imported automatically by Python early during startup when

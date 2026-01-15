@@ -442,6 +442,38 @@ class BaseNLPService:
                     )
                     final_ok = False
 
+            # Auto-detect encoder-only models: when a decoder is expected but
+            # only a canonical single-file encoder (`model.onnx`) exists, treat
+            # the model as encoder-only so callers won't require a separate
+            # `decoder_model.onnx` file. This helps support LLM exports that
+            # produce a single `model.onnx` artifact for encoder-only runs.
+            try:
+                if need_decoder and dec_flag != "true":
+                    has_canonical_model = BaseNLPService._file_exists_in_model(
+                        model_path,
+                        getattr(cfg, "encoder_onnx_model", "model.onnx"),
+                        "model.onnx",
+                        getattr(cfg, "encoder_optimized_onnx_model", "model_optimized.onnx"),
+                    )
+                    has_decoder_files = BaseNLPService._file_exists_in_model(
+                        model_path,
+                        getattr(cfg, "decoder_onnx_model", "decoder_model.onnx"),
+                        getattr(cfg, "decoder_optimized_onnx_model", "decoder_model_optimized.onnx"),
+                    )
+                    if has_canonical_model and not has_decoder_files:
+                        logger.info(
+                            "Inferring encoder-only model for '%s' (found model.onnx, no decoder artifacts)",
+                            sanitize_for_log(model_to_use),
+                        )
+                        md["decoder_model_exists"] = "false"
+                        md["encoder_model_exists"] = "true"
+                        md["encoder_only_inferred"] = True
+                        # Disable decoder requirement so subsequent checks pass
+                        need_decoder = False
+            except Exception:
+                # Non-fatal: inference failure shouldn't block availability checks
+                logger.debug("Encoder-only inference check failed", exc_info=True)
+
             # Decoder check (only if required and not already known true)
             if need_decoder and dec_flag != "true":
                 dec_candidates = []

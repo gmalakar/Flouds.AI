@@ -1,3 +1,9 @@
+# =============================================================================
+# File: test_auth_middleware.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 from unittest.mock import Mock, patch
 
 from fastapi import FastAPI

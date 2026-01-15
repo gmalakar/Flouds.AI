@@ -287,15 +287,6 @@ while IFS='=' read -r key value; do
     DOCKER_ARGS+=("-e" "$key=$value")
 done < "$ENV_FILE"
 
-# Add cache tuning environment variables with defaults (only if not already in .env)
-declare -A CACHE_DEFAULTS=(
-    [FLOUDS_ENCODER_CACHE_MAX]="3"
-    [FLOUDS_DECODER_CACHE_MAX]="3"
-    [FLOUDS_MODEL_CACHE_MAX]="2"
-    [FLOUDS_SPECIAL_TOKENS_CACHE_MAX]="8"
-    [FLOUDS_CACHE_MEMORY_THRESHOLD]="1.0"
-)
-
 for key in "${!CACHE_DEFAULTS[@]}"; do
     # Check if variable is not already set from .env
     if [[ -z "${!key}" ]]; then

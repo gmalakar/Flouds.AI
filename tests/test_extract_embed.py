@@ -4,11 +4,6 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-# =============================================================================
-# File: test_extract_embed.py
-# Date: 2025-12-22
-# Copyright (c) 2025 Goutam Malakar. All rights reserved.
-# =============================================================================
 
 import base64
 from unittest.mock import AsyncMock, MagicMock, patch

@@ -319,15 +319,39 @@ class PromptProcessor(BaseNLPService):
                 model_config, model_to_use
             )
 
-            if getattr(model_config, "use_seq2seqlm", False):
+            # Record which generation path is selected for diagnosis.
+            try:
+                use_seq2seqlm = bool(getattr(model_config, "use_seq2seqlm", False))
+                encoder_only = bool(getattr(model_config, "encoder_only", False))
+                logger.info(
+                    "Generation path selection for model=%s: use_seq2seqlm=%s encoder_only=%s",
+                    sanitize_for_log(model_to_use),
+                    use_seq2seqlm,
+                    encoder_only,
+                )
+            except Exception:
+                logger.debug("Failed to log generation path flags", exc_info=True)
+
+            if use_seq2seqlm:
+                logger.info(
+                    "Using seq2seq generation for %s", sanitize_for_log(model_to_use)
+                )
                 return PromptProcessor._run_seq2seq_generation(
                     model_path, tokenizer, model_config, request
                 )
-            elif getattr(model_config, "encoder_only", False):
+            elif encoder_only:
+                logger.info(
+                    "Using encoder-only generation for %s",
+                    sanitize_for_log(model_to_use),
+                )
                 return PromptProcessor._run_encoder_only_generation(
                     model_path, tokenizer, model_config, request
                 )
             else:
+                logger.info(
+                    "Using encoder+decoder ONNX generation for %s",
+                    sanitize_for_log(model_to_use),
+                )
                 return PromptProcessor._run_onnx_generation(
                     model_path, tokenizer, model_config, request
                 )

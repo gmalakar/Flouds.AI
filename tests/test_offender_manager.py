@@ -1,3 +1,9 @@
+# =============================================================================
+# File: test_offender_manager.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import os
 import time
 

@@ -172,7 +172,6 @@ class ModelInfoService:
             "repetition_penalty",
             "prepend_text",
             "encoder_only",
-            "use_t5_encoder",
         }
 
         types: List[str] = (

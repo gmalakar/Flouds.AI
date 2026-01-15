@@ -1,3 +1,9 @@
+# =============================================================================
+# File: test_prompt_service_encoder_output_cache.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 import hashlib
 import json
 from types import SimpleNamespace

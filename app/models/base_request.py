@@ -1,5 +1,11 @@
 # =============================================================================
 # File: base_request.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
+# =============================================================================
+# File: base_request.py
 # Lightweight BaseRequest adapted from canonical implementation
 # =============================================================================
 from typing import Optional

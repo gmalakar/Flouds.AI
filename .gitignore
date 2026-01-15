@@ -83,8 +83,12 @@ logs/
 
 # ML models and data
 onnx/
+tools/
+onnx_old/
 app/onnx/
+onnx_loaders/
 onnx_loaders/onnx/
+onnx_loaders/tools/
 /models/
 !app/models/
 data/
@@ -169,3 +173,4 @@ admin_credentials.txt
 !**/README.md
 !**/requirements-dev.txt
 !**/requirements-onnx-loaders.txt
+!**/load_scripts_examples.txt

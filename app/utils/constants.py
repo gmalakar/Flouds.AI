@@ -1,3 +1,9 @@
+# =============================================================================
+# File: constants.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 """Project-wide numeric constants for stable comparisons and epsilons.
 
 Keep this module minimal and import-safe to avoid circular imports.

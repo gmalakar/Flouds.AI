@@ -1,3 +1,9 @@
+# =============================================================================
+# File: __init__.py
+# Date: 2026-01-09
+# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# =============================================================================
+
 """Test package initializer that registers `tests.test_configuration` as
 pytest plugin so fixtures defined there are available without creating
 a `test_configuration.py` file.
