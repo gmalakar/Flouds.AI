@@ -97,9 +97,7 @@ def isolate_tests():
 def test_truncate_text_to_token_limit():
     text = "One. Two. Three. Four. Five. Six. Seven. Eight Nine. Ten."
     tokenizer = DummyTokenizer()
-    truncated = SentenceTransformer._truncate_text_to_token_limit(
-        text, tokenizer, max_tokens=5
-    )
+    truncated = SentenceTransformer._truncate_text_to_token_limit(text, tokenizer, max_tokens=5)
     assert len(truncated) <= 20  # 5 tokens * 4 chars estimate
 
 
@@ -126,9 +124,7 @@ def test_split_text_into_chunks():
     "app.services.embedder_service.SentenceTransformer._get_encoder_session",
     return_value=DummySession(),
 )
-def test_embed_text_success(
-    mock_session, mock_tokenizer, mock_config, dummy_model_config
-):
+def test_embed_text_success(mock_session, mock_tokenizer, mock_config, dummy_model_config):
     mock_config.return_value = dummy_model_config
     req = EmbeddingRequest(
         model="dummy-model",
@@ -144,8 +140,7 @@ def test_embed_text_success(
         assert hasattr(chunk, "chunk")
         assert isinstance(chunk.vector, list)
         assert all(
-            isinstance(x, (float, np.floating, np.float32, np.float64))
-            for x in chunk.vector
+            isinstance(x, (float, np.floating, np.float32, np.float64)) for x in chunk.vector
         )
         assert isinstance(chunk.chunk, str)
 
@@ -180,15 +175,11 @@ def test_embed_text_handles_exception(monkeypatch, dummy_model_config):
     # checks pass and the embedding code calls the patched _embed_text_local.
     from app.services.base_nlp_service import BaseNLPService
 
-    monkeypatch.setattr(
-        BaseNLPService, "_get_model_config", lambda model: dummy_model_config
-    )
+    monkeypatch.setattr(BaseNLPService, "_get_model_config", lambda model: dummy_model_config)
 
     monkeypatch.setattr(SentenceTransformer, "_embed_text_local", raise_exc)
 
-    req = EmbeddingRequest(
-        model="dummy-model", input="fail test", projected_dimension=8
-    )
+    req = EmbeddingRequest(model="dummy-model", input="fail test", projected_dimension=8)
 
     response = SentenceTransformer.embed_text(req)
     assert response.success is False
@@ -204,17 +195,14 @@ def test_embed_text_handles_exception(monkeypatch, dummy_model_config):
     "app.services.embedder_service.SentenceTransformer._get_encoder_session",
     return_value=DummySession(),
 )
-@pytest.mark.asyncio
-async def test_embed_batch_async(
-    mock_session, mock_tokenizer, mock_config, dummy_model_config
-):
+def test_embed_batch_async(mock_session, mock_tokenizer, mock_config, dummy_model_config):
     mock_config.return_value = dummy_model_config
     requests = EmbeddingBatchRequest(
         model="dummy-model",
         projected_dimension=8,
         inputs=["First text.", "Second text."],
     )
-    response = await SentenceTransformer.embed_batch_async(requests)
+    response = SentenceTransformer.embed_batch_async(requests)
     assert response.success is True
     assert response.model == "dummy-model"
     assert len(response.results) > 0  # Should have some results
@@ -233,9 +221,7 @@ def test_upsampling_prevention():
     )()
 
     # Try to project to larger dimension (upsampling) - should be prevented
-    result = SentenceTransformer._process_embedding_output(
-        emb, config, None, projected_dimension=8
-    )
+    result = SentenceTransformer._process_embedding_output(emb, config, None, projected_dimension=8)
 
     # Should remain at original dimension, not upsample
     assert result.shape == (4,), f"Expected shape (4,), got {result.shape}"
@@ -251,9 +237,7 @@ def test_downsampling_allowed():
     )()
 
     # Project to smaller dimension (downsampling) - should be allowed
-    result = SentenceTransformer._process_embedding_output(
-        emb, config, None, projected_dimension=4
-    )
+    result = SentenceTransformer._process_embedding_output(emb, config, None, projected_dimension=4)
 
     # Should be downsampled to requested dimension
     assert result.shape == (4,), f"Expected shape (4,), got {result.shape}"
@@ -336,9 +320,7 @@ def test_normalization_after_projection():
     "app.services.embedder_service.SentenceTransformer._get_encoder_session",
     return_value=DummySession(),
 )
-def test_dimension_used_in_response(
-    mock_session, mock_tokenizer, mock_config, dummy_model_config
-):
+def test_dimension_used_in_response(mock_session, mock_tokenizer, mock_config, dummy_model_config):
     """Test that dimension_used is included in used_parameters."""
     dummy_model_config.dimension = 384
     mock_config.return_value = dummy_model_config
@@ -365,9 +347,7 @@ def test_dimension_used_in_response(
     "app.services.embedder_service.SentenceTransformer._get_encoder_session",
     return_value=DummySession(),
 )
-def test_warnings_in_base_response(
-    mock_session, mock_tokenizer, mock_config, dummy_model_config
-):
+def test_warnings_in_base_response(mock_session, mock_tokenizer, mock_config, dummy_model_config):
     """Test that warnings field is available in response (from BaseResponse)."""
     mock_config.return_value = dummy_model_config
 

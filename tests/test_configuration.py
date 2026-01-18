@@ -11,7 +11,7 @@
 
 import os
 import sys
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch  # noqa: F401
 
 import pytest
 

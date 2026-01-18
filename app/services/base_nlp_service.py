@@ -7,7 +7,7 @@
 import os
 import threading
 import time
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Set, cast
 
 import numpy as np
 import onnxruntime as ort
@@ -27,34 +27,20 @@ from app.exceptions import (
 from app.logger import get_logger
 from app.models.model_metadata import ModelMetadata
 from app.modules.concurrent_dict import ConcurrentDict
-from app.utils.cache_keys import get_model_cache_key
 from app.utils.log_sanitizer import sanitize_for_log
 from app.utils.path_validator import validate_safe_path
 from app.utils.simple_cache import SimpleCache
 
 try:
-    from optimum.onnxruntime import ORTModelForSeq2SeqLM  # type: ignore
+    from optimum.onnxruntime import ORTModelForSeq2SeqLM
 except Exception:
     ORTModelForSeq2SeqLM = None
 
-logger = get_logger("base_nlp_service")
-
 # Cache primitives moved to `cache_registry` to decouple CacheManager
-from app.services.cache_registry import (
-    MODEL_CONFIG_CACHE,
-)
-from app.services.cache_registry import (
-    clear_encoder_sessions as cache_clear_encoder_sessions,
-)
-from app.services.cache_registry import (
-    clear_model_config_cache as cache_clear_model_config_cache,
-)
-from app.services.cache_registry import (
-    clear_thread_tokenizers as cache_clear_thread_tokenizers,
-)
-from app.services.cache_registry import (
-    ensure_initialized,
-)
+from app.services.cache_registry import MODEL_CONFIG_CACHE
+from app.services.cache_registry import clear_encoder_sessions as cache_clear_encoder_sessions
+from app.services.cache_registry import clear_model_config_cache as cache_clear_model_config_cache
+from app.services.cache_registry import clear_thread_tokenizers as cache_clear_thread_tokenizers
 from app.services.cache_registry import get_cache_stats as cache_get_cache_stats
 from app.services.cache_registry import (
     get_decoder_sessions,
@@ -62,6 +48,8 @@ from app.services.cache_registry import (
     get_models_cache,
     tokenizer_local,
 )
+
+logger = get_logger("base_nlp_service")
 
 # HuggingFace model mappings for fallback
 HUGGINGFACE_MODEL_MAPPING = {
@@ -86,6 +74,10 @@ class BaseNLPService:
     # last-loaded timestamp, lightweight flags). Heavy objects (sessions,
     # models) remain in the ConcurrentDict caches above.
     _model_metadata_cache: SimpleCache = SimpleCache(max_size=50)
+    # Small set of validated resolved model folder paths to avoid repeated
+    # expensive `validate_safe_path` calls. Use a lock for simple thread-safety.
+    _validated_model_paths: Set[str] = set()
+    _validated_paths_lock = threading.Lock()
 
     # Shared caches for other services (decoder sessions, optimum models,
     # and special tokens). Centralized here so `CacheManager` can operate
@@ -179,9 +171,7 @@ class BaseNLPService:
                 # Do not attempt to infer folder from other keys; caller should
                 # provide `model_folder_name` in the config. Return None so
                 # callers can surface an appropriate error.
-                logger.error(
-                    "Model '%s' missing 'model_folder_name' in config", model_to_use
-                )
+                logger.error("Model '%s' missing 'model_folder_name' in config", model_to_use)
                 return None
 
             mf_norm = os.path.normpath(str(mf))
@@ -209,11 +199,20 @@ class BaseNLPService:
             try:
                 metadata = {
                     "resolved_path": full_path,
+                    "validated_resolved_path": full_path,
                     "model_folder_name": mf_norm,
                     "tasks": getattr(config, "tasks", None),
                     "timestamp": int(time.time()),
                 }
                 BaseNLPService._set_model_metadata(model_to_use, metadata)
+                # Record validated path in class-level cache so subsequent
+                # file-existence checks can skip path validation.
+                try:
+                    with BaseNLPService._validated_paths_lock:
+                        BaseNLPService._validated_model_paths.add(full_path)
+                except Exception:
+                    # Non-fatal - don't break path resolution on lock failures
+                    pass
             except Exception:
                 # Metadata population shouldn't block normal flow
                 logger.debug(f"Failed to set metadata for {model_to_use}")
@@ -234,13 +233,47 @@ class BaseNLPService:
         if any candidate resolves to an existing file. Skips empty/None
         candidates.
         """
+        # Fast path: if this exact folder was validated previously, reuse it
+        # without re-calling `validate_safe_path` which can be expensive.
+        validated_folder = None
+        try:
+            with BaseNLPService._validated_paths_lock:
+                if folder in BaseNLPService._validated_model_paths:
+                    validated_folder = folder
+        except Exception:
+            validated_folder = None
+
+        # If not cached, validate the folder once and record the validated
+        # result for future checks. On validation failure fall back to the
+        # previous per-candidate validation behavior.
+        if validated_folder is None:
+            try:
+                validated_folder = validate_safe_path(folder, BaseNLPService._root_path)
+                try:
+                    with BaseNLPService._validated_paths_lock:
+                        BaseNLPService._validated_model_paths.add(validated_folder)
+                except Exception:
+                    pass
+            except Exception:
+                # If folder validation fails, fall back to per-candidate validation
+                for candidate in candidates:
+                    if not candidate:
+                        continue
+                    try:
+                        candidate_path = validate_safe_path(
+                            os.path.join(folder, candidate), BaseNLPService._root_path
+                        )
+                    except Exception:
+                        continue
+                    if os.path.exists(candidate_path):
+                        return True
+                return False
+
         for candidate in candidates:
             if not candidate:
                 continue
             try:
-                candidate_path = validate_safe_path(
-                    os.path.join(folder, candidate), BaseNLPService._root_path
-                )
+                candidate_path = os.path.join(validated_folder, candidate)
             except Exception:
                 continue
             if os.path.exists(candidate_path):
@@ -264,9 +297,7 @@ class BaseNLPService:
         Respects `use_optimized` and `fallback_to_regular` flags and tries sensible
         fallbacks to maintain compatibility with existing naming patterns.
         """
-        use_optimized = (
-            getattr(model_config, "use_optimized", False) and not fallback_to_regular
-        )
+        use_optimized = getattr(model_config, "use_optimized", False) and not fallback_to_regular
 
         # Normalize type
         t = model_type.lower()
@@ -323,9 +354,7 @@ class BaseNLPService:
             if cfg is None:
                 cfg = BaseNLPService._get_model_config(model_to_use)
             if not cfg:
-                logger.error(
-                    "Model config '%s' not found", sanitize_for_log(model_to_use)
-                )
+                logger.error("Model config '%s' not found", sanitize_for_log(model_to_use))
                 return False
 
             # Allow caller to provide an already-resolved model_path (useful
@@ -382,11 +411,7 @@ class BaseNLPService:
 
             # If encoder already known present and decoder either not required
             # or known present, we can return early.
-            if (
-                need_encoder
-                and enc_flag == "true"
-                and (not need_decoder or dec_flag == "true")
-            ):
+            if need_encoder and enc_flag == "true" and (not need_decoder or dec_flag == "true"):
                 return True
 
             # If any required artifact is cached as missing, fail fast.
@@ -424,9 +449,7 @@ class BaseNLPService:
                 enc_candidates.extend(
                     [
                         getattr(cfg, "encoder_onnx_model", "model.onnx"),
-                        getattr(
-                            cfg, "encoder_optimized_onnx_model", "model_optimized.onnx"
-                        ),
+                        getattr(cfg, "encoder_optimized_onnx_model", "model_optimized.onnx"),
                         getattr(cfg, "encoder_onnx_model", "encoder_model.onnx"),
                     ]
                 )
@@ -458,9 +481,20 @@ class BaseNLPService:
                     has_decoder_files = BaseNLPService._file_exists_in_model(
                         model_path,
                         getattr(cfg, "decoder_onnx_model", "decoder_model.onnx"),
-                        getattr(cfg, "decoder_optimized_onnx_model", "decoder_model_optimized.onnx"),
+                        getattr(
+                            cfg,
+                            "decoder_optimized_onnx_model",
+                            "decoder_model_optimized.onnx",
+                        ),
                     )
-                    if has_canonical_model and not has_decoder_files:
+                    # Only infer encoder-only when the model is not explicitly
+                    # configured as a seq2seq LM. If `use_seq2seqlm` is True we
+                    # must require decoder artifacts.
+                    if (
+                        has_canonical_model
+                        and not has_decoder_files
+                        and not getattr(cfg, "use_seq2seqlm", False)
+                    ):
                         logger.info(
                             "Inferring encoder-only model for '%s' (found model.onnx, no decoder artifacts)",
                             sanitize_for_log(model_to_use),
@@ -494,9 +528,7 @@ class BaseNLPService:
                     ]
                 )
 
-                dec_exists = BaseNLPService._file_exists_in_model(
-                    model_path, *dec_candidates
-                )
+                dec_exists = BaseNLPService._file_exists_in_model(model_path, *dec_candidates)
                 # Store result in local metadata map; will persist below
                 md["decoder_model_exists"] = "true" if dec_exists else "false"
                 if not dec_exists:
@@ -538,9 +570,7 @@ class BaseNLPService:
         """
         try:
             if not model_name or not task:
-                raise InvalidInputError(
-                    "Both 'model_name' and 'task' are required parameters"
-                )
+                raise InvalidInputError("Both 'model_name' and 'task' are required parameters")
 
             # Validate that the model configuration exists. Raise a
             # ModelNotFoundError so callers can surface a clear error when
@@ -550,9 +580,9 @@ class BaseNLPService:
                 raise ModelNotFoundError(f"Model '{model_name}' not found")
 
             # Prefer explicit tasks list when available
-            if hasattr(cfg, "tasks") and getattr(cfg, "tasks"):
+            if hasattr(cfg, "tasks") and cfg.tasks:
                 try:
-                    tasks = [str(t).lower() for t in getattr(cfg, "tasks")]
+                    tasks = [str(t).lower() for t in cfg.tasks]
                 except Exception:
                     tasks = []
                 return str(task).lower() in tasks
@@ -625,9 +655,7 @@ class BaseNLPService:
                             model_name = os.path.basename(tokenizer_path)
                             hf_model = HUGGINGFACE_MODEL_MAPPING.get(model_name)
                             if hf_model:
-                                tokenizer = AutoTokenizer.from_pretrained(
-                                    hf_model, legacy=True
-                                )
+                                tokenizer = AutoTokenizer.from_pretrained(hf_model, legacy=True)
                             else:
                                 raise TokenizerError(
                                     f"No HuggingFace mapping found for {model_name}"
@@ -646,7 +674,7 @@ class BaseNLPService:
 
             return tokenizer_local.tokenizers[cache_key]
 
-        except (OSError, FileNotFoundError) as e:
+        except OSError as e:
             logger.error(
                 "Tokenizer files not accessible at %s: %s",
                 sanitize_for_log(tokenizer_path),
@@ -715,7 +743,7 @@ class BaseNLPService:
                 return ort.InferenceSession(encoder_model_path, providers=[provider])
 
             return encoder_sessions.get_or_add(cache_key, create_session)
-        except (OSError, FileNotFoundError) as e:
+        except OSError as e:
             logger.error(
                 "ONNX model file not accessible at %s: %s",
                 sanitize_for_log(encoder_model_path),
@@ -888,7 +916,7 @@ class BaseNLPService:
                 try:
                     md = ModelMetadata(**metadata)
                 except Exception:
-                    md = ModelMetadata(**{k: v for k, v in metadata.items()})
+                    md = ModelMetadata(**dict(metadata))
             else:
                 # Try to coerce arbitrary objects
                 try:
@@ -956,9 +984,7 @@ class BaseNLPService:
         if session:
             output_names = [o.name.lower() for o in session.get_outputs()]
             if any(
-                keyword in name
-                for name in output_names
-                for keyword in ["logit", "score", "prob"]
+                keyword in name for name in output_names for keyword in ["logit", "score", "prob"]
             ):
                 return True
 
@@ -994,9 +1020,7 @@ class BaseNLPService:
         `CacheManager` when necessary.
         """
         if ORTModelForSeq2SeqLM is None:
-            logger.warning(
-                "optimum[onnxruntime] not installed; skipping Seq2SeqLM load"
-            )
+            logger.warning("optimum[onnxruntime] not installed; skipping Seq2SeqLM load")
             return None
 
         try:

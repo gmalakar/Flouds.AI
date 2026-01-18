@@ -92,9 +92,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 f"Cleaned up {len(ips_to_remove)} empty IPs, {len(self.request_history)} IPs remaining"
             )
 
-    def is_rate_limited(
-        self, ip: str, current_time: float
-    ) -> Tuple[bool, str, int, int]:
+    def is_rate_limited(self, ip: str, current_time: float) -> Tuple[bool, str, int, int]:
         """Check if IP is rate limited. Returns (is_limited, message, minute_count, hour_count)."""
         timestamps: Deque[float] = self.request_history[ip]
 
@@ -204,9 +202,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Add rate limit headers using pre-calculated counts
         response.headers["X-RateLimit-Limit-Minute"] = str(self.requests_per_minute)
         response.headers["X-RateLimit-Remaining-Minute"] = str(
-            max(
-                0, self.requests_per_minute - minute_count - 1
-            )  # -1 for current request
+            max(0, self.requests_per_minute - minute_count - 1)  # -1 for current request
         )
         response.headers["X-RateLimit-Limit-Hour"] = str(self.requests_per_hour)
         response.headers["X-RateLimit-Remaining-Hour"] = str(

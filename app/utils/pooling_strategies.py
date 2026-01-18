@@ -55,9 +55,7 @@ class PoolingStrategies:
     ) -> np.ndarray:
         """Mean pooling with attention mask."""
         if embedding is None or attention_mask is None:
-            raise ValueError(
-                "mean_pooling requires non-None embedding and attention_mask"
-            )
+            raise ValueError("mean_pooling requires non-None embedding and attention_mask")
         if embedding.shape[:2] != attention_mask.shape:
             raise ValueError("Embedding and attention mask dimensions mismatch")
         masked_embedding = embedding * attention_mask[..., None]
@@ -71,15 +69,11 @@ class PoolingStrategies:
     ) -> np.ndarray:
         """Max pooling with attention mask."""
         if embedding is None or attention_mask is None:
-            raise ValueError(
-                "max_pooling requires non-None embedding and attention_mask"
-            )
+            raise ValueError("max_pooling requires non-None embedding and attention_mask")
         if embedding.shape[:2] != attention_mask.shape:
             raise ValueError("Embedding and attention mask dimensions mismatch")
         # Set masked positions to large negative value before max
-        masked_embedding = np.where(
-            attention_mask[..., None].astype(bool), embedding, MASK_NEG_INF
-        )
+        masked_embedding = np.where(attention_mask[..., None].astype(bool), embedding, MASK_NEG_INF)
         return masked_embedding.max(axis=1)
 
     @staticmethod
@@ -150,10 +144,10 @@ class PoolingStrategies:
             logger.debug(f"Applying pooling strategy: {strategy} has applied")
             return PoolingStrategies.mean_pooling(embedding, attention_mask)
         elif embedding.ndim == 3:
-            logger.debug(f"Applying mean pooling without attention mask for 3D tensor")
+            logger.debug("Applying mean pooling without attention mask for 3D tensor")
             return embedding[0].mean(axis=0)  # First batch, mean over sequence
         elif embedding.ndim == 2:
-            logger.debug(f"Applying mean pooling without attention mask for 2D tensor")
+            logger.debug("Applying mean pooling without attention mask for 2D tensor")
             return embedding.mean(axis=0)  # Mean over sequence
         else:
             logger.debug(

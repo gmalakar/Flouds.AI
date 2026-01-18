@@ -21,9 +21,7 @@ logger = get_logger("sendprompt")
 async def send_prompt(request: PromptRequest) -> PromptResponse:
     """Process input string prompt using PromptProcessor."""
     try:
-        logger.info(
-            "Processing prompt for model %s: %s", request.model, request.input[:100]
-        )
+        logger.info("Processing prompt for model %s: %s", request.model, request.input[:100])
 
         # Use PromptProcessor to process the prompt
         response = PromptProcessor.process_prompt(request)

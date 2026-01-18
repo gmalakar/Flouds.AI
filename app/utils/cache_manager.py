@@ -12,21 +12,11 @@ from typing import Any, Dict, List, Optional
 
 import psutil
 
-# Throttle expensive memory queries to at most once per this interval (seconds).
-# Configurable via environment variable `FLOUDS_MEMORY_CHECK_INTERVAL` (seconds).
-_MIN_MEMORY_CHECK_INTERVAL: float = float(
-    os.getenv("FLOUDS_MEMORY_CHECK_INTERVAL", "5")
-)
-# Module-level cache for last memory check to avoid repeated psutil calls
-_LAST_MEMORY_CHECK: float = 0.0
-_CACHED_AVAILABLE_GB: float = 0.0
-
-from typing import cast
-
 from app.app_init import APP_SETTINGS
 from app.exceptions import CacheInvalidationError
 from app.logger import get_logger
-from app.modules.concurrent_dict import ConcurrentDict
+
+# ConcurrentDict import not required in this module
 from app.services.cache_registry import (
     clear_decoder_sessions,
     clear_encoder_sessions,
@@ -39,6 +29,13 @@ from app.services.cache_registry import (
 )
 
 logger = get_logger("cache_manager")
+
+# Throttle expensive memory queries to at most once per this interval (seconds).
+# Configurable via environment variable `FLOUDS_MEMORY_CHECK_INTERVAL` (seconds).
+_MIN_MEMORY_CHECK_INTERVAL: float = float(os.getenv("FLOUDS_MEMORY_CHECK_INTERVAL", "5"))
+# Module-level cache for last memory check to avoid repeated psutil calls
+_LAST_MEMORY_CHECK: float = 0.0
+_CACHED_AVAILABLE_GB: float = 0.0
 
 
 class CacheManager:
@@ -88,7 +85,7 @@ class CacheManager:
         return available_gb < threshold_gb
 
     @staticmethod
-    def cleanup_unused_caches(max_age_seconds: Optional[float] = None):
+    def cleanup_unused_caches(max_age_seconds: Optional[float] = None) -> None:
         """Clean up unused cache entries older than max_age_seconds, with logging."""
         if max_age_seconds is None:
             max_age_seconds = APP_SETTINGS.monitoring.cache_cleanup_max_age_seconds
@@ -133,9 +130,10 @@ class CacheManager:
 
         except Exception as e:
             logger.error(f"Failed to cleanup unused caches: {e}")
+        return None
 
     @staticmethod
-    def clear_model_caches():
+    def clear_model_caches() -> None:
         """Clear all model-related caches."""
         try:
             # Clear summarizer-related caches and registry caches directly
@@ -152,6 +150,7 @@ class CacheManager:
 
         except Exception as e:
             logger.error(f"Failed to clear caches: {e}")
+        return None
 
     @staticmethod
     def check_and_clear_cache_if_needed(threshold_gb: Optional[float] = None) -> bool:
@@ -191,7 +190,7 @@ class CacheManager:
         return stats
 
     @staticmethod
-    def clear_all_caches():
+    def clear_all_caches() -> None:
         """Clear all application caches."""
         logger.info("Clearing all caches")
 
@@ -209,9 +208,10 @@ class CacheManager:
         clear_thread_tokenizers()
         clear_model_config_cache()
         logger.info("All caches cleared")
+        return None
 
     @staticmethod
-    def warm_up_caches(model_names: Optional[List[str]] = None):
+    def warm_up_caches(model_names: Optional[List[str]] = None) -> None:
         """Warm up caches with commonly used models."""
         if not model_names:
             # Default models to warm up
@@ -222,37 +222,39 @@ class CacheManager:
         # and prevent circular imports.
         warm_up_model_configs(model_names)
         logger.info("Cache warm-up completed")
+        return None
 
     @staticmethod
     def get_cache_health() -> Dict[str, Any]:
         """Get cache health metrics."""
         stats = CacheManager.get_all_cache_stats()
-
-        health = {
+        health: Dict[str, Any] = {
             "status": "healthy",
             "total_cached_items": 0,
             "cache_efficiency": "good",
         }
 
-        # Calculate total cached items
-        for service, service_stats in stats.items():
+        # Calculate total cached items using a typed local accumulator
+        total_cached_items: int = 0
+        for _service, service_stats in stats.items():
             if isinstance(service_stats, dict):
                 for key, value in service_stats.items():
                     if isinstance(value, int) and "cached" in key:
-                        health["total_cached_items"] += value
+                        total_cached_items += value
 
         # Simple health assessment
-        if health["total_cached_items"] == 0:
+        if total_cached_items == 0:
             health["status"] = "cold"
             health["cache_efficiency"] = "poor"
-        elif health["total_cached_items"] > 100:
+        elif total_cached_items > 100:
             health["cache_efficiency"] = "excellent"
 
+        health["total_cached_items"] = total_cached_items
         health["details"] = stats
         return health
 
     @staticmethod
-    def optimize_caches():
+    def optimize_caches() -> None:
         """Optimize cache performance by clearing expired entries."""
         logger.info("Optimizing caches")
 
@@ -270,3 +272,4 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Cache optimization failed: {e}")
             raise CacheInvalidationError(f"Cache optimization failed: {e}")
+        return None

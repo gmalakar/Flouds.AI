@@ -7,7 +7,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Union
+from typing import IO, Any, Union
 
 from app.exceptions import ResourceException
 from app.logger import get_logger
@@ -44,7 +44,6 @@ def validate_safe_path(file_path: Union[str, Path], base_dir: Union[str, Path]) 
     try:
         # Convert to strings for initial validation
         file_str = str(file_path)
-        base_str = str(base_dir)
 
         # Check for dangerous patterns in raw path
         for pattern in COMPILED_PATTERNS:
@@ -63,9 +62,7 @@ def validate_safe_path(file_path: Union[str, Path], base_dir: Union[str, Path]) 
         try:
             file_path.relative_to(base_dir)
         except ValueError:
-            raise ResourceException(
-                f"Path traversal detected: {file_path} is outside {base_dir}"
-            )
+            raise ResourceException(f"Path traversal detected: {file_path} is outside {base_dir}")
 
         # Validate path length (prevent extremely long paths)
         if len(str(file_path)) > 4096:
@@ -73,7 +70,7 @@ def validate_safe_path(file_path: Union[str, Path], base_dir: Union[str, Path]) 
 
         return str(file_path)
 
-    except (OSError, PermissionError) as e:
+    except OSError as e:
         raise ResourceException(f"Cannot access path: {e}")
     except Exception as e:
         logger.error(f"Path validation error: {e}")
@@ -102,17 +99,15 @@ def safe_join(base_dir: Union[str, Path], *paths: str) -> str:
         # Check for dangerous patterns in components
         for pattern in COMPILED_PATTERNS:
             if pattern.search(path_component):
-                raise ResourceException(
-                    f"Dangerous pattern in path component: {path_component}"
-                )
+                raise ResourceException(f"Dangerous pattern in path component: {path_component}")
 
     joined_path = os.path.join(base_dir, *paths)
     return validate_safe_path(joined_path, base_dir)
 
 
 def safe_open(
-    file_path: Union[str, Path], base_dir: Union[str, Path], mode: str = "r", **kwargs
-):
+    file_path: Union[str, Path], base_dir: Union[str, Path], mode: str = "r", **kwargs: Any
+) -> IO[Any]:
     """
     Safely open a file with path validation.
 
@@ -143,7 +138,7 @@ def safe_open(
 
     try:
         return open(safe_path, mode, **kwargs)
-    except (IOError, OSError) as e:
+    except OSError as e:
         raise ResourceException(f"Cannot open file {safe_path}: {e}")
 
 

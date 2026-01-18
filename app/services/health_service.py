@@ -7,7 +7,7 @@
 import os
 import time
 from datetime import datetime
-from typing import Dict
+from typing import Any, Dict
 
 from app.exceptions import ComponentHealthError
 from app.logger import get_logger
@@ -26,8 +26,8 @@ class HealthService:
     @classmethod
     def get_health_status(cls) -> Dict:
         """Performs comprehensive health check and returns status."""
-        components = {}
-        details = {}
+        components: Dict[str, str] = {}
+        details: Dict[str, Any] = {}
 
         # Check ONNX models availability
         onnx_status = cls._check_onnx()
@@ -79,7 +79,7 @@ class HealthService:
             else:
                 return "degraded"
 
-        except (OSError, FileNotFoundError) as e:
+        except OSError as e:
             logger.warning(f"ONNX path not accessible: {str(e)}")
             return "unhealthy"
         except Exception as e:
@@ -109,9 +109,7 @@ class HealthService:
             return "unhealthy"
         except Exception as e:
             logger.error(f"Authentication health check failed: {str(e)}")
-            raise ComponentHealthError(
-                f"Authentication component health check failed: {e}"
-            )
+            raise ComponentHealthError(f"Authentication component health check failed: {e}")
 
     @classmethod
     def _check_memory(cls) -> str:

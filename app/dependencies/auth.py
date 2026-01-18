@@ -28,12 +28,12 @@ logger = get_logger("auth")
 
 router = APIRouter()
 
+# Module-level defaults to avoid function-call defaults in signatures (flake8 B008)
+TENANT_HEADER = Header("", alias="X-Tenant-Code", description="Tenant code for request")
+SECURITY_DEP = Depends(HTTPBearer(auto_error=False))
 
-def common_headers(
-    tenant_code: str = Header(
-        "", alias="X-Tenant-Code", description="Tenant code for request"
-    )
-) -> Dict[str, str]:
+
+def common_headers(tenant_code: str = TENANT_HEADER) -> Dict[str, str]:
     """Dependency that declares common headers used across endpoints.
 
     This is used for documentation purposes (OpenAPI) so routes show the
@@ -56,9 +56,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.enabled = APP_SETTINGS.security.enabled
 
         # Cache valid keys count at startup to avoid repeated calls
-        self._keys_configured = (
-            bool(key_manager.get_all_tokens()) if self.enabled else True
-        )
+        self._keys_configured = bool(key_manager.get_all_tokens()) if self.enabled else True
 
         self.public_endpoints = frozenset(
             [
@@ -88,15 +86,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if self.enabled:
             valid_keys = key_manager.get_all_tokens()
             if valid_keys:
-                logger.info(
-                    f"API authentication enabled with {len(valid_keys)} client(s)"
-                )
+                logger.info(f"API authentication enabled with {len(valid_keys)} client(s)")
             else:
                 logger.warning("API authentication enabled but no clients configured")
         else:
             logger.info("API authentication disabled")
 
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:  # type: ignore[override]
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Process request with API key authentication.
 
         Match behavior with FloudsVector: require `X-Tenant-Code` for all
@@ -125,11 +123,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return xff.split(",", 1)[0].strip()
             client = getattr(req, "client", None)
             try:
-                return (
-                    client.host
-                    if client and getattr(client, "host", None)
-                    else "unknown"
-                )
+                return client.host if client and getattr(client, "host", None) else "unknown"
             except Exception:
                 return "unknown"
 
@@ -159,9 +153,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not tenant_header:
             # register attempt and possibly block; tenant unknown -> use 'master'
             try:
-                blocked_now, reason = offender_manager.register_attempt(
-                    client_ip, tenant="master"
-                )
+                blocked_now, reason = offender_manager.register_attempt(client_ip, tenant="master")
             except Exception:
                 blocked_now, reason = False, ""
 
@@ -225,11 +217,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 success=False,
                 message=(
                     "Missing Authorization header"
-                    + (
-                        " or token parameter"
-                        if not APP_SETTINGS.app.is_production
-                        else ""
-                    )
+                    + (" or token parameter" if not APP_SETTINGS.app.is_production else "")
                 ),
                 model="auth",
                 time_taken=0.0,
@@ -288,7 +276,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 @router.get("/secure-endpoint")
 def secure_endpoint(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = SECURITY_DEP,
 ) -> dict[str, Any]:
     """Example secured endpoint using dependency injection.
 
@@ -311,7 +299,7 @@ def secure_endpoint(
 # Dependency function for easy reuse
 async def get_current_client(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = SECURITY_DEP,
 ) -> str:
     """Get current authenticated client ID.
 
@@ -327,15 +315,11 @@ async def get_current_client(
 
     # Fallback to token validation using dependency-provided credentials
     if credentials is None or not getattr(credentials, "credentials", None):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     tenant_code = request.headers.get("X-Tenant-Code", "")
     client = key_manager.authenticate_client(credentials.credentials, tenant_code)
     if not client:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     return client.client_id

@@ -13,7 +13,7 @@ import sys
 # Add app to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "app"))
 
-from app.modules.key_manager import key_manager
+from app.modules.key_manager import key_manager  # noqa: E402
 
 
 def main():
@@ -35,7 +35,7 @@ def main():
     )
 
     # List clients command
-    list_parser = subparsers.add_parser("list", help="List all clients")
+    subparsers.add_parser("list", help="List all clients")
 
     # Remove client command
     remove_parser = subparsers.add_parser("remove", help="Remove client")
@@ -51,16 +51,14 @@ def main():
         client_secret = args.secret or secrets.token_urlsafe(32)
 
         if key_manager.add_client(args.client_id, client_secret, args.type):
-            print(f"✅ Client added successfully!")
+            print("✅ Client added successfully!")
             print(f"Client ID: {args.client_id}")
             print(f"Client Type: {args.type}")
             print(f"Client Secret: {client_secret}")
             print(f"\n🔑 Token: {args.client_id}|{client_secret}")
-            print(f"\n📋 Usage:")
-            print(
-                f'curl -H "Authorization: Bearer {args.client_id}|{client_secret}" \\'
-            )
-            print(f"  http://localhost:19690/api/v1/summarize")
+            print("\n📋 Usage:")
+            print(f'curl -H "Authorization: Bearer {args.client_id}|{client_secret}" \\')
+            print("  http://localhost:19690/api/v1/summarize")
         else:
             print(f"❌ Failed to add client: {args.client_id}")
 

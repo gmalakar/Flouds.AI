@@ -50,9 +50,6 @@ class OnnxConfig(BaseModel):
     pooling_strategy: str = Field(default="mean")
     encoder_onnx_model: str = Field(default="encoder_model.onnx")
     decoder_onnx_model: str = Field(default="decoder_model.onnx")
-    encoder_optimized_onnx_model: str = Field(default="model_optimized.onnx")
-    decoder_optimized_onnx_model: str = Field(default="decoder_model_optimized.onnx")
-    use_optimized: bool = Field(default=False)
     # Note: Existence flags are stored in the runtime model metadata cache
     # (see `BaseNLPService._set_model_metadata`) rather than on the
     # configuration object itself.
@@ -65,24 +62,18 @@ class OnnxConfig(BaseModel):
     repetition_penalty: Optional[float] = Field(default=None)
     early_stopping: bool = True
     use_seq2seqlm: bool = Field(default=False)
-    encoder_only: bool = Field(
-        default=False
-    )  # For GPT-style models that use only encoder
+    encoder_only: bool = Field(default=False)  # For GPT-style models that use only encoder
     prepend_text: str = Field(default="summarize: ")
     chunk_logic: str = Field(default="sentence")
     chunk_overlap: int = Field(default=1)
     chunk_size: Optional[int] = Field(default=None)  # For fixed chunking
-    legacy_tokenizer: bool = Field(
-        default=False
-    )  # Use legacy tokenizer for older models
+    legacy_tokenizer: bool = Field(default=False)  # Use legacy tokenizer for older models
     lowercase: bool = Field(default=False)  # Convert text to lowercase
     remove_emojis: bool = Field(default=False)  # Remove emojis and non-ASCII characters
     force_pooling: bool = Field(default=False)  # Force pooling for embeddings
     vocab_size: Optional[int] = Field(default=None)
     quantize: bool = Field(default=False)  # Enable output quantization
     quantize_type: str = Field(default="int8")  # Quantization type: int8, uint8, binary
-    forced_bos_token_id: Optional[int] = Field(
-        default=None
-    )  # Forced BOS token ID for generation
+    forced_bos_token_id: Optional[int] = Field(default=None)  # Forced BOS token ID for generation
     # Preferred limit on newly generated tokens (recommended over total `max_length`)
     max_new_tokens: Optional[int] = Field(default=None)

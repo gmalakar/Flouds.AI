@@ -10,7 +10,7 @@
 # =============================================================================
 
 import numpy as np
-import pytest
+import pytest  # noqa: F401
 
 from app.utils.constants import NORM_EPS
 
@@ -66,9 +66,7 @@ class TestNormalizationOptimization:
 
     def test_2d_normalization_equivalence(self):
         """Test 2D batch normalization produces same results."""
-        batch = np.array(
-            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], dtype=np.float32
-        )
+        batch = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], dtype=np.float32)
 
         result_orig = normalize_original(batch.copy())
         result_opt = normalize_optimized(batch.copy())

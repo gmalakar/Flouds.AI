@@ -6,7 +6,7 @@
 
 
 import base64
-from typing import Annotated, List, Optional, Union
+from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 
@@ -24,6 +24,9 @@ from app.utils.log_sanitizer import sanitize_for_log
 
 router = APIRouter()
 logger = get_logger("router")
+
+# Module-level Form instance to avoid function calls in defaults (B008)
+DEFAULT_FORM = Form()
 
 
 def _extract_text_from_file(
@@ -88,7 +91,7 @@ def _create_batch_embedding_request(
     texts = [content.content for content in extracted_contents]
 
     # Build request dict with only non-None values
-    request_data = {
+    request_data: Dict[str, Any] = {
         "inputs": texts,
         "model": model,
         "join_chunks": join_chunks,
@@ -123,7 +126,26 @@ def _create_batch_embedding_request(
     if use_optimized is not None:
         request_data["use_optimized"] = use_optimized
 
-    return EmbeddingBatchRequest(**request_data)
+    return EmbeddingBatchRequest(
+        inputs=texts,
+        model=model or "",
+        tenant_code=None,
+        projected_dimension=projected_dimension,
+        join_chunks=join_chunks,
+        join_by_pooling_strategy=join_by_pooling_strategy,
+        output_large_text_upon_join=output_large_text_upon_join,
+        pooling_strategy=pooling_strategy,
+        max_length=max_length,
+        chunk_logic=chunk_logic,
+        chunk_overlap=chunk_overlap,
+        chunk_size=chunk_size,
+        legacy_tokenizer=legacy_tokenizer,
+        normalize=normalize,
+        force_pooling=force_pooling,
+        lowercase=lowercase,
+        remove_emojis=remove_emojis,
+        use_optimized=use_optimized,
+    )
 
 
 @router.post("/extract_and_embed", response_model=EmbeddingBatchResponse)
@@ -143,18 +165,14 @@ async def extract_and_embed(request: ExtractEmbedRequest) -> EmbeddingBatchRespo
     )
     try:
         # Extract text from file
-        extracted_contents = _extract_text_from_file(
-            request.file_content, request.extention
-        )
+        extracted_contents = _extract_text_from_file(request.file_content, request.extention)
 
         # Create batch embedding request with extracted contents
         batch_request = _create_batch_embedding_request(
             extracted_contents=extracted_contents,
             model=request.model,
             projected_dimension=request.projected_dimension,
-            join_chunks=(
-                request.join_chunks if request.join_chunks is not None else False
-            ),
+            join_chunks=(request.join_chunks if request.join_chunks is not None else False),
             join_by_pooling_strategy=request.join_by_pooling_strategy,
             output_large_text_upon_join=(
                 request.output_large_text_upon_join
@@ -175,9 +193,7 @@ async def extract_and_embed(request: ExtractEmbedRequest) -> EmbeddingBatchRespo
         )
 
         # Generate embeddings for all extracted contents
-        response: EmbeddingBatchResponse = await SentenceTransformer.embed_batch_async(
-            batch_request
-        )
+        response: EmbeddingBatchResponse = SentenceTransformer.embed_batch_async(batch_request)
 
         # Add metadata (item_number and content_as) to each embedding chunk
         for i, chunk in enumerate(response.results):
@@ -192,7 +208,7 @@ async def extract_and_embed(request: ExtractEmbedRequest) -> EmbeddingBatchRespo
         raise HTTPException(status_code=status_code, detail=e.message)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in extract file and embed endpoint")
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -200,23 +216,23 @@ async def extract_and_embed(request: ExtractEmbedRequest) -> EmbeddingBatchRespo
 @router.post("/extract_file_and_embed", response_model=EmbeddingBatchResponse)
 async def extract_file_and_embed(
     file: UploadFile,
-    extension: Annotated[Optional[str], Form()] = None,
-    model: Annotated[Optional[str], Form()] = None,
-    projected_dimension: Annotated[Optional[int], Form()] = None,
-    join_chunks: Annotated[bool, Form()] = False,
-    join_by_pooling_strategy: Annotated[Optional[str], Form()] = None,
-    output_large_text_upon_join: Annotated[bool, Form()] = False,
-    pooling_strategy: Annotated[Optional[str], Form()] = None,
-    max_length: Annotated[Optional[int], Form()] = None,
-    chunk_logic: Annotated[Optional[str], Form()] = None,
-    chunk_overlap: Annotated[Optional[int], Form()] = None,
-    chunk_size: Annotated[Optional[int], Form()] = None,
-    legacy_tokenizer: Annotated[Optional[bool], Form()] = None,
-    normalize: Annotated[Optional[bool], Form()] = None,
-    force_pooling: Annotated[Optional[bool], Form()] = None,
-    lowercase: Annotated[Optional[bool], Form()] = None,
-    remove_emojis: Annotated[Optional[bool], Form()] = None,
-    use_optimized: Annotated[Optional[bool], Form()] = None,
+    extension: Annotated[Optional[str], DEFAULT_FORM] = None,
+    model: Annotated[Optional[str], DEFAULT_FORM] = None,
+    projected_dimension: Annotated[Optional[int], DEFAULT_FORM] = None,
+    join_chunks: Annotated[bool, DEFAULT_FORM] = False,
+    join_by_pooling_strategy: Annotated[Optional[str], DEFAULT_FORM] = None,
+    output_large_text_upon_join: Annotated[bool, DEFAULT_FORM] = False,
+    pooling_strategy: Annotated[Optional[str], DEFAULT_FORM] = None,
+    max_length: Annotated[Optional[int], DEFAULT_FORM] = None,
+    chunk_logic: Annotated[Optional[str], DEFAULT_FORM] = None,
+    chunk_overlap: Annotated[Optional[int], DEFAULT_FORM] = None,
+    chunk_size: Annotated[Optional[int], DEFAULT_FORM] = None,
+    legacy_tokenizer: Annotated[Optional[bool], DEFAULT_FORM] = None,
+    normalize: Annotated[Optional[bool], DEFAULT_FORM] = None,
+    force_pooling: Annotated[Optional[bool], DEFAULT_FORM] = None,
+    lowercase: Annotated[Optional[bool], DEFAULT_FORM] = None,
+    remove_emojis: Annotated[Optional[bool], DEFAULT_FORM] = None,
+    use_optimized: Annotated[Optional[bool], DEFAULT_FORM] = None,
 ) -> EmbeddingBatchResponse:
     """
     Combined endpoint that extracts text from an uploaded file and then generates embeddings.
@@ -262,9 +278,7 @@ async def extract_file_and_embed(
         # Auto-detect extension if not provided
         if not extension:
             extension = (
-                file.filename.split(".")[-1]
-                if file.filename and "." in file.filename
-                else "txt"
+                file.filename.split(".")[-1] if file.filename and "." in file.filename else "txt"
             )
 
         logger.debug(
@@ -299,9 +313,7 @@ async def extract_file_and_embed(
         )
 
         # Generate embeddings for all extracted contents
-        response: EmbeddingBatchResponse = await SentenceTransformer.embed_batch_async(
-            batch_request
-        )
+        response: EmbeddingBatchResponse = SentenceTransformer.embed_batch_async(batch_request)
 
         # Add metadata (item_number and content_as) to each embedding chunk
         for i, chunk in enumerate(response.results):
@@ -316,6 +328,6 @@ async def extract_file_and_embed(
         raise HTTPException(status_code=status_code, detail=e.message)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in extract file and embed endpoint")
         raise HTTPException(status_code=500, detail="Internal server error")

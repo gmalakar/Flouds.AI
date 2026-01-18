@@ -8,7 +8,7 @@
 # File: config.py
 # Copied from FloudsVector canonical implementation
 # =============================================================================
-from typing import Any, Dict, Optional
+# typing imports not required here
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Request, status
 
@@ -16,12 +16,38 @@ from app.logger import get_logger
 from app.models.config_request import ConfigRequest
 from app.models.delete_config_request import DeleteConfigRequest
 from app.modules.key_manager import key_manager
-from app.services import config_service
+from app.services.config_service import config_service
 from app.utils.common_utils import CommonUtils
 
 logger = get_logger("config.router")
 
 router = APIRouter()
+
+# Module-level parameter defaults to avoid function-call defaults (flake8 B008)
+TENANT_HEADER = Header("", alias="X-Tenant-Code")
+KEY_QUERY = Query(..., description="Config key (part of composite PK)")
+TENANT_QUERY = Query(
+    "",
+    description="Tenant code (part of composite PK). Empty string for default tenant",
+)
+
+# Move Body defaults to module-level constants to avoid function-call defaults
+ADD_CONFIG_PAYLOAD = Body(
+    ...,
+    examples=[
+        {
+            "summary": "Example payload",
+            "value": {
+                "key": "cors_origins",
+                "value": '["https://example.com"]',
+                "tenant_code": "",
+                "encrypted": False,
+            },
+        }
+    ],
+)
+UPDATE_CONFIG_PAYLOAD = Body(...)
+DELETE_CONFIG_PAYLOAD = Body(...)
 
 
 # Router-level startup handlers are deprecated. DB initialization happens
@@ -32,22 +58,9 @@ router = APIRouter()
 @router.post("/add")
 def add_config(
     request: Request,
-    payload: ConfigRequest = Body(
-        ...,
-        examples=[
-            {
-                "summary": "Example payload",
-                "value": {
-                    "key": "cors_origins",
-                    "value": '["https://example.com"]',
-                    "tenant_code": "",
-                    "encrypted": False,
-                },
-            }
-        ],
-    ),
-    tenant_code: str = Header("", alias="X-Tenant-Code"),
-):
+    payload: ConfigRequest = ADD_CONFIG_PAYLOAD,
+    tenant_code: str = TENANT_HEADER,
+) -> dict:
     """Create a new config entry. Admins only.
 
     Payload fields:
@@ -92,13 +105,10 @@ def add_config(
 @router.get("/get")
 def get_config(
     request: Request,
-    key: str = Query(..., description="Config key (part of composite PK)"),
-    tenant_code: str = Query(
-        "",
-        description="Tenant code (part of composite PK). Empty string for default tenant",
-    ),
-    tenant_header: str = Header("", alias="X-Tenant-Code"),
-):
+    key: str = KEY_QUERY,
+    tenant_code: str = TENANT_QUERY,
+    tenant_header: str = TENANT_HEADER,
+) -> dict:
     """Retrieve a config value by composite primary key (key + tenant_code).
     If the stored value is encrypted, return a masked response (do not return decrypted or ciphertext).
     """
@@ -129,9 +139,9 @@ def get_config(
 @router.put("/update")
 def update_config(
     request: Request,
-    payload: ConfigRequest = Body(...),
-    tenant_code: str = Header("", alias="X-Tenant-Code"),
-):
+    payload: ConfigRequest = UPDATE_CONFIG_PAYLOAD,
+    tenant_code: str = TENANT_HEADER,
+) -> dict:
     """Update an existing config entry. Admins only.
 
     Payload must include `key` and `tenant_code` (composite PK), plus `value` and optional `encrypted`.
@@ -178,9 +188,9 @@ def update_config(
 @router.delete("/delete")
 def delete_config(
     request: Request,
-    payload: DeleteConfigRequest = Body(...),
-    tenant_code: str = Header("", alias="X-Tenant-Code"),
-):
+    payload: DeleteConfigRequest = DELETE_CONFIG_PAYLOAD,
+    tenant_code: str = TENANT_HEADER,
+) -> dict:
     """Delete a config entry by composite PK. Payload must include `key` and `tenant_code`.
     Admins only.
     """

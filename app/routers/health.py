@@ -6,10 +6,8 @@
 
 import os
 import time
-from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
 from app.logger import get_logger
 from app.services.base_nlp_service import BaseNLPService
@@ -56,9 +54,7 @@ async def detailed_health_check():
             disk_free = 0
 
         model_cache_size = (
-            BaseNLPService._model_cache.size()
-            if hasattr(BaseNLPService, "_model_cache")
-            else 0
+            BaseNLPService._model_cache.size() if hasattr(BaseNLPService, "_model_cache") else 0
         )
         try:
             encoder_sessions = get_encoder_sessions().size()

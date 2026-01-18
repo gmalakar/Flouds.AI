@@ -13,12 +13,7 @@ from pathlib import Path
 import pytest
 
 from app.exceptions import ResourceException
-from app.utils.path_validator import (
-    safe_join,
-    safe_open,
-    validate_filename,
-    validate_safe_path,
-)
+from app.utils.path_validator import safe_join, safe_open, validate_filename, validate_safe_path
 
 
 class TestPathValidation:

@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-import os
+import os  # noqa: F401
 import time
 
 from app.modules.offender_manager import OffenderManager

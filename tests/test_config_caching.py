@@ -67,16 +67,16 @@ class TestConfigCaching:
 
             # First call with mtime = 1000
             mock_mtime.return_value = 1000
-            config1 = ConfigLoader.get_onnx_config("test-model")
+            ConfigLoader.get_onnx_config("test-model")
             assert mock_load.call_count == 1
 
             # Second call with same mtime should use cache
-            config2 = ConfigLoader.get_onnx_config("test-model")
+            ConfigLoader.get_onnx_config("test-model")
             assert mock_load.call_count == 1
 
             # Third call with different mtime should reload
             mock_mtime.return_value = 2000
-            config3 = ConfigLoader.get_onnx_config("test-model")
+            ConfigLoader.get_onnx_config("test-model")
             assert mock_load.call_count == 2
 
     def test_model_config_caching_in_base_service(self):

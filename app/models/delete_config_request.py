@@ -23,4 +23,4 @@ class DeleteConfigRequest(BaseRequest):
       - tenant_code: optional tenant code (empty string for default tenant)
     """
 
-    key: str = Field(cast(Any, ...), description="The config key.")  # type: ignore
+    key: str = Field(cast(Any, ...), description="The config key.")

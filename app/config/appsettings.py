@@ -11,9 +11,7 @@ from pydantic import BaseModel, Field
 class AppConfig(BaseModel):
     name: str = Field(default="Flouds AI")
     version: str = Field(default="1.0.0")
-    description: str = Field(
-        default="AI-powered text summarization and embedding service"
-    )
+    description: str = Field(default="AI-powered text summarization and embedding service")
     debug: bool = Field(default=False)
     is_production: bool = Field(default=True)
     cors_origins: List[str] = Field(default=["*"])
@@ -22,7 +20,8 @@ class AppConfig(BaseModel):
 
 
 class ServerConfig(BaseModel):
-    host: str = Field(default="0.0.0.0")
+    # Default to localhost to avoid unintentionally binding to all interfaces
+    host: str = Field(default="127.0.0.1")
     port: int = Field(default=19690)
     session_provider: str = Field(default="CPUExecutionProvider")
     keepalive_timeout: int = Field(default=5)
@@ -90,9 +89,7 @@ class LoggingConfig(BaseModel):
     """
 
     level: str = Field(default="INFO", description="Logging level")
-    max_file_size: int = Field(
-        default=10485760, description="Maximum size in bytes for log files"
-    )
+    max_file_size: int = Field(default=10485760, description="Maximum size in bytes for log files")
     backup_count: int = Field(default=5, description="Number of backup files")
     format: str = Field(
         default="%(asctime)s %(levelname)s %(name)s: %(message)s",

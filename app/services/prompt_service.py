@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional, Set, cast
 
 import numpy as np
 import onnxruntime as ort
-from numpy import ndarray
 
 try:
     from optimum.onnxruntime import ORTModelForSeq2SeqLM
@@ -37,11 +36,7 @@ from app.models.prompt_request import PromptBatchRequest, PromptRequest
 from app.models.prompt_response import PromptResponse
 from app.modules.concurrent_dict import ConcurrentDict
 from app.services.base_nlp_service import BaseNLPService
-from app.services.cache_registry import (
-    get_decode_cache,
-    get_encoder_output_cache,
-    get_generation_cache,
-)
+from app.services.cache_registry import get_decode_cache, get_generation_cache
 from app.utils.batch_limiter import BatchLimiter
 from app.utils.log_sanitizer import sanitize_for_log
 from app.utils.path_validator import validate_safe_path
@@ -80,9 +75,7 @@ class PromptProcessor(BaseNLPService):
     @staticmethod
     def _load_special_tokens(special_tokens_path: str) -> Set[str]:
         """Load special tokens from JSON file."""
-        logger.debug(
-            "Loading special tokens from: %s", sanitize_for_log(special_tokens_path)
-        )
+        logger.debug("Loading special tokens from: %s", sanitize_for_log(special_tokens_path))
         if not os.path.exists(special_tokens_path):
             logger.warning(f"Special tokens file not found: {special_tokens_path}")
             return set()
@@ -123,14 +116,9 @@ class PromptProcessor(BaseNLPService):
                     # Look for logits output with shape [batch, seq_len, vocab_size]
                     if output.shape and len(output.shape) >= 3:
                         vocab_dim = output.shape[-1]
-                        if (
-                            isinstance(vocab_dim, (int, np.integer))
-                            and vocab_dim > 1000
-                        ):
+                        if isinstance(vocab_dim, (int, np.integer)) and vocab_dim > 1000:
                             # Reasonable vocab size (> 1000 tokens)
-                            logger.debug(
-                                f"Auto-detected vocab_size from ONNX output: {vocab_dim}"
-                            )
+                            logger.debug(f"Auto-detected vocab_size from ONNX output: {vocab_dim}")
                             return int(vocab_dim)
         except Exception as e:
             logger.warning(f"Could not auto-detect vocab_size from ONNX session: {e}")
@@ -186,9 +174,7 @@ class PromptProcessor(BaseNLPService):
     def get_model(model_to_use_path: str) -> Optional[Any]:
         """Get cached ONNX model with error handling."""
         if ORTModelForSeq2SeqLM is None:
-            logger.warning(
-                "optimum[onnxruntime] not installed; skipping Seq2SeqLM load"
-            )
+            logger.warning("optimum[onnxruntime] not installed; skipping Seq2SeqLM load")
             return None
 
         try:
@@ -203,14 +189,19 @@ class PromptProcessor(BaseNLPService):
             CacheManager.check_and_clear_cache_if_needed()
 
             logger.debug(f"Loading model from path: {model_to_use_path}")
-            model = PromptProcessor._models.get_or_add(
-                model_to_use_path,
-                # Cast to Any to avoid static analyzer complaining when ORTModelForSeq2SeqLM
-                # may be None at import-time; runtime check above prevents reaching this.
-                lambda: cast(Any, ORTModelForSeq2SeqLM).from_pretrained(
+
+            def _load_ort_model():
+                # If the path exists on filesystem, prefer a local-only load to
+                # avoid HF hub repo id validation which rejects Windows paths.
+                if os.path.exists(model_to_use_path):
+                    return cast(Any, ORTModelForSeq2SeqLM).from_pretrained(
+                        model_to_use_path, use_cache=False, local_files_only=True
+                    )
+                return cast(Any, ORTModelForSeq2SeqLM).from_pretrained(
                     model_to_use_path, use_cache=False
-                ),
-            )
+                )
+
+            model = PromptProcessor._models.get_or_add(model_to_use_path, _load_ort_model)
             # Compatibility patch for newer transformers versions
             if not hasattr(model, "_supports_cache_class"):
                 logger.debug("Applying compatibility patch for ORTModelForSeq2SeqLM")
@@ -221,6 +212,28 @@ class PromptProcessor(BaseNLPService):
         except FileNotFoundError:
             raise ModelNotFoundError(f"Model not found: {model_to_use_path}")
         except Exception as e:
+            # HuggingFace/optimum may validate repository ids and raise a
+            # user-unfriendly error when given a local Windows path (contains
+            # drive letters/backslashes). If the path exists on the filesystem
+            # treat this as a local path and fall back to ONNX session-based
+            # generation by returning None so callers can continue.
+            try:
+                msg = str(e)
+            except Exception:
+                msg = ""
+
+            # If the path exists on-disk, prefer to treat it as a local
+            # filesystem model and fall back to ONNX sessions. Optimum/Transformers
+            # may sometimes validate repository ids even when `local_files_only`
+            # was requested; avoid hard failures in that case.
+            if os.path.exists(model_to_use_path):
+                logger.warning(
+                    "Optimum repo-id validation rejected local path %s; falling back to ONNX: %s",
+                    sanitize_for_log(model_to_use_path),
+                    sanitize_for_log(msg),
+                )
+                return None
+
             raise ModelLoadError(f"Failed to load model: {e}")
 
     @staticmethod
@@ -292,9 +305,15 @@ class PromptProcessor(BaseNLPService):
                     response.message = result.message
             finally:
                 timer.cancel()
-        finally:
-            response.time_taken = time.time() - start_time
-            return response
+
+        except Exception as e:
+            logger.error(f"Error processing prompt: {e}")
+            response.success = False
+            response.message = str(e)
+
+        # finalize timing and return outside finally to avoid silencing exceptions (B012)
+        response.time_taken = time.time() - start_time
+        return response
 
     @staticmethod
     def summarize(request: PromptRequest) -> PromptResponse:
@@ -333,9 +352,7 @@ class PromptProcessor(BaseNLPService):
                 logger.debug("Failed to log generation path flags", exc_info=True)
 
             if use_seq2seqlm:
-                logger.info(
-                    "Using seq2seq generation for %s", sanitize_for_log(model_to_use)
-                )
+                logger.info("Using seq2seq generation for %s", sanitize_for_log(model_to_use))
                 return PromptProcessor._run_seq2seq_generation(
                     model_path, tokenizer, model_config, request
                 )
@@ -366,9 +383,7 @@ class PromptProcessor(BaseNLPService):
             raise InferenceError(f"Error generating text: {e}")
 
     @staticmethod
-    def _prepare_model_resources(
-        model_config: OnnxConfig, model_name: str
-    ) -> tuple[str, Any]:
+    def _prepare_model_resources(model_config: OnnxConfig, model_name: str) -> tuple[str, Any]:
         """Prepare model path and tokenizer."""
         # Resolve model folder first (tests may patch this) and then validate
         # availability using the supplied model_config so we don't re-fetch
@@ -384,9 +399,7 @@ class PromptProcessor(BaseNLPService):
             cfg=model_config,
             model_path=model_path,
         ):
-            raise ModelLoadError(
-                f"Model '{model_name}' not available or model files missing"
-            )
+            raise ModelLoadError(f"Model '{model_name}' not available or model files missing")
 
         logger.info("Using model path: %s", sanitize_for_log(model_path))
 
@@ -421,9 +434,7 @@ class PromptProcessor(BaseNLPService):
                 model_path, tokenizer, model_config, request
             )
 
-        return PromptProcessor._generate_seq2seq(
-            model, tokenizer, model_config, request
-        )
+        return PromptProcessor._generate_seq2seq(model, tokenizer, model_config, request)
 
     @staticmethod
     def _run_encoder_only_generation(
@@ -461,12 +472,96 @@ class PromptProcessor(BaseNLPService):
         request: PromptRequest,
     ) -> SummaryResults:
         """Run ONNX encoder/decoder text generation."""
-        encoder_path, decoder_path = PromptProcessor._get_model_file_paths(
-            model_path, model_config
-        )
+        encoder_path, decoder_path = PromptProcessor._get_model_file_paths(model_path, model_config)
 
-        encoder_session = PromptProcessor._get_encoder_session(encoder_path)
-        decoder_session = PromptProcessor._get_decoder_session(decoder_path)
+        # If the encoder and decoder paths point to the same ONNX file, or
+        # if the decoder ONNX graph appears to be a causal/decoder-only
+        # model (no encoder_hidden_states/encoder output input), prefer a
+        # single-session decoder-only flow to reduce memory and avoid
+        # unnecessary encoder session creation.
+        # Initialize session holders so they are defined regardless of
+        # early exceptions during heuristic inspection (prevents UnboundLocalError)
+        encoder_session = None
+        decoder_session = None
+
+        try:
+            decoder_only = False
+            same_path = os.path.abspath(os.path.normpath(encoder_path)) == os.path.abspath(
+                os.path.normpath(decoder_path)
+            )
+
+            # Heuristic: inspect decoder file inputs for encoder-related names.
+            if os.path.exists(decoder_path):
+                try:
+                    import onnx as _onnx
+
+                    m = _onnx.load(decoder_path)
+                    input_names = {inp.name for inp in getattr(m.graph, "input", [])}
+                    if not any(
+                        n
+                        for n in input_names
+                        if "encoder" in n.lower() or "encoder_hidden" in n.lower()
+                    ):
+                        decoder_only = True
+                except Exception:
+                    # If inspection fails, fall back to path equality heuristic
+                    decoder_only = False
+
+            if decoder_only or same_path:
+                # Create one session and run decoder-only generation (causal)
+                session = PromptProcessor._get_decoder_session(decoder_path)
+                if session is None:
+                    # Try encoder session as a fallback (some caches differ)
+                    session = PromptProcessor._get_encoder_session(decoder_path)
+                if session is None:
+                    raise ModelLoadError("Failed to load ONNX session for decoder-only model")
+
+                # If the model truly requires encoder outputs (same_path but not causal),
+                # we'll still proceed with the encoder+decoder flow using the same session
+                # object where possible (below). For now, if it looks causal, call the
+                # encoder-only generation routine which expects a single session.
+                if decoder_only:
+                    # If the decoder-only session produces more than one output
+                    # (logits + past_key_values) or expects past_key_values inputs,
+                    # use the decoder-only autoregressive helper which feeds back
+                    # past_key_values between steps. Otherwise fall back to the
+                    # encoder-only generation helper for simple causal graphs.
+                    try:
+                        sess_inputs = {i.name for i in session.get_inputs()}
+                        sess_outputs = [o.name for o in session.get_outputs()]
+                        expects_past = any(
+                            (
+                                "past_key_values" in n.lower()
+                                or ".key" in n.lower()
+                                or ".value" in n.lower()
+                            )
+                            for n in sess_inputs
+                        )
+                        if expects_past or len(sess_outputs) > 1:
+                            return PromptProcessor._generate_decoder_only(
+                                session, tokenizer, model_config, request
+                            )
+                        else:
+                            return PromptProcessor._generate_encoder_only(
+                                session, tokenizer, model_config, request
+                            )
+                    except Exception:
+                        return PromptProcessor._generate_encoder_only(
+                            session, tokenizer, model_config, request
+                        )
+
+                # same_path but not clearly decoder-only: reuse single session
+                encoder_session = session
+                decoder_session = session
+        except Exception:
+            # Fall back to standard behavior if heuristics fail
+            encoder_session = None
+            decoder_session = None
+
+        # If sessions not created above, create them separately
+        if encoder_session is None or decoder_session is None:
+            encoder_session = PromptProcessor._get_encoder_session(encoder_path)
+            decoder_session = PromptProcessor._get_decoder_session(decoder_path)
 
         if not encoder_session or not decoder_session:
             raise ModelLoadError("Failed to load ONNX sessions")
@@ -494,12 +589,11 @@ class PromptProcessor(BaseNLPService):
             special_tokens,
             model_config,
             request,
+            encoder_path,
         )
 
     @staticmethod
-    def _get_model_file_paths(
-        model_path: str, model_config: OnnxConfig
-    ) -> tuple[str, str]:
+    def _get_model_file_paths(model_path: str, model_config: OnnxConfig) -> tuple[str, str]:
         """Get encoder and decoder model file paths."""
         encoder_filename = PromptProcessor._get_model_filename(model_config, "encoder")
         decoder_filename = PromptProcessor._get_model_filename(model_config, "decoder")
@@ -515,7 +609,9 @@ class PromptProcessor(BaseNLPService):
         return encoder_path, decoder_path
 
     @staticmethod
-    def _get_model_filename(model_config: OnnxConfig, model_type: str) -> str:
+    def _get_model_filename(
+        model_config: OnnxConfig, model_type: str = "encoder", fallback_to_regular: bool = False
+    ) -> str:
         """Get model filename based on type and optimization settings."""
         use_optimized = getattr(model_config, "use_optimized", False)
 
@@ -550,7 +646,7 @@ class PromptProcessor(BaseNLPService):
         PromptProcessor._check_memory_and_clear_cache()
 
         try:
-            generate_kwargs = PromptProcessor._build_generation_params(
+            generate_kwargs: Dict[str, Any] = PromptProcessor._build_generation_params(
                 model_config, request
             )
 
@@ -572,9 +668,7 @@ class PromptProcessor(BaseNLPService):
                 from transformers import GenerationConfig
 
                 generation_config = GenerationConfig(**generate_kwargs)
-                summary_ids = model.generate(
-                    **inputs, generation_config=generation_config
-                )
+                summary_ids = model.generate(**inputs, generation_config=generation_config)
             except ImportError:
                 # Fallback for older transformers versions
                 summary_ids = model.generate(**inputs, **generate_kwargs)
@@ -586,13 +680,13 @@ class PromptProcessor(BaseNLPService):
 
             return SummaryResults(summary=summary, message="", success=True)
 
-        except MemoryError as e:
+        except MemoryError:
             logger.error("Out of memory during Seq2Seq generation")
             try:
                 from app.utils.cache_manager import CacheManager
 
                 CacheManager.clear_all_caches()
-            except:
+            except Exception:
                 pass
             return SummaryResults(
                 summary="",
@@ -608,11 +702,113 @@ class PromptProcessor(BaseNLPService):
             )
 
     @staticmethod
+    def _generate_decoder_only(
+        session: ort.InferenceSession,
+        tokenizer: Any,
+        model_config: OnnxConfig,
+        request: PromptRequest,
+    ) -> SummaryResults:
+        """Generate text from a decoder-only ONNX session that uses past_key_values.
+
+        This implements an autoregressive loop similar to the example provided
+        where the session takes the last token (or short prefix) and optional
+        `past_key_values.*` inputs and returns logits followed by past tensors.
+        """
+        try:
+            token_config = PromptProcessor._get_token_config(model_config, tokenizer)
+            input_text = PromptProcessor._prepare_input_text(request, model_config)
+
+            # Tokenize to numpy arrays
+            inputs = tokenizer(input_text, return_tensors="np")
+            gen_input_ids = np.ascontiguousarray(np.asarray(inputs["input_ids"]))
+            # attention mask handling omitted here; per-step mask is created below
+
+            max_new = int(
+                getattr(model_config, "max_new_tokens", token_config.get("max_length", 128))
+            )
+            max_new = min(max_new, int(token_config.get("max_length", 512)))
+
+            # Prepare mapping of input names for past injection
+            input_names = [i.name for i in session.get_inputs()]
+            output_names = [o.name for o in session.get_outputs()]
+
+            # Initialize past storage as None; outputs after first run will populate it
+            past = None
+
+            generated = gen_input_ids.copy()
+
+            for _step in range(max_new):
+                # Prepare step inputs: last token and attention mask
+                step_inputs = {}
+                step_inputs_name_input = None
+                # find likely input name for input ids
+                for n in input_names:
+                    if "input_ids" in n or n == "input":
+                        step_inputs_name_input = n
+                        break
+                if step_inputs_name_input is None:
+                    step_inputs_name_input = "input_ids"
+
+                step_inputs[step_inputs_name_input] = generated[:, -1:].astype(np.int64)
+
+                # Provide attention mask if the graph expects it
+                for n in input_names:
+                    if "attention_mask" in n or "mask" == n:
+                        step_inputs[n] = np.ones_like(generated, dtype=np.int64)
+                        break
+
+                # Inject past tensors if available and session expects them
+                if past is not None:
+                    # past is a list corresponding to outputs[1:]; match by name
+                    for out_name, out_val in zip(output_names[1:], past):
+                        if out_name in input_names:
+                            step_inputs[out_name] = out_val
+
+                try:
+                    outputs = session.run(None, step_inputs)
+                except Exception as e:
+                    logger.error(f"Decoder-only ONNX step failed: {e}")
+                    break
+
+                if not outputs:
+                    logger.warning("Decoder-only ONNX returned no outputs")
+                    break
+
+                logits = outputs[0]
+                # Remaining outputs are treated as past tensors
+                if len(outputs) > 1:
+                    past = outputs[1:]
+
+                # Greedy decoding: take argmax on last token logits
+                try:
+                    next_token = np.argmax(logits[:, -1, :], axis=-1).astype(np.int64)
+                except Exception:
+                    next_token = np.argmax(logits, axis=-1).astype(np.int64)
+
+                generated = np.concatenate([generated, next_token[:, None]], axis=1)
+
+                # Stop if EOS
+                eos = getattr(tokenizer, "eos_token_id", None) or getattr(
+                    model_config, "eos_token_id", None
+                )
+                if eos is not None and int(next_token[0]) == int(eos):
+                    break
+
+            # Decode generated tokens
+            out_ids = generated[0].tolist()
+            summary = tokenizer.decode(out_ids, skip_special_tokens=True).strip()
+            summary = PromptProcessor._capitalize_sentences(summary)
+            return SummaryResults(summary=summary, message="", success=True)
+        except Exception as e:
+            logger.exception("Decoder-only generation failed")
+            return SummaryResults(summary="", message=f"Error: {e}", success=False)
+
+    @staticmethod
     def _build_generation_params(
         model_config: OnnxConfig, request: PromptRequest
     ) -> Dict[str, Any]:
         """Build generation parameters for model."""
-        generate_kwargs = {}
+        generate_kwargs: Dict[str, Any] = {}
 
         # Basic parameters
         PromptProcessor._add_basic_params(generate_kwargs, model_config)
@@ -624,9 +820,7 @@ class PromptProcessor(BaseNLPService):
         return generate_kwargs
 
     @staticmethod
-    def _add_basic_params(
-        generate_kwargs: Dict[str, Any], model_config: OnnxConfig
-    ) -> None:
+    def _add_basic_params(generate_kwargs: Dict[str, Any], model_config: OnnxConfig) -> None:
         """Add basic generation parameters."""
         for param, default in [("max_length", DEFAULT_MAX_LENGTH), ("min_length", 0)]:
             value = getattr(model_config, param, default)
@@ -634,9 +828,7 @@ class PromptProcessor(BaseNLPService):
                 generate_kwargs[param] = value
 
     @staticmethod
-    def _add_beam_params(
-        generate_kwargs: Dict[str, Any], model_config: OnnxConfig
-    ) -> None:
+    def _add_beam_params(generate_kwargs: Dict[str, Any], model_config: OnnxConfig) -> None:
         """Add beam search parameters."""
         num_beams = getattr(model_config, "num_beams", 1)
         if num_beams > 1:
@@ -645,9 +837,7 @@ class PromptProcessor(BaseNLPService):
             generate_kwargs["early_stopping"] = True
 
     @staticmethod
-    def _add_optional_params(
-        generate_kwargs: Dict[str, Any], model_config: OnnxConfig
-    ) -> None:
+    def _add_optional_params(generate_kwargs: Dict[str, Any], model_config: OnnxConfig) -> None:
         """Add optional generation parameters."""
         for param in [
             "repetition_penalty",
@@ -667,9 +857,18 @@ class PromptProcessor(BaseNLPService):
         request: PromptRequest,
     ) -> None:
         """Add temperature and sampling parameters."""
-        temperature = request.temperature or getattr(model_config, "temperature", 0.0)
-        if temperature > 0.0:
-            generate_kwargs["temperature"] = temperature
+        temp_src = (
+            request.temperature
+            if request.temperature is not None
+            else getattr(model_config, "temperature", 0.0)
+        )
+        try:
+            temperature_val = float(temp_src)
+        except Exception:
+            temperature_val = 0.0
+
+        if temperature_val > 0.0:
+            generate_kwargs["temperature"] = temperature_val
             generate_kwargs["do_sample"] = True
 
     @staticmethod
@@ -692,6 +891,7 @@ class PromptProcessor(BaseNLPService):
         special_tokens: Set[str],
         model_config: OnnxConfig,
         request: PromptRequest,
+        encoder_path: str | None = None,
     ) -> SummaryResults:
         """Generate text using ONNX encoder/decoder sessions."""
         # Preemptive memory check to avoid OOM crashes
@@ -709,7 +909,7 @@ class PromptProcessor(BaseNLPService):
                 max_length=token_config["max_length"],
             )
             encoder_outputs = PromptProcessor._run_encoder(
-                encoder_session, inputs, model_config
+                encoder_session, inputs, model_config, encoder_path
             )
 
             # Generate tokens
@@ -728,14 +928,14 @@ class PromptProcessor(BaseNLPService):
             )
             return SummaryResults(summary=summary, message="", success=True)
 
-        except MemoryError as e:
+        except MemoryError:
             logger.error("Out of memory during ONNX generation")
             # Trigger aggressive cleanup
             try:
                 from app.utils.cache_manager import CacheManager
 
                 CacheManager.clear_all_caches()
-            except:
+            except Exception:
                 pass
             return SummaryResults(
                 summary="",
@@ -753,12 +953,8 @@ class PromptProcessor(BaseNLPService):
     @staticmethod
     def _get_token_config(model_config: OnnxConfig, tokenizer: Any) -> Dict[str, int]:
         """Get token configuration for ONNX inference."""
-        pad_token_id = getattr(
-            model_config, "pad_token_id", getattr(tokenizer, "pad_token_id", 0)
-        )
-        eos_token_id = getattr(
-            model_config, "eos_token_id", getattr(tokenizer, "eos_token_id", 1)
-        )
+        pad_token_id = getattr(model_config, "pad_token_id", getattr(tokenizer, "pad_token_id", 0))
+        eos_token_id = getattr(model_config, "eos_token_id", getattr(tokenizer, "eos_token_id", 1))
         max_length = getattr(model_config, "max_length", DEFAULT_MAX_LENGTH)
 
         # Get decoder start token
@@ -778,7 +974,10 @@ class PromptProcessor(BaseNLPService):
 
     @staticmethod
     def _run_encoder(
-        encoder_session: ort.InferenceSession, inputs: Dict, model_config: OnnxConfig
+        encoder_session: ort.InferenceSession,
+        inputs: Dict,
+        model_config: OnnxConfig,
+        encoder_path: str | None = None,
     ) -> Any:
         """Run encoder inference."""
         input_names = model_config.inputnames
@@ -798,6 +997,85 @@ class PromptProcessor(BaseNLPService):
             except Exception:
                 mask = inputs["attention_mask"]
             onnx_inputs[getattr(input_names, "mask", "attention_mask")] = mask
+
+        # Ensure required inputs like `position_ids` and any `past_key_values.*`
+        # are present. Some exported models (merged `_with_past` artifacts)
+        # require these inputs; provide safe defaults inferred from the
+        # ONNX input shapes to avoid runtime ValueError for missing inputs.
+        try:
+            sess_inputs = encoder_session.get_inputs()
+            seq_len = None
+            try:
+                seq_len = int(np.asarray(inputs["input_ids"]).shape[1])
+            except Exception:
+                seq_len = 1
+
+            for sin in sess_inputs:
+                name = sin.name
+                if name in onnx_inputs:
+                    continue
+                # Fill position_ids with arange sequence
+                if "position_ids" in name.lower():
+                    try:
+                        pos_arr = np.arange(seq_len, dtype=np.int64)[None, :]
+                        # If encoder_path provided, attempt to detect position embedding
+                        # table size and clamp indices to avoid out-of-bounds Gather.
+                        if encoder_path is not None:
+                            try:
+                                import onnx as _onnx
+
+                                m = _onnx.load(encoder_path)
+                                max_pos = None
+                                for init in getattr(m.graph, "initializer", []):
+                                    iname = getattr(init, "name", "") or ""
+                                    if "position" in iname.lower():
+                                        dims = list(getattr(init, "dims", []))
+                                        if dims:
+                                            max_pos = int(dims[0])
+                                            break
+                                if max_pos is not None:
+                                    pos_arr = np.minimum(pos_arr, max_pos - 1)
+                            except Exception:
+                                pass
+
+                        onnx_inputs[name] = pos_arr
+                        continue
+                    except Exception:
+                        onnx_inputs[name] = np.zeros((1, seq_len), dtype=np.int64)
+                        continue
+
+                # For past_key_values and similar cached tensors, infer shape
+                # from the session metadata and create zero-filled float arrays.
+                if (
+                    "past_key_values" in name.lower()
+                    or name.lower().startswith("past")
+                    or ".key" in name.lower()
+                    or ".value" in name.lower()
+                ):
+                    try:
+                        shape = []
+                        for d in getattr(sin, "shape", []) or []:
+                            if isinstance(d, int):
+                                shape.append(d)
+                            else:
+                                # Replace dynamic dims with conservative defaults
+                                # Prefer batch=1, seq_len where appropriate
+                                if len(shape) == 0:
+                                    shape.append(1)
+                                else:
+                                    shape.append(seq_len if seq_len is not None else 1)
+                        if not shape:
+                            shape = [1, seq_len if seq_len is not None else 1]
+                        onnx_inputs[name] = np.zeros(tuple(shape), dtype=np.float32)
+                        continue
+                    except Exception:
+                        try:
+                            onnx_inputs[name] = np.zeros((1, 1, 1, 1), dtype=np.float32)
+                        except Exception:
+                            pass
+        except Exception:
+            # Be conservative: if introspection fails, proceed with existing inputs
+            pass
 
         result = encoder_session.run(None, onnx_inputs)
         return result
@@ -847,9 +1125,7 @@ class PromptProcessor(BaseNLPService):
                 "model_version": model_version or "",
                 "tokenizer": tokenizer_id or "",
                 "max_length": int(token_config.get("max_length", 0)),
-                "decoder_start_token_id": int(
-                    token_config.get("decoder_start_token_id", 0)
-                ),
+                "decoder_start_token_id": int(token_config.get("decoder_start_token_id", 0)),
                 "eos_token_id": int(token_config.get("eos_token_id", 0)),
                 "tenant": getattr(request, "tenant_code", None) or "",
             }
@@ -870,10 +1146,7 @@ class PromptProcessor(BaseNLPService):
                 m.update(PromptProcessor._hash_array(mask, np.int8).encode())
 
             try:
-                if (
-                    isinstance(encoder_outputs, (list, tuple))
-                    and len(encoder_outputs) > 0
-                ):
+                if isinstance(encoder_outputs, (list, tuple)) and len(encoder_outputs) > 0:
                     enc0 = np.ascontiguousarray(encoder_outputs[0])
                     enc_digest = PromptProcessor._hash_array(enc0, np.float16)
                     m.update(b"||enc0||")
@@ -898,11 +1171,15 @@ class PromptProcessor(BaseNLPService):
     ) -> List[int]:
         """Generate tokens using decoder."""
         decoder_input_names = model_config.decoder_inputnames
-        decoder_input_ids = np.array(
-            [[token_config["decoder_start_token_id"]]], dtype=np.int64
-        )
-        temperature = request.temperature or getattr(model_config, "temperature", 0.0)
-        summary_ids = []
+        decoder_input_ids = np.array([[token_config["decoder_start_token_id"]]], dtype=np.int64)
+        # Normalize temperature to a concrete float before any numeric ops/calls
+        temperature_raw = request.temperature or getattr(model_config, "temperature", 0.0)
+        try:
+            temperature: float = float(temperature_raw or 0.0)
+        except Exception:
+            temperature = 0.0
+
+        summary_ids: List[int] = []
 
         # Attempt to use centralized deterministic generation cache
         try:
@@ -931,9 +1208,7 @@ class PromptProcessor(BaseNLPService):
                 pass
 
         step_start = time.time()
-        step_timeout = (
-            getattr(request, "timeout", DEFAULT_TIMEOUT) / token_config["max_length"]
-        )
+        step_timeout = getattr(request, "timeout", DEFAULT_TIMEOUT) / token_config["max_length"]
 
         # Ensure encoder_outputs[0] is a numpy array for the decoder inputs
         try:
@@ -947,17 +1222,13 @@ class PromptProcessor(BaseNLPService):
                 break
 
             decoder_inputs = {
-                getattr(
-                    decoder_input_names, "encoder_output", "encoder_hidden_states"
-                ): enc0,
+                getattr(decoder_input_names, "encoder_output", "encoder_hidden_states"): enc0,
                 getattr(decoder_input_names, "input", "input_ids"): decoder_input_ids,
             }
 
             if "attention_mask" in inputs:
                 try:
-                    mask_arr = np.ascontiguousarray(
-                        np.asarray(inputs["attention_mask"])
-                    )
+                    mask_arr = np.ascontiguousarray(np.asarray(inputs["attention_mask"]))
                     decoder_inputs[
                         getattr(decoder_input_names, "mask", "encoder_attention_mask")
                     ] = mask_arr.astype(np.int64)
@@ -1004,9 +1275,7 @@ class PromptProcessor(BaseNLPService):
                 logger.debug("EOS token reached")
                 break
 
-            decoder_input_ids = np.concatenate(
-                [decoder_input_ids, [[next_token_id]]], axis=1
-            )
+            decoder_input_ids = np.concatenate([decoder_input_ids, [[next_token_id]]], axis=1)
 
         return summary_ids
 
@@ -1018,11 +1287,7 @@ class PromptProcessor(BaseNLPService):
     ) -> np.ndarray:
         """Apply repetition penalty to logits and return modified array."""
         try:
-            if (
-                repetition_penalty is None
-                or repetition_penalty == 1.0
-                or not generated_ids
-            ):
+            if repetition_penalty is None or repetition_penalty == 1.0 or not generated_ids:
                 return logits
             out = logits.copy()
             for token_id in set(generated_ids):
@@ -1057,8 +1322,8 @@ class PromptProcessor(BaseNLPService):
             sorted_indices = np.argsort(probs)[::-1]
             sorted_probs = probs[sorted_indices]
             cumsum_probs = np.cumsum(sorted_probs)
-            cutoff_idx = np.searchsorted(cumsum_probs, top_p) + 1
-            cutoff_idx = min(cutoff_idx, len(sorted_indices))
+            cutoff_idx = int(np.searchsorted(cumsum_probs, top_p) + 1)
+            cutoff_idx = min(cutoff_idx, int(len(sorted_indices)))
             filtered = np.zeros_like(probs)
             filtered[sorted_indices[:cutoff_idx]] = sorted_probs[:cutoff_idx]
             if filtered.sum() > 0:
@@ -1140,14 +1405,10 @@ class PromptProcessor(BaseNLPService):
                     "tokenizer": str(tokenizer_id) or "",
                     "skip_special": True,
                     "ids": list(map(int, output_ids)),
-                    "special_tokens": (
-                        sorted([t for t in special_tokens]) if special_tokens else []
-                    ),
+                    "special_tokens": sorted(special_tokens) if special_tokens else [],
                 }
                 m = hashlib.sha256()
-                m.update(
-                    json.dumps(parts, sort_keys=True, separators=(",", ":")).encode()
-                )
+                m.update(json.dumps(parts, sort_keys=True, separators=(",", ":")).encode())
                 cache_key = m.hexdigest()
                 cached = dec_cache.get(cache_key)
                 if cached is not None:
@@ -1189,15 +1450,12 @@ class PromptProcessor(BaseNLPService):
                     input_text,
                     return_tensors="np",
                     truncation=True,
-                    max_length=getattr(model_config, "max_length", DEFAULT_MAX_LENGTH)
-                    - 1,
+                    max_length=getattr(model_config, "max_length", DEFAULT_MAX_LENGTH) - 1,
                     add_special_tokens=False,
                 )
                 # Prepend BOS token
                 input_ids = inputs["input_ids"]
-                input_ids = np.concatenate(
-                    [np.array([[bos_token_id]]), input_ids], axis=1
-                )
+                input_ids = np.concatenate([np.array([[bos_token_id]]), input_ids], axis=1)
                 inputs["input_ids"] = input_ids
                 if "attention_mask" in inputs:
                     attention_mask = np.concatenate(
@@ -1214,9 +1472,7 @@ class PromptProcessor(BaseNLPService):
 
             # Normalize tokenizer outputs to numpy arrays to avoid editor/type warnings
             try:
-                inputs["input_ids"] = np.ascontiguousarray(
-                    np.asarray(inputs["input_ids"])
-                )
+                inputs["input_ids"] = np.ascontiguousarray(np.asarray(inputs["input_ids"]))
                 if "attention_mask" in inputs:
                     inputs["attention_mask"] = np.ascontiguousarray(
                         np.asarray(inputs["attention_mask"])
@@ -1235,9 +1491,7 @@ class PromptProcessor(BaseNLPService):
             onnx_inputs = {"input_ids": enc_in_ids}
             if "attention_mask" in inputs:
                 try:
-                    enc_mask = np.ascontiguousarray(
-                        np.asarray(inputs["attention_mask"])
-                    )
+                    enc_mask = np.ascontiguousarray(np.asarray(inputs["attention_mask"]))
                     enc_mask = enc_mask.astype(np.int64)
                 except Exception:
                     enc_mask = inputs["attention_mask"]
@@ -1255,9 +1509,15 @@ class PromptProcessor(BaseNLPService):
                 logits = outputs[0]
 
             # Generate next tokens
-            temperature = request.temperature or getattr(
-                model_config, "temperature", 0.8
+            temp_src = (
+                request.temperature
+                if request.temperature is not None
+                else getattr(model_config, "temperature", 0.8)
             )
+            try:
+                temperature = float(temp_src)
+            except Exception:
+                temperature = 0.0
             top_k = getattr(model_config, "top_k", None)
             top_p = getattr(model_config, "top_p", None)
             repetition_penalty = getattr(model_config, "repetition_penalty", None)
@@ -1274,9 +1534,7 @@ class PromptProcessor(BaseNLPService):
 
             # Time-based safety: avoid long-running generation when timeout supplied
             step_start = time.time()
-            step_timeout = getattr(request, "timeout", DEFAULT_TIMEOUT) / max(
-                1, max_new_tokens
-            )
+            step_timeout = getattr(request, "timeout", DEFAULT_TIMEOUT) / max(1, max_new_tokens)
 
             generated_ids = inputs["input_ids"][0].tolist()
 
@@ -1284,9 +1542,7 @@ class PromptProcessor(BaseNLPService):
                 # Break if per-step timeout exceeded (defensive guard)
                 try:
                     if time.time() - step_start > step_timeout * (step + 1):
-                        logger.warning(
-                            f"Encoder-only generation step timeout at step {step}"
-                        )
+                        logger.warning(f"Encoder-only generation step timeout at step {step}")
                         break
                 except Exception:
                     pass
@@ -1309,14 +1565,10 @@ class PromptProcessor(BaseNLPService):
                 new_input = np.array([generated_ids], dtype=np.int64)
                 onnx_inputs["input_ids"] = new_input
                 if "attention_mask" in onnx_inputs:
-                    onnx_inputs["attention_mask"] = np.ones_like(
-                        new_input, dtype=np.int64
-                    )
+                    onnx_inputs["attention_mask"] = np.ones_like(new_input, dtype=np.int64)
                 # Update position_ids for new sequence length
                 new_seq_len = new_input.shape[1]
-                onnx_inputs["position_ids"] = np.arange(new_seq_len, dtype=np.int64)[
-                    None, :
-                ]
+                onnx_inputs["position_ids"] = np.arange(new_seq_len, dtype=np.int64)[None, :]
 
                 outputs = encoder_session.run(None, onnx_inputs)
                 try:
@@ -1396,9 +1648,7 @@ class PromptProcessor(BaseNLPService):
 
         try:
             # Validate batch size
-            BatchLimiter.validate_batch_size(
-                request.inputs, max_size=DEFAULT_BATCH_SIZE
-            )
+            BatchLimiter.validate_batch_size(request.inputs, max_size=DEFAULT_BATCH_SIZE)
 
             loop = get_event_loop()
             try:
@@ -1423,7 +1673,7 @@ class PromptProcessor(BaseNLPService):
             for idx, result in enumerate(results):
                 # Handle exceptions and objects without `success` safely
                 if isinstance(result, Exception) or (
-                    hasattr(result, "success") and not getattr(result, "success")
+                    hasattr(result, "success") and not result.success
                 ):
                     err_msg = getattr(result, "message", str(result))
                     logger.error(f"Error in input {idx}: {err_msg}")
@@ -1446,9 +1696,9 @@ class PromptProcessor(BaseNLPService):
             response.success = False
             response.message = f"Error generating summarization: {str(e)}"
             logger.exception("Unexpected error during batch summarization")
-        finally:
-            response.time_taken = time.time() - start_time
-            return response
+        # finalize timing and return outside finally to avoid silencing exceptions (B012)
+        response.time_taken = time.time() - start_time
+        return response
 
     @classmethod
     def summarize_batch(cls, request):

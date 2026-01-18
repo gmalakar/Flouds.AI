@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-import json
+import json  # noqa: F401
 
 from app.config.appsettings import AppSettings, OnnxSettings
 from app.config.config_loader import ConfigLoader

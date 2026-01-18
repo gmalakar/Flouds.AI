@@ -5,25 +5,15 @@
 # =============================================================================
 
 import base64
-import binascii
 import csv
 import re
 import time
 from io import BytesIO, StringIO
-from typing import List
+from typing import Any, List
 
 import pdfplumber
 from bs4 import BeautifulSoup
 from docx import Document
-
-try:
-    from pptx import Presentation
-except ImportError:
-    Presentation = None
-try:
-    import openpyxl
-except ImportError:
-    openpyxl = None
 
 from app.exceptions import InferenceError, ModelNotFoundError
 from app.logger import get_logger
@@ -33,6 +23,20 @@ from app.models.file_request import FileRequest
 from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("extractor_service")
+
+
+Presentation: Any = None
+try:
+    from pptx import Presentation as _Presentation
+
+    Presentation = _Presentation
+except Exception:
+    # Presentation optional; keep as None when library unavailable
+    Presentation = None
+try:
+    import openpyxl
+except Exception:
+    openpyxl = None
 
 
 class ExtractorService:
@@ -91,7 +95,7 @@ class ExtractorService:
         elif isinstance(req.file_content, str):
             try:
                 file_bytes = base64.b64decode(req.file_content)
-            except (binascii.Error, ValueError):
+            except ValueError:
                 raise InferenceError("Invalid base64 encoded file content")
         else:
             raise InferenceError("file_content must be base64 string or bytes")
@@ -140,9 +144,7 @@ class ExtractorService:
                     if p.text.strip()
                 ]
             return [
-                ExtractedFileContent(
-                    content=para, item_number=i + 1, content_as="paragraphs"
-                )
+                ExtractedFileContent(content=para, item_number=i + 1, content_as="paragraphs")
                 for i, para in enumerate(paragraphs)
             ]
         except Exception as e:
@@ -182,9 +184,7 @@ class ExtractorService:
         except UnicodeDecodeError:
             raise InferenceError("File is not valid UTF-8 encoded text")
         normalized = ExtractorService._normalize_whitespace(text)
-        return [
-            ExtractedFileContent(content=normalized, item_number=1, content_as="text")
-        ]
+        return [ExtractedFileContent(content=normalized, item_number=1, content_as="text")]
 
     @staticmethod
     def _extract_html(file_bytes: bytes) -> List[ExtractedFileContent]:
@@ -211,16 +211,12 @@ class ExtractorService:
                 slides = []
                 for slide in prs.slides:
                     slide_text = [
-                        ExtractorService._normalize_whitespace(
-                            getattr(shape, "text", "")
-                        )
+                        ExtractorService._normalize_whitespace(getattr(shape, "text", ""))
                         for shape in slide.shapes
                     ]
                     slides.append("\n".join(slide_text))
             return [
-                ExtractedFileContent(
-                    content=slide, item_number=i + 1, content_as="slides"
-                )
+                ExtractedFileContent(content=slide, item_number=i + 1, content_as="slides")
                 for i, slide in enumerate(slides)
             ]
         except Exception as e:
@@ -246,15 +242,11 @@ class ExtractorService:
                             row_str = ",".join(
                                 str(cell) if cell is not None else "" for cell in row
                             )
-                            sheet_data.append(
-                                ExtractorService._normalize_whitespace(row_str)
-                            )
+                            sheet_data.append(ExtractorService._normalize_whitespace(row_str))
                     sheets.append("\n".join(sheet_data))
 
             return [
-                ExtractedFileContent(
-                    content=sheet, item_number=i + 1, content_as="sheets"
-                )
+                ExtractedFileContent(content=sheet, item_number=i + 1, content_as="sheets")
                 for i, sheet in enumerate(sheets)
             ]
         except Exception as e:

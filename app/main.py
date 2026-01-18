@@ -8,52 +8,24 @@ import os
 import signal
 import sys
 import warnings
-from contextlib import asynccontextmanager
-
-from app.dependencies import auth
-
-# Suppress PyTorch ONNX warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
-
-print("Starting imports...")
-import gc
 from types import FrameType
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPBearer
 
-print("FastAPI imported")
-
-# Force garbage collection to free memory
-gc.collect()
-print("Memory cleanup completed")
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse, Response
-
 from app.app_init import APP_SETTINGS
-from app.dependencies.auth import AuthMiddleware, common_headers
-from app.exceptions import FloudsBaseException
-from app.logger import get_logger
-
-# Compatibility guard: some Optimum/ORT versions removed internal attribute
-# `_is_stateful` expected by older code paths. Set a safe default on startup
-# so downstream code that expects this attribute won't fail with AttributeError.
-try:
-    from optimum.onnxruntime import ORTModelForSeq2SeqLM
-
-    if not hasattr(ORTModelForSeq2SeqLM, "_is_stateful"):
-        setattr(ORTModelForSeq2SeqLM, "_is_stateful", False)
-except Exception:
-    # Optimum not installed or import failed; nothing to patch.
-    pass
 from app.app_routing import setup_routing
 from app.app_startup import lifespan
-from app.services import config_service
+from app.exceptions import FloudsBaseException
+from app.logger import get_logger
 from app.utils.enhance_openapi import setup_enhanced_openapi
 from app.utils.error_handler import ErrorHandler
 from app.utils.log_sanitizer import sanitize_for_log
+
+# Suppress PyTorch ONNX warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.onnx")
 
 logger = get_logger("main")
 
@@ -94,7 +66,7 @@ setup_enhanced_openapi(app)
 
 # Global exception handlers
 @app.exception_handler(FloudsBaseException)
-async def flouds_exception_handler(request: Request, exc: FloudsBaseException):
+async def flouds_exception_handler(request: Request, exc: FloudsBaseException) -> JSONResponse:
     """Handle custom Flouds exceptions."""
     status_code = ErrorHandler.get_http_status(exc)
     logger.warning(
@@ -114,7 +86,7 @@ async def flouds_exception_handler(request: Request, exc: FloudsBaseException):
 
 
 @app.exception_handler(MemoryError)
-async def memory_error_handler(request: Request, exc: MemoryError):
+async def memory_error_handler(request: Request, exc: MemoryError) -> JSONResponse:
     """Handle out-of-memory errors without crashing the service."""
     logger.error(
         "Out of memory error in %s: %s",
@@ -142,12 +114,10 @@ async def memory_error_handler(request: Request, exc: MemoryError):
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle unexpected exceptions."""
     # Let the ErrorHandler process the exception (logging/telemetry)
-    ErrorHandler.handle_exception(
-        exc, f"request to {request.url}", include_traceback=True
-    )
+    ErrorHandler.handle_exception(exc, f"request to {request.url}", include_traceback=True)
     return JSONResponse(
         status_code=500,
         content={
@@ -160,8 +130,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Configure middleware and routers (moved to app/app_routing.py)
-from app.app_routing import setup_routing
-
 # Centralized routing + middleware setup
 setup_routing(app)
 
@@ -212,9 +180,7 @@ def run_server():
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    logger.info(
-        f"Starting uvicorn server on {APP_SETTINGS.server.host}:{APP_SETTINGS.server.port}"
-    )
+    logger.info(f"Starting uvicorn server on {APP_SETTINGS.server.host}:{APP_SETTINGS.server.port}")
 
     import uvicorn
 

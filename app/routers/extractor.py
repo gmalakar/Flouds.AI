@@ -19,6 +19,9 @@ from app.utils.error_handler import ErrorHandler
 router = APIRouter()
 logger = get_logger("router")
 
+# Move Form() default to module-level constant to avoid B008
+DEFAULT_EXTENSION_FORM = Form(None)
+
 
 @router.post("/extract", response_model=ExtractedResponse)
 async def extract(request: FileRequest) -> ExtractedResponse:
@@ -28,14 +31,14 @@ async def extract(request: FileRequest) -> ExtractedResponse:
     except FloudsBaseException as e:
         status_code = ErrorHandler.get_http_status(e)
         raise HTTPException(status_code=status_code, detail=e.message)
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in extract endpoint")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/extract_file", response_model=ExtractedResponse)
 async def extract_file(
-    file: UploadFile, extension: str = Form(None)
+    file: UploadFile, extension: str = DEFAULT_EXTENSION_FORM
 ) -> ExtractedResponse:
     try:
         file_bytes = await file.read()
@@ -44,9 +47,7 @@ async def extract_file(
         # Auto-detect extension if not provided
         if not extension:
             extension = (
-                file.filename.split(".")[-1]
-                if file.filename and "." in file.filename
-                else "txt"
+                file.filename.split(".")[-1] if file.filename and "." in file.filename else "txt"
             )
 
         request = FileRequest(file_content=file_content, extention=extension)
@@ -55,6 +56,6 @@ async def extract_file(
     except FloudsBaseException as e:
         status_code = ErrorHandler.get_http_status(e)
         raise HTTPException(status_code=status_code, detail=e.message)
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in extract_file endpoint")
         raise HTTPException(status_code=500, detail="Internal server error")

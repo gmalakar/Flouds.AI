@@ -1,7 +1,7 @@
 # Embedding Process Flow and Logic
 
 This document describes the embedding pipeline used in this project (paths refer to `Flouds.Py`), the key caches and constants, deterministic behavior guarantees, and how to run the focused embedding tests.
- 
+
 ![Embedding flow diagram](./embedding_flow.svg)
 
 ## Overview

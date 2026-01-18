@@ -45,15 +45,13 @@ def test_prepare_onnx_inputs_batch_and_dtype():
 
 def test_attention_mask_normalization_various_shapes():
     # Create distinguishable token embeddings so pooling result is predictable
-    seq_len = 3
+    # seq_len was previously unused; remove assignment
     dim = 4
     # embeddings: tokens 0,1,2 vectors = [1],[2],[3] repeated
     emb_tokens = np.array([[1.0] * dim, [2.0] * dim, [3.0] * dim])
     emb_3d = emb_tokens[None, :, :]  # shape (1, seq_len, dim)
 
-    model_config = SimpleNamespace(
-        pooling_strategy="mean", force_pooling=False, normalize=False
-    )
+    model_config = SimpleNamespace(pooling_strategy="mean", force_pooling=False, normalize=False)
 
     # Case A: 1D mask -> should be treated as (1, seq_len)
     mask_1d = np.array([1, 0, 1])

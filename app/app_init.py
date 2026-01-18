@@ -23,9 +23,7 @@ else:
 
 logger.info(f"FLOUDS_API_ENV: {os.environ.get('FLOUDS_API_ENV', 'Enterprise')}")
 logger.info(f"FLOUDS_ONNX_ROOT: {os.environ.get('FLOUDS_ONNX_ROOT', 'Not set')}")
-logger.info(
-    f"FLOUDS_ONNX_CONFIG_FILE: {os.environ.get('FLOUDS_ONNX_CONFIG_FILE', 'Not set')}"
-)
+logger.info(f"FLOUDS_ONNX_CONFIG_FILE: {os.environ.get('FLOUDS_ONNX_CONFIG_FILE', 'Not set')}")
 logger.info(f"FLOUDS_CLIENTS_DB: {os.environ.get('FLOUDS_CLIENTS_DB', 'clients.db')}")
 logger.info(f"FLOUDS_LOG_PATH: {os.environ.get('FLOUDS_LOG_PATH', 'Not set')}")
 
@@ -52,7 +50,7 @@ except (LookupError, OSError):
         try:
             nltk.download("punkt_tab")
             logger.info("NLTK punkt_tab tokenizer downloaded successfully.")
-        except:
+        except Exception:
             nltk.download("punkt")
             logger.info("NLTK punkt tokenizer downloaded successfully.")
 

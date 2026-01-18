@@ -12,11 +12,20 @@ from fastapi import APIRouter, HTTPException, Query
 from app.logger import get_logger
 from app.models.model_info_response import ModelInfoResponse
 from app.services.base_nlp_service import BaseNLPService
-from app.utils.path_validator import validate_safe_path
+
+# validate_safe_path not required in this module
 
 logger = get_logger("model_info")
 
 router = APIRouter()
+
+# Module-level Query defaults to avoid function-call defaults (flake8 B008)
+MODEL_QUERY = Query(..., description="Name of the model to check")
+PROPERTY_NAME_QUERY = Query(
+    None,
+    description="Optional property name from `details` to return (returns its value or null).",
+)
+FOR_TASK_QUERY = Query(None, description="Optional task filter (e.g. 'embedding', 'prompt')")
 
 
 class ModelInfoService:
@@ -32,9 +41,10 @@ class ModelInfoService:
         tasks: List[str] = []
 
         # Prefer explicit `tasks` list in config.
-        if hasattr(config, "tasks") and getattr(config, "tasks"):
+        if hasattr(config, "tasks") and config.tasks:
             try:
-                tasks = [str(t).lower() for t in getattr(config, "tasks")]
+                # Access attribute directly after hasattr check to satisfy bugbear
+                tasks = [str(t).lower() for t in config.tasks]
             except Exception:
                 tasks = []
 
@@ -62,9 +72,7 @@ class ModelInfoService:
         """
         common_required = {"max_length", "chunk_logic", "encoder_onnx_model"}
 
-        types: List[str] = (
-            [model_type] if isinstance(model_type, str) else list(model_type or [])
-        )
+        types: List[str] = [model_type] if isinstance(model_type, str) else list(model_type or [])
 
         required = set(common_required)
         if "embedding" in types:
@@ -91,9 +99,7 @@ class ModelInfoService:
             "use_optimized": False,
         }
 
-        types: List[str] = (
-            [model_type] if isinstance(model_type, str) else list(model_type or [])
-        )
+        types: List[str] = [model_type] if isinstance(model_type, str) else list(model_type or [])
 
         defaults: Dict[str, Any] = dict(common_defaults)
 
@@ -174,9 +180,7 @@ class ModelInfoService:
             "encoder_only",
         }
 
-        types: List[str] = (
-            [model_type] if isinstance(model_type, str) else list(model_type or [])
-        )
+        types: List[str] = [model_type] if isinstance(model_type, str) else list(model_type or [])
 
         allowed = set(common_params)
         if "embedding" in types:
@@ -256,26 +260,22 @@ class ModelInfoService:
 
             if session:
                 # Detect dimension
-                native_dim = cast(
-                    Any, SentenceTransformer
-                )._get_native_dimension_from_session(session)
+                native_dim = cast(Any, SentenceTransformer)._get_native_dimension_from_session(
+                    session
+                )
                 if native_dim:
                     auto_detected["dimension"] = native_dim
 
                 # Detect output names
-                output_names = cast(
-                    Any, SentenceTransformer
-                )._get_output_names_from_session(session)
+                output_names = cast(Any, SentenceTransformer)._get_output_names_from_session(
+                    session
+                )
                 if output_names:
                     auto_detected["outputnames"] = output_names
-                    auto_detected["primary_output"] = (
-                        output_names[0] if output_names else None
-                    )
+                    auto_detected["primary_output"] = output_names[0] if output_names else None
 
                 # Detect input names
-                input_names: List[str] = [
-                    getattr(inp, "name", "") for inp in session.get_inputs()
-                ]
+                input_names: List[str] = [getattr(inp, "name", "") for inp in session.get_inputs()]
                 input_names = [n for n in input_names if n]
                 if input_names:
                     auto_detected["inputnames"] = input_names
@@ -283,9 +283,7 @@ class ModelInfoService:
                 # Detect vocab_size (for language models)
                 from app.services.prompt_service import PromptProcessor
 
-                vocab_size = cast(Any, PromptProcessor)._get_vocab_size_from_session(
-                    session
-                )
+                vocab_size = cast(Any, PromptProcessor)._get_vocab_size_from_session(session)
                 if vocab_size:
                     auto_detected["vocab_size"] = vocab_size
 
@@ -350,9 +348,7 @@ class ModelInfoService:
             return response
 
         # Check if ONNX files exist
-        files_info: Dict[str, Any] = ModelInfoService._check_onnx_files(
-            model_path, config
-        )
+        files_info: Dict[str, Any] = ModelInfoService._check_onnx_files(model_path, config)
         details["files_info"] = files_info
         details["onnx_file_available"] = files_info["encoder_exists"]
 
@@ -375,9 +371,7 @@ class ModelInfoService:
                     config_params[k] = v
 
         # Filter config params based on model type
-        config_params = ModelInfoService._filter_config_params(
-            config_params, model_type
-        )
+        config_params = ModelInfoService._filter_config_params(config_params, model_type)
         details["config_params"] = config_params
 
         # Get auto-detected parameters (call protected helpers via Any cast)
@@ -395,9 +389,7 @@ class ModelInfoService:
 
         # Update message based on availability
         if not details.get("onnx_file_available"):
-            response["warnings"] = [
-                f"ONNX model file '{files_info['encoder_file']}' not found"
-            ]
+            response["warnings"] = [f"ONNX model file '{files_info['encoder_file']}' not found"]
             response["message"] = "Model found in config but ONNX files are missing"
 
         return response
@@ -410,12 +402,8 @@ class ModelInfoService:
     tags=["Model Information"],
 )
 async def get_model_info(
-    model: str = Query(..., description="Name of the model to check"),
-    property_name: Optional[str] = Query(
-        None,
-        description="Optional property name from `details` to return (returns its value or null).",
-    ),
-):
+    model: str = MODEL_QUERY, property_name: Optional[str] = PROPERTY_NAME_QUERY
+) -> Any:
     """
     Get comprehensive model information including availability and parameters.
 
@@ -498,11 +486,7 @@ async def get_model_info(
 
 @router.get("/models/list", tags=["Model Information"])
 @router.post("/models/list", tags=["Model Information"])
-async def list_models(
-    for_task: Optional[str] = Query(
-        None, description="Optional task filter (e.g. 'embedding', 'prompt')"
-    )
-) -> Dict[str, Any]:
+async def list_models(for_task: Optional[str] = FOR_TASK_QUERY) -> Dict[str, Any]:
     """
     List all available models in the configuration.
 
@@ -539,9 +523,7 @@ async def list_models(
                 if isinstance(model_type, (list, tuple)):
                     type_list = [str(t).lower() for t in model_type]
                 elif isinstance(model_type, str):
-                    type_list = [
-                        p.strip().lower() for p in model_type.split(",") if p.strip()
-                    ]
+                    type_list = [p.strip().lower() for p in model_type.split(",") if p.strip()]
                 else:
                     type_list = []
             except Exception:

@@ -7,7 +7,7 @@
 """Middleware for path security validation."""
 
 import re
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, Awaitable, Callable
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -34,9 +34,7 @@ SUSPICIOUS_PATTERNS = [
     r"C:\\Program Files",  # Windows program directory
 ]
 
-COMPILED_PATTERNS = [
-    re.compile(pattern, re.IGNORECASE) for pattern in SUSPICIOUS_PATTERNS
-]
+COMPILED_PATTERNS = [re.compile(pattern, re.IGNORECASE) for pattern in SUSPICIOUS_PATTERNS]
 
 
 class PathSecurityMiddleware(BaseHTTPMiddleware):
@@ -58,13 +56,11 @@ class PathSecurityMiddleware(BaseHTTPMiddleware):
                     )
                     return True
         elif isinstance(value, dict):
-            d = cast(dict[str, Any], value)
-            for key, val in d.items():
+            for key, val in value.items():
                 if self._scan_value(val, f"{path}.{key}"):
                     return True
         elif isinstance(value, list):
-            lst = cast(list[Any], value)
-            for i, val in enumerate(lst):
+            for i, val in enumerate(value):
                 if self._scan_value(val, f"{path}[{i}]"):
                     return True
         return False
@@ -75,9 +71,7 @@ class PathSecurityMiddleware(BaseHTTPMiddleware):
         """Process request and scan for path traversal attempts."""
 
         # Skip health checks and static content
-        if request.url.path.startswith(
-            ("/api/v1/health", "/docs", "/redoc", "/openapi.json")
-        ):
+        if request.url.path.startswith(("/api/v1/health", "/docs", "/redoc", "/openapi.json")):
             return await call_next(request)
 
         try:

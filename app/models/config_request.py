@@ -26,8 +26,8 @@ class ConfigRequest(BaseRequest):
       - encrypted: optional flag indicating value is stored encrypted
     """
 
-    key: str = Field(cast(Any, ...), description="The config key.")  # type: ignore
-    value: str = Field(cast(Any, ...), description="The config value.")  # type: ignore
+    key: str = Field(cast(Any, ...), description="The config key.")
+    value: str = Field(cast(Any, ...), description="The config value.")
     encrypted: Optional[bool] = Field(False, description="Is the value encrypted?")
 
     @field_validator("key")

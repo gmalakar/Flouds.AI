@@ -14,7 +14,7 @@ class SimpleCache:
 
     def __init__(self, max_size: int = 5):
         self.max_size = max_size
-        self.cache = OrderedDict()
+        self.cache: OrderedDict[str, Any] = OrderedDict()
         self.lock = Lock()
 
     def get(self, key: str) -> Optional[Any]:

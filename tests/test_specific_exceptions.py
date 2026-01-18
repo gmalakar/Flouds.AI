@@ -29,8 +29,8 @@ class TestSpecificExceptions:
 
     def test_database_exceptions_in_key_manager(self):
         """Test database-specific exceptions in KeyManager (SQLite)."""
-        import os
-        import tempfile
+        import os  # noqa: F401
+        import tempfile  # noqa: F401
 
         from app.modules.key_manager import KeyManager
 
@@ -80,9 +80,7 @@ class TestSpecificExceptions:
         """Test cache-specific exceptions in CacheManager."""
         from app.utils.cache_manager import CacheManager
 
-        with patch(
-            "app.config.config_loader.ConfigLoader.get_cache_stats"
-        ) as mock_stats:
+        with patch("app.config.config_loader.ConfigLoader.get_cache_stats") as mock_stats:
             mock_stats.side_effect = Exception("Cache error")
 
             with pytest.raises(CacheInvalidationError):
@@ -92,9 +90,7 @@ class TestSpecificExceptions:
         """Test resource-specific exceptions in PerformanceMonitor."""
         from app.utils.performance_monitor import PerformanceMonitor
 
-        with patch(
-            "app.utils.performance_monitor.psutil.virtual_memory"
-        ) as mock_memory:
+        with patch("app.utils.performance_monitor.psutil.virtual_memory") as mock_memory:
             mock_memory.side_effect = Exception("System error")
 
             with pytest.raises(ResourceException):
@@ -104,9 +100,7 @@ class TestSpecificExceptions:
         """Test model-specific exceptions in BaseNLPService."""
         from app.services.base_nlp_service import BaseNLPService
 
-        with patch(
-            "app.config.config_loader.ConfigLoader.get_onnx_config"
-        ) as mock_config:
+        with patch("app.config.config_loader.ConfigLoader.get_onnx_config") as mock_config:
             mock_config.side_effect = Exception("Config error")
 
             # Should return None instead of raising exception

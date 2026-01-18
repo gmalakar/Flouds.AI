@@ -98,18 +98,14 @@ class TestEmbedderRefactoring:
         with patch.object(SentenceTransformer, "_preprocess_text") as mock_preprocess:
             mock_preprocess.return_value = "processed text"
 
-            result = SentenceTransformer._prepare_text_for_embedding(
-                "Test Text", mock_config
-            )
+            result = SentenceTransformer._prepare_text_for_embedding("Test Text", mock_config)
 
             assert result == "processed text"
             mock_preprocess.assert_called_once_with("Test Text", True, False)
 
     def test_prepare_embedding_resources(self):
         """Test embedding resource preparation."""
-        with patch.object(
-            SentenceTransformer, "_get_model_config"
-        ) as mock_config, patch.object(
+        with patch.object(SentenceTransformer, "_get_model_config") as mock_config, patch.object(
             SentenceTransformer, "_get_model_path"
         ) as mock_model_path, patch.object(
             SentenceTransformer, "_get_tokenizer_threadsafe"
@@ -129,8 +125,8 @@ class TestEmbedderRefactoring:
             mock_session.return_value = Mock()
             mock_embedding_path.return_value = "/safe/embedding/path"
 
-            config, tokenizer, session = (
-                SentenceTransformer._prepare_embedding_resources("test-model")
+            config, tokenizer, session = SentenceTransformer._prepare_embedding_resources(
+                "test-model"
             )
 
             assert config is not None
@@ -146,9 +142,7 @@ class TestEmbedderRefactoring:
             mock_config.use_optimized = False
             mock_config.encoder_onnx_model = "custom_model.onnx"
 
-            result = SentenceTransformer._get_embedding_model_path(
-                "/base/path", mock_config
-            )
+            result = SentenceTransformer._get_embedding_model_path("/base/path", mock_config)
 
             assert result == "/safe/model/path"
             mock_path.assert_called_once()

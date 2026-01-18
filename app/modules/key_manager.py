@@ -18,11 +18,7 @@ from typing import Optional, Set, Tuple
 
 from cryptography.fernet import Fernet
 
-from app.exceptions import (
-    DatabaseConnectionError,
-    DatabaseCorruptionError,
-    DecryptionError,
-)
+from app.exceptions import DatabaseConnectionError, DatabaseCorruptionError, DecryptionError
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
 
@@ -34,6 +30,18 @@ class Client:
         self.client_id = client_id
         self.client_secret = client_secret
         self.client_type = client_type
+        self.tenant_code: str = ""
+
+
+def _parse_token_impl_fn(token: str) -> Optional[Tuple[str, str]]:
+    """Module-level helper to parse token into (client_id, client_secret)."""
+    if "|" not in token:
+        return None
+    try:
+        client_id, client_secret = token.split("|", 1)
+        return (client_id, client_secret)
+    except (ValueError, IndexError):
+        return None
 
 
 class KeyManager:
@@ -44,14 +52,16 @@ class KeyManager:
         try:
             from app.app_init import APP_SETTINGS
 
-            resolved = db_path or getattr(
-                APP_SETTINGS.security, "clients_db_path", "clients.db"
+            resolved_obj = (
+                db_path
+                if db_path is not None
+                else getattr(APP_SETTINGS.security, "clients_db_path", "clients.db")
             )
         except Exception:
             # Fallback if APP_SETTINGS not available during import-time
-            resolved = db_path or "clients.db"
+            resolved_obj = db_path or "clients.db"
 
-        self.db_path: str = str(resolved)
+        self.db_path: str = str(resolved_obj)
         self.clients: dict[str, Client] = {}
         self._token_cache: Set[str] = set()
         self._admin_cache: Set[str] = set()
@@ -59,8 +69,10 @@ class KeyManager:
         try:
             from app.app_init import APP_SETTINGS
 
-            self.db_path = db_path or getattr(
-                APP_SETTINGS.security, "clients_db_path", "clients.db"
+            self.db_path = (
+                str(db_path)
+                if db_path is not None
+                else str(getattr(APP_SETTINGS.security, "clients_db_path", "clients.db"))
             )
 
             # Ensure directory exists
@@ -81,9 +93,7 @@ class KeyManager:
             raise
         except Exception as init_error:
             logger.error(f"Critical error initializing KeyManager: {init_error}")
-            raise DatabaseConnectionError(
-                f"KeyManager initialization failed: {init_error}"
-            )
+            raise DatabaseConnectionError(f"KeyManager initialization failed: {init_error}")
 
     @contextmanager
     def _get_connection(self):
@@ -104,7 +114,7 @@ class KeyManager:
                 conn.rollback()
             logger.error(f"Database corruption: {e}")
             raise DatabaseCorruptionError(f"Database corruption detected: {e}")
-        except Exception as e:
+        except Exception:
             if conn:
                 conn.rollback()
             raise
@@ -135,7 +145,7 @@ class KeyManager:
                 # Create index on client_type for faster admin lookups
                 cursor.execute(
                     """
-                    CREATE INDEX IF NOT EXISTS idx_client_type 
+                    CREATE INDEX IF NOT EXISTS idx_client_type
                     ON clients(client_type)
                 """
                 )
@@ -143,7 +153,7 @@ class KeyManager:
                 # Create trigger to update updated_at
                 cursor.execute(
                     """
-                    CREATE TRIGGER IF NOT EXISTS update_client_timestamp 
+                    CREATE TRIGGER IF NOT EXISTS update_client_timestamp
                     AFTER UPDATE ON clients
                     BEGIN
                         UPDATE clients SET updated_at = CURRENT_TIMESTAMP
@@ -168,11 +178,7 @@ class KeyManager:
         except sqlite3.DatabaseError as e:
             # Handle "file is not a database" error (e.g., TinyDB file)
             error_msg = str(e).lower()
-            if (
-                "not a database" in error_msg
-                or "malformed" in error_msg
-                or "corrupt" in error_msg
-            ):
+            if "not a database" in error_msg or "malformed" in error_msg or "corrupt" in error_msg:
                 logger.warning(f"Database file is corrupted or wrong format: {e}")
                 self._recover_database()
             else:
@@ -219,14 +225,14 @@ class KeyManager:
 
                 cursor.execute(
                     """
-                    CREATE INDEX IF NOT EXISTS idx_client_type 
+                    CREATE INDEX IF NOT EXISTS idx_client_type
                     ON clients(client_type)
                 """
                 )
 
                 cursor.execute(
                     """
-                    CREATE TRIGGER IF NOT EXISTS update_client_timestamp 
+                    CREATE TRIGGER IF NOT EXISTS update_client_timestamp
                     AFTER UPDATE ON clients
                     BEGIN
                         UPDATE clients SET updated_at = CURRENT_TIMESTAMP
@@ -269,20 +275,11 @@ class KeyManager:
         logger.info("Generated new encryption key at %s", sanitize_for_log(key_file))
         return key
 
-    @lru_cache(maxsize=1000)
-    def _parse_token(self, token: str) -> Optional[Tuple[str, str]]:
-        """Parse and cache token parsing results."""
-        if "|" not in token:
-            return None
-        try:
-            client_id, client_secret = token.split("|", 1)
-            return (client_id, client_secret)
-        except (ValueError, IndexError):
-            return None
+    # Use a cached staticmethod to avoid lru_cache retaining `self` references (bugbear B019)
+    # lru-cached staticmethod for token parsing (module-level helper used)
+    _parse_token = staticmethod(lru_cache(maxsize=1000)(_parse_token_impl_fn))
 
-    def authenticate_client(
-        self, token: str, tenant_code: str = ""
-    ) -> Optional[Client]:
+    def authenticate_client(self, token: str, tenant_code: str = "") -> Optional[Client]:
         """Authenticate client using client_id|client_secret format."""
         try:
             parsed = self._parse_token(token)
@@ -361,7 +358,7 @@ class KeyManager:
             # Update in-memory cache
             self.clients[client_id] = Client(client_id, client_secret, client_type)
             # attach tenant_code attribute to client object for runtime checks
-            setattr(self.clients[client_id], "tenant_code", tenant_code)
+            self.clients[client_id].tenant_code = tenant_code
 
             # Update token and admin caches
             token = f"{client_id}|{client_secret}"
@@ -369,8 +366,8 @@ class KeyManager:
             if client_type in ("admin", "superadmin"):
                 self._admin_cache.add(client_id)
 
-            # Clear LRU cache
-            self._parse_token.cache_clear()
+            # Clear LRU cache (guard if underlying function exposes cache_clear)
+            getattr(self._parse_token, "cache_clear", lambda: None)()
 
             logger.info(
                 "Added/updated client: %s (%s)",
@@ -382,14 +379,10 @@ class KeyManager:
         except (DatabaseConnectionError, DatabaseCorruptionError):
             return False
         except (ValueError, TypeError) as e:
-            logger.error(
-                "Invalid client data for %s: %s", sanitize_for_log(client_id), str(e)
-            )
+            logger.error("Invalid client data for %s: %s", sanitize_for_log(client_id), str(e))
             return False
         except Exception as e:
-            logger.error(
-                "Failed to add client %s: %s", sanitize_for_log(client_id), str(e)
-            )
+            logger.error("Failed to add client %s: %s", sanitize_for_log(client_id), str(e))
             return False
 
     def remove_client(self, client_id: str) -> bool:
@@ -408,8 +401,8 @@ class KeyManager:
                     self._token_cache.discard(token)
                     self._admin_cache.discard(client_id)
 
-                # Clear LRU cache
-                self._parse_token.cache_clear()
+                # Clear LRU cache (guard if underlying function exposes cache_clear)
+                getattr(self._parse_token, "cache_clear", lambda: None)()
 
                 logger.info(f"Removed client: {client_id}")
                 return True
@@ -418,9 +411,7 @@ class KeyManager:
         except (DatabaseConnectionError, DatabaseCorruptionError):
             return False
         except Exception as e:
-            logger.error(
-                "Failed to remove client %s: %s", sanitize_for_log(client_id), str(e)
-            )
+            logger.error("Failed to remove client %s: %s", sanitize_for_log(client_id), str(e))
             return False
 
     def load_clients(self):
@@ -430,9 +421,7 @@ class KeyManager:
             self.clients.clear()
 
             if not os.path.exists(self.db_path):
-                logger.info(
-                    f"Database file {self.db_path} does not exist, will be created"
-                )
+                logger.info(f"Database file {self.db_path} does not exist, will be created")
                 return
 
             with self._get_connection() as conn:
@@ -465,15 +454,11 @@ class KeyManager:
                         client_id = row["client_id"]
                         encrypted_secret = row["client_secret"]
                         client_type = row["client_type"]
-                        tenant_code = (
-                            row["tenant_code"] if "tenant_code" in row.keys() else ""
-                        )
+                        tenant_code = row["tenant_code"] if "tenant_code" in row.keys() else ""
 
                         # Decrypt secret
                         try:
-                            client_secret = self.fernet.decrypt(
-                                encrypted_secret.encode()
-                            ).decode()
+                            client_secret = self.fernet.decrypt(encrypted_secret.encode()).decode()
                         except Exception as decrypt_error:
                             logger.error(
                                 f"Failed to decrypt client secret for {client_id}: {decrypt_error}"
@@ -483,7 +468,7 @@ class KeyManager:
                             )
 
                         client = Client(client_id, client_secret, client_type)
-                        setattr(client, "tenant_code", tenant_code)
+                        client.tenant_code = tenant_code
                         self.clients[client_id] = client
 
                         # Update caches
@@ -496,14 +481,10 @@ class KeyManager:
                         logger.error(f"Decryption failed for client {client_id}")
                         continue
                     except (KeyError, ValueError) as client_error:
-                        logger.error(
-                            f"Invalid client data for {client_id}: {client_error}"
-                        )
+                        logger.error(f"Invalid client data for {client_id}: {client_error}")
                         continue
                     except Exception as client_error:
-                        logger.error(
-                            f"Failed to load client {client_id}: {client_error}"
-                        )
+                        logger.error(f"Failed to load client {client_id}: {client_error}")
                         continue
 
                 logger.info(f"Loaded {len(self.clients)} clients from {self.db_path}")
@@ -533,22 +514,18 @@ class KeyManager:
                 # Clients by type
                 cursor.execute(
                     """
-                    SELECT client_type, COUNT(*) as count 
-                    FROM clients 
+                    SELECT client_type, COUNT(*) as count
+                    FROM clients
                     GROUP BY client_type
                 """
                 )
-                by_type = {
-                    row["client_type"]: row["count"] for row in cursor.fetchall()
-                }
+                by_type = {row["client_type"]: row["count"] for row in cursor.fetchall()}
 
                 return {
                     "total_clients": total,
                     "by_type": by_type,
                     "database_size_bytes": (
-                        os.path.getsize(self.db_path)
-                        if os.path.exists(self.db_path)
-                        else 0
+                        os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
                     ),
                 }
         except Exception as e:
@@ -563,7 +540,7 @@ class KeyManager:
         """Clear caches (SQLite connections are auto-closed by context manager)."""
         self._token_cache.clear()
         self._admin_cache.clear()
-        self._parse_token.cache_clear()
+        getattr(self._parse_token, "cache_clear", lambda: None)()
 
     def __enter__(self):
         return self
@@ -580,10 +557,7 @@ key_manager = KeyManager()
 def _ensure_admin_exists():
     # Ensure a superadmin exists. If none exists, create a bootstrap superadmin
     # account. This account has global admin privileges across tenants.
-    if any(
-        getattr(c, "client_type", "") == "superadmin"
-        for c in key_manager.clients.values()
-    ):
+    if any(getattr(c, "client_type", "") == "superadmin" for c in key_manager.clients.values()):
         return
 
     from datetime import datetime
@@ -602,9 +576,7 @@ def _ensure_admin_exists():
         try:
             key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
             console_file_path = os.path.join(key_dir, "admin_console.txt")
-            with safe_open(
-                console_file_path, key_dir, "w", encoding="utf-8"
-            ) as console_file:
+            with safe_open(console_file_path, key_dir, "w", encoding="utf-8") as console_file:
                 console_file.writelines(
                     [
                         "=== ADMIN CREDENTIALS CREATED ===\n",
@@ -614,9 +586,7 @@ def _ensure_admin_exists():
                         "=== SAVE THESE CREDENTIALS ===\n",
                     ]
                 )
-            logger.warning(
-                "Admin credentials saved to %s", sanitize_for_log(console_file_path)
-            )
+            logger.warning("Admin credentials saved to %s", sanitize_for_log(console_file_path))
         except Exception as e:
             logger.error(
                 "Failed to save admin console to %s: %s",
@@ -639,14 +609,10 @@ def _ensure_admin_exists():
                 f.write(f"Authorization: Bearer {admin_id}|{admin_secret}\n")
                 f.write("\n")
                 f.write("Example:\n")
-                f.write(
-                    f'curl -H "Authorization: Bearer {admin_id}|{admin_secret}" \\\n+'
-                )
+                f.write(f'curl -H "Authorization: Bearer {admin_id}|{admin_secret}" \\\n+')
                 f.write("  http://localhost:19690/api/v1/admin/clients\n")
             creds_path = os.path.join(key_dir, creds_file)
-            logger.warning(
-                "Admin credentials saved to: %s", sanitize_for_log(creds_path)
-            )
+            logger.warning("Admin credentials saved to: %s", sanitize_for_log(creds_path))
         except Exception as e:
             logger.error("Failed to save admin credentials to file: %s", str(e))
     else:
@@ -677,9 +643,7 @@ def _ensure_superadmin_exists():
             try:
                 key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
                 console_path = os.path.join(key_dir, "superadmin_console.txt")
-                with safe_open(
-                    console_path, key_dir, "w", encoding="utf-8"
-                ) as console_file:
+                with safe_open(console_path, key_dir, "w", encoding="utf-8") as console_file:
                     console_file.writelines(
                         [
                             "=== SUPERADMIN CREDENTIALS CREATED ===\n",
@@ -689,9 +653,7 @@ def _ensure_superadmin_exists():
                             "=== SAVE THESE CREDENTIALS ===\n",
                         ]
                     )
-                logger.warning(
-                    "Superadmin credentials saved to %s", sanitize_for_log(console_path)
-                )
+                logger.warning("Superadmin credentials saved to %s", sanitize_for_log(console_path))
             except Exception as e:
                 logger.error("Failed to save superadmin console output: %s", str(e))
         else:

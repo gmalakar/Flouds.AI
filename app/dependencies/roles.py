@@ -16,6 +16,11 @@ from typing import Optional
 
 from fastapi import Header, HTTPException, status
 
+# Module-level Header defaults to avoid function-call defaults (flake8 B008)
+X_USER_ID_HEADER = Header(None, alias="X-User-Id")
+X_USER_ROLE_HEADER = Header(None, alias="X-User-Role")
+X_TENANT_CODE_HEADER = Header(None, alias="X-Tenant-Code")
+
 
 class UserContext:
     def __init__(self, user_id: Optional[str], role: str, tenant: Optional[str]):
@@ -25,20 +30,16 @@ class UserContext:
 
 
 def get_user_context(
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
-    x_tenant_code: Optional[str] = Header(None, alias="X-Tenant-Code"),
+    x_user_id: Optional[str] = X_USER_ID_HEADER,
+    x_user_role: Optional[str] = X_USER_ROLE_HEADER,
+    x_tenant_code: Optional[str] = X_TENANT_CODE_HEADER,
 ) -> UserContext:
     role = (x_user_role or "user").lower()
     if role not in ("superadmin", "admin", "tenant-admin", "user"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role header"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role header")
     return UserContext(user_id=x_user_id, role=role, tenant=x_tenant_code)
 
 
 def require_role(user_ctx: UserContext, allowed: list[str]) -> None:
     if user_ctx.role not in allowed:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")

@@ -9,28 +9,24 @@
 # Date: 2026-01-05
 # =============================================================================
 
-import random
-import traceback
 from contextlib import asynccontextmanager
 from os import getenv
-from typing import List, Optional
+from typing import AsyncIterator, List
 
 from fastapi import FastAPI
 
 from app.app_init import APP_SETTINGS
 from app.logger import get_logger
 from app.services import config_service
-from app.utils.background_cleanup import (
-    start_background_cleanup,
-    stop_background_cleanup,
-)
-from app.utils.log_sanitizer import sanitize_for_log
+from app.utils.background_cleanup import start_background_cleanup, stop_background_cleanup
+
+# log sanitization not needed in startup
 
 logger = get_logger("app_startup")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage application lifespan events (extracted from `main.py`).
 
     Responsibilities:
@@ -89,18 +85,14 @@ async def lifespan(app: FastAPI):
                     # No seeding/override requested — apply whatever is in DB
                     config_service.load_and_apply_settings()
         except Exception:
-            logger.exception(
-                "Failed to seed/override config from env; falling back to DB values"
-            )
+            logger.exception("Failed to seed/override config from env; falling back to DB values")
     except Exception as e:
         logger.exception("Failed to initialize config service: %s", e)
 
     logger.info("Starting background cleanup service")
     try:
         if APP_SETTINGS.monitoring.enable_background_cleanup:
-            interval = float(
-                APP_SETTINGS.monitoring.background_cleanup_interval_seconds
-            )
+            interval = float(APP_SETTINGS.monitoring.background_cleanup_interval_seconds)
             max_age = float(APP_SETTINGS.monitoring.cache_cleanup_max_age_seconds)
             start_background_cleanup(cleanup_interval=interval, max_age_seconds=max_age)
         else:

@@ -8,7 +8,7 @@ import os
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
+import pytest  # noqa: F401
 
 from app.services.base_nlp_service import BaseNLPService
 
@@ -126,14 +126,10 @@ def test_shortcut_honors_cached_true_and_skips_filesystem():
     cfg.tasks = ["embedding"]
     cfg.model_folder_name = "cached_true_model"
     # Seed metadata cache to simulate a cached positive flag
-    BaseNLPService._set_model_metadata(
-        "cached_true_model", {"encoder_model_exists": "true"}
-    )
+    BaseNLPService._set_model_metadata("cached_true_model", {"encoder_model_exists": "true"})
 
     # Patch file_exists_in_model to fail if called
-    with patch(
-        "app.services.base_nlp_service.BaseNLPService.file_exists_in_model"
-    ) as mock_check:
+    with patch("app.services.base_nlp_service.BaseNLPService.file_exists_in_model") as mock_check:
         mock_check.side_effect = AssertionError(
             "Filesystem check should not be called when perform_filesystem_check=False"
         )
@@ -155,13 +151,9 @@ def test_shortcut_honors_cached_false_and_skips_filesystem():
     cfg.tasks = ["embedding"]
     cfg.model_folder_name = "cached_false_model"
     # Seed metadata cache to simulate a cached negative flag
-    BaseNLPService._set_model_metadata(
-        "cached_false_model", {"encoder_model_exists": "false"}
-    )
+    BaseNLPService._set_model_metadata("cached_false_model", {"encoder_model_exists": "false"})
 
-    with patch(
-        "app.services.base_nlp_service.BaseNLPService.file_exists_in_model"
-    ) as mock_check:
+    with patch("app.services.base_nlp_service.BaseNLPService.file_exists_in_model") as mock_check:
         mock_check.side_effect = AssertionError(
             "Filesystem check should not be called when perform_filesystem_check=False"
         )
@@ -189,9 +181,7 @@ def test_shortcut_allows_not_checked_without_filesystem_call():
     )
     cfg.use_seq2seqlm = True
 
-    with patch(
-        "app.services.base_nlp_service.BaseNLPService.file_exists_in_model"
-    ) as mock_check:
+    with patch("app.services.base_nlp_service.BaseNLPService.file_exists_in_model") as mock_check:
         mock_check.side_effect = AssertionError(
             "Filesystem check should not be called when perform_filesystem_check=False"
         )

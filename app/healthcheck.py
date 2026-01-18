@@ -6,8 +6,12 @@
 
 import os
 import sys
-import urllib.error
-import urllib.request
+from typing import List, Optional
+from urllib.parse import urlparse
+
+import requests  # type: ignore[import-untyped]
+
+from app.app_init import APP_SETTINGS
 
 
 def build_healthcheck_url() -> str:
@@ -31,17 +35,43 @@ def build_healthcheck_url() -> str:
 def main() -> int:
     url = build_healthcheck_url()
     timeout_s = float(os.getenv("HEALTHCHECK_TIMEOUT", "8"))
+    # Validate URL scheme to allow only http/https
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return 1
 
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    # Build trusted hosts whitelist from settings or env
+    def _get_trusted_hosts() -> Optional[List[str]]:
+        # Prefer explicit healthcheck env
+        env_val = os.getenv("HEALTHCHECK_TRUSTED_HOSTS") or os.getenv("FLOUDS_TRUSTED_HOSTS")
+        if env_val:
+            return [h.strip() for h in env_val.split(",") if h.strip()]
+        try:
+            try:
+                th = APP_SETTINGS.security
+            except Exception:
+                th = None
+            if th and hasattr(th, "trusted_hosts") and th.trusted_hosts:
+                return list(th.trusted_hosts)
+        except Exception:
+            pass
+        return None
+
+    trusted = _get_trusted_hosts()
+    host = parsed.hostname or ""
+    if trusted and "*" not in trusted:
+        # Match host exactly against whitelist
+        if host not in trusted:
+            return 1
+
+    headers = {"Accept": "application/json"}
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            status = getattr(resp, "status", 200)
-            # Consider any 2xx/3xx as healthy
-            if 200 <= status < 400:
-                return 0
-            else:
-                return 1
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, Exception):
+        resp = requests.get(url, headers=headers, timeout=timeout_s, allow_redirects=False)
+        status = resp.status_code
+        if 200 <= int(status) < 400:
+            return 0
+        return 1
+    except requests.RequestException:
         return 1
 
 

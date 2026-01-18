@@ -1,10 +1,9 @@
+#!/usr/bin/env python3
 # =============================================================================
 # File: enhance_openapi.py
 # Date: 2026-01-09
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
-
-#!/usr/bin/env python3
 """
 Enhance the FastAPI OpenAPI schema with richer metadata and examples.
 
@@ -107,12 +106,13 @@ def enhance_openapi_schema(app: FastAPI) -> dict:
     return app.openapi_schema
 
 
-def setup_enhanced_openapi(app: FastAPI):
+def setup_enhanced_openapi(app: FastAPI) -> None:
     """Attach enhanced OpenAPI generator to `app`."""
 
     def _custom():
         return enhance_openapi_schema(app)
 
+    # Attach custom openapi generator
     app.openapi = _custom
 
 

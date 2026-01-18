@@ -8,7 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.middleware import tenant_security
+from app.middleware import tenant_security  # noqa: F401
 from app.middleware.tenant_security import (
     TenantCorsMiddleware,
     TenantTrustedHostMiddleware,

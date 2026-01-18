@@ -9,7 +9,6 @@
 import atexit
 import random
 import threading
-import time
 import traceback
 from typing import Optional
 
@@ -23,9 +22,7 @@ logger = get_logger("background_cleanup")
 class BackgroundCleanup:
     """Background service for automatic cache cleanup."""
 
-    def __init__(
-        self, cleanup_interval: float = 60.0, max_age_seconds: Optional[float] = None
-    ):
+    def __init__(self, cleanup_interval: float = 60.0, max_age_seconds: Optional[float] = None):
         self.cleanup_interval = cleanup_interval
         self.max_age_seconds = max_age_seconds
         self._stop_event = threading.Event()
@@ -144,7 +141,7 @@ _background_cleanup: Optional[BackgroundCleanup] = None
 
 def start_background_cleanup(
     cleanup_interval: float = 60.0, max_age_seconds: Optional[float] = None
-):
+) -> None:
     """Start the global background cleanup service."""
     global _background_cleanup
     if _background_cleanup is None:
@@ -152,7 +149,7 @@ def start_background_cleanup(
     _background_cleanup.start()
 
 
-def stop_background_cleanup():
+def stop_background_cleanup() -> None:
     """Stop the global background cleanup service."""
     global _background_cleanup
     if _background_cleanup:

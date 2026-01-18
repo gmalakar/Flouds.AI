@@ -23,7 +23,7 @@ class PerformanceTracker:
         self.counters: Dict[str, int] = defaultdict(int)
 
     @contextmanager
-    def track(self, operation: str):
+    def track(self, operation: str) -> Any:
         """Context manager to track operation timing."""
         start_time = time.perf_counter()
         try:

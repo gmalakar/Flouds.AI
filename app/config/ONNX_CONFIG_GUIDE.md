@@ -6,7 +6,7 @@ This document explains which properties in `onnx_config.json` are required vs op
 
 These properties can be automatically detected from the ONNX model files. If omitted, they will be auto-detected at runtime.
 
-### 1. **dimension** 
+### 1. **dimension**
 - **Auto-detected from:** ONNX output shape `[batch, seq_len, dimension]`
 - **When to specify:** Override if you want a different dimension than native
 - **Example:** `"dimension": 384`
@@ -330,5 +330,5 @@ DEBUG: Auto-detected output names from ONNX model: ['token_embeddings', 'sentenc
 
 ---
 
-**Last Updated:** December 30, 2025  
+**Last Updated:** December 30, 2025
 **Auto-Detection Features Introduced:** v2.0.0

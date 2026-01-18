@@ -18,9 +18,10 @@ logger = get_logger("admin")
 router = APIRouter(prefix="/admin")
 
 
-def verify_admin_access(
-    request: Request, tenant: dict[str, Any] = Depends(common_headers)
-) -> bool:
+COMMON_HEADERS_DEP = Depends(common_headers)
+
+
+def verify_admin_access(request: Request, tenant: dict[str, Any] = COMMON_HEADERS_DEP) -> bool:
     """Verify client has admin access using optimized checks."""
     try:
         # Fast path: check client_id directly with admin cache
@@ -50,6 +51,9 @@ def verify_admin_access(
     return True
 
 
+VERIFY_ADMIN_DEP = Depends(verify_admin_access)
+
+
 class ClientKeyRequest(BaseModel):
     client_id: str
 
@@ -65,7 +69,7 @@ class ClientListResponse(BaseModel):
 
 @router.post("/generate-key", response_model=ClientKeyResponse)
 async def generate_client_key(
-    req: ClientKeyRequest, request: Request, _: bool = Depends(verify_admin_access)
+    req: ClientKeyRequest, request: Request, _: bool = VERIFY_ADMIN_DEP
 ) -> dict[str, str]:
     """Generate API key for a client."""
     try:
@@ -74,7 +78,7 @@ async def generate_client_key(
     except (ValueError, TypeError) as e:
         logger.error("Invalid client key parameters: %s", str(e))
         raise HTTPException(status_code=400, detail="Invalid request parameters")
-    except (PermissionError, OSError) as e:
+    except OSError as e:
         logger.error("Database access error during key generation: %s", str(e))
         raise HTTPException(status_code=500, detail="Database access denied")
     except Exception as e:
@@ -84,19 +88,17 @@ async def generate_client_key(
 
 @router.delete("/remove-client/{client_id}")
 async def remove_client(
-    client_id: str, request: Request, _: bool = Depends(verify_admin_access)
-):
+    client_id: str, request: Request, _: bool = VERIFY_ADMIN_DEP
+) -> dict[str, str]:
     """Remove client from database."""
     if key_manager.remove_client(client_id):
         return {"message": f"Client removed: {client_id}"}
     else:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
 
 @router.get("/clients", response_model=ClientListResponse)
-async def list_clients(request: Request, _: bool = Depends(verify_admin_access)):
+async def list_clients(request: Request, _: bool = VERIFY_ADMIN_DEP) -> ClientListResponse:
     """List all clients with API keys."""
     # `key_manager.clients` is already annotated as `dict[str, Client]`,
     # so use it directly and rely on the annotation for static analysis.

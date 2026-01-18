@@ -41,12 +41,8 @@ def test_extract_text_from_file_success():
         success=True,
         message="Extraction successful",
         results=[
-            ExtractedFileContent(
-                content="Page 1 content", item_number=1, content_as="pages"
-            ),
-            ExtractedFileContent(
-                content="Page 2 content", item_number=2, content_as="pages"
-            ),
+            ExtractedFileContent(content="Page 1 content", item_number=1, content_as="pages"),
+            ExtractedFileContent(content="Page 2 content", item_number=2, content_as="pages"),
         ],
         time_taken=0.1,
     )
@@ -73,9 +69,7 @@ def test_extract_text_from_file_accepts_bytes():
         success=True,
         message="Extraction successful",
         results=[
-            ExtractedFileContent(
-                content="Page 1 content", item_number=1, content_as="pages"
-            ),
+            ExtractedFileContent(content="Page 1 content", item_number=1, content_as="pages"),
         ],
         time_taken=0.1,
     )
@@ -101,9 +95,7 @@ def test_extract_text_from_file_accepts_base64_string():
         success=True,
         message="Extraction successful",
         results=[
-            ExtractedFileContent(
-                content="Page 1 content", item_number=1, content_as="pages"
-            ),
+            ExtractedFileContent(content="Page 1 content", item_number=1, content_as="pages"),
         ],
         time_taken=0.1,
     )
@@ -224,11 +216,7 @@ async def test_extract_and_embed_success():
     mock_extraction_response = ExtractedResponse(
         success=True,
         message="Extraction successful",
-        results=[
-            ExtractedFileContent(
-                content="Test content", item_number=1, content_as="pages"
-            )
-        ],
+        results=[ExtractedFileContent(content="Test content", item_number=1, content_as="pages")],
         time_taken=0.1,
     )
 
@@ -240,9 +228,7 @@ async def test_extract_and_embed_success():
     )
 
     file_content = base64.b64encode(b"dummy pdf content").decode()
-    request = ExtractEmbedRequest(
-        file_content=file_content, extention="pdf", model="test-model"
-    )
+    request = ExtractEmbedRequest(file_content=file_content, extention="pdf", model="test-model")
 
     with patch(
         "app.routers.extract_embed.ExtractorService.extract_text",
@@ -267,9 +253,7 @@ async def test_extract_and_embed_extraction_fails():
     )
 
     file_content = base64.b64encode(b"dummy pdf content").decode()
-    request = ExtractEmbedRequest(
-        file_content=file_content, extention="pdf", model="test-model"
-    )
+    request = ExtractEmbedRequest(file_content=file_content, extention="pdf", model="test-model")
 
     with patch(
         "app.routers.extract_embed.ExtractorService.extract_text",
@@ -289,11 +273,7 @@ async def test_extract_and_embed_with_all_parameters():
     mock_extraction_response = ExtractedResponse(
         success=True,
         message="Extraction successful",
-        results=[
-            ExtractedFileContent(
-                content="Test content", item_number=1, content_as="pages"
-            )
-        ],
+        results=[ExtractedFileContent(content="Test content", item_number=1, content_as="pages")],
         time_taken=0.1,
     )
 
@@ -345,9 +325,7 @@ async def test_extract_file_and_embed_success():
         success=True,
         message="Extraction successful",
         results=[
-            ExtractedFileContent(
-                content="Uploaded file content", item_number=1, content_as="pages"
-            )
+            ExtractedFileContent(content="Uploaded file content", item_number=1, content_as="pages")
         ],
         time_taken=0.1,
     )
@@ -371,9 +349,7 @@ async def test_extract_file_and_embed_success():
         "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
         return_value=mock_embedding_response,
     ):
-        response = await extract_file_and_embed(
-            file=mock_file, extension="pdf", model="test-model"
-        )
+        response = await extract_file_and_embed(file=mock_file, extension="pdf", model="test-model")
 
         assert response.success is True
         assert response.message == "Embedding successful"
@@ -389,11 +365,7 @@ async def test_extract_file_and_embed_auto_detect_extension():
     mock_extraction_response = ExtractedResponse(
         success=True,
         message="Extraction successful",
-        results=[
-            ExtractedFileContent(
-                content="Test content", item_number=1, content_as="pages"
-            )
-        ],
+        results=[ExtractedFileContent(content="Test content", item_number=1, content_as="pages")],
         time_taken=0.1,
     )
 
@@ -432,11 +404,7 @@ async def test_extract_file_and_embed_no_filename_extension():
     mock_extraction_response = ExtractedResponse(
         success=True,
         message="Extraction successful",
-        results=[
-            ExtractedFileContent(
-                content="Test content", item_number=1, content_as="text"
-            )
-        ],
+        results=[ExtractedFileContent(content="Test content", item_number=1, content_as="text")],
         time_taken=0.1,
     )
 
@@ -475,11 +443,7 @@ async def test_extract_file_and_embed_with_form_parameters():
     mock_extraction_response = ExtractedResponse(
         success=True,
         message="Extraction successful",
-        results=[
-            ExtractedFileContent(
-                content="Test content", item_number=1, content_as="pages"
-            )
-        ],
+        results=[ExtractedFileContent(content="Test content", item_number=1, content_as="pages")],
         time_taken=0.1,
     )
 
@@ -558,15 +522,9 @@ async def test_extract_and_embed_multiple_pages():
         success=True,
         message="Extraction successful",
         results=[
-            ExtractedFileContent(
-                content="Page 1 content", item_number=1, content_as="pages"
-            ),
-            ExtractedFileContent(
-                content="Page 2 content", item_number=2, content_as="pages"
-            ),
-            ExtractedFileContent(
-                content="Page 3 content", item_number=3, content_as="pages"
-            ),
+            ExtractedFileContent(content="Page 1 content", item_number=1, content_as="pages"),
+            ExtractedFileContent(content="Page 2 content", item_number=2, content_as="pages"),
+            ExtractedFileContent(content="Page 3 content", item_number=3, content_as="pages"),
         ],
         time_taken=0.1,
     )
@@ -583,9 +541,7 @@ async def test_extract_and_embed_multiple_pages():
     )
 
     file_content = base64.b64encode(b"dummy pdf content").decode()
-    request = ExtractEmbedRequest(
-        file_content=file_content, extention="pdf", model="test-model"
-    )
+    request = ExtractEmbedRequest(file_content=file_content, extention="pdf", model="test-model")
 
     with patch(
         "app.routers.extract_embed.ExtractorService.extract_text",

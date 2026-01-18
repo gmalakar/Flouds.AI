@@ -28,7 +28,7 @@ async def embed(request: EmbeddingRequest) -> EmbeddingResponse:
     except FloudsBaseException as e:
         status_code = ErrorHandler.get_http_status(e)
         raise HTTPException(status_code=status_code, detail=e.message)
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in embedding endpoint")
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -40,13 +40,11 @@ async def embed(request: EmbeddingRequest) -> EmbeddingResponse:
 async def embed_batch(requests: EmbeddingBatchRequest) -> EmbeddingBatchResponse:
     logger.debug("Embedding batch request, count: %d", len(requests.inputs))
     try:
-        responses: EmbeddingBatchResponse = await SentenceTransformer.embed_batch_async(
-            requests
-        )
+        responses: EmbeddingBatchResponse = SentenceTransformer.embed_batch_async(requests)
         return responses
     except FloudsBaseException as e:
         status_code = ErrorHandler.get_http_status(e)
         raise HTTPException(status_code=status_code, detail=e.message)
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in batch embedding endpoint")
         raise HTTPException(status_code=500, detail="Internal server error")

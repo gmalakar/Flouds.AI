@@ -17,6 +17,9 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
+from app.models.prompt_response import PromptResponse
+from app.services.prompt_service import PromptProcessor
+
 
 @pytest.fixture(autouse=True)
 def _cleanup_sync_tests():
@@ -79,8 +82,7 @@ async def _cleanup_async_tests():
         pass
 
 
-from app.models.prompt_response import PromptResponse
-from app.services.prompt_service import PromptProcessor
+# moved imports to top to satisfy flake8 E402
 
 
 # Dummy classes for mocking

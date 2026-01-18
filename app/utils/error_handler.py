@@ -104,7 +104,7 @@ class ErrorHandler:
 
 def handle_errors(
     context: str = "operation", reraise: bool = False, include_traceback: bool = False
-):
+) -> Callable:
     """Decorator for automatic error handling."""
 
     def decorator(func: Callable) -> Callable:
@@ -113,9 +113,7 @@ def handle_errors(
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                error_response = ErrorHandler.handle_exception(
-                    e, context, include_traceback
-                )
+                error_response = ErrorHandler.handle_exception(e, context, include_traceback)
 
                 if reraise:
                     raise
@@ -144,7 +142,7 @@ def handle_async_errors(
     context: str = "async_operation",
     reraise: bool = False,
     include_traceback: bool = False,
-):
+) -> Callable:
     """Decorator for automatic async error handling."""
 
     def decorator(func: Callable) -> Callable:
@@ -153,9 +151,7 @@ def handle_async_errors(
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
-                error_response = ErrorHandler.handle_exception(
-                    e, context, include_traceback
-                )
+                error_response = ErrorHandler.handle_exception(e, context, include_traceback)
 
                 if reraise:
                     raise

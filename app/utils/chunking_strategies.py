@@ -36,23 +36,15 @@ class ChunkingStrategies:
             overlap = getattr(model_config, "chunk_overlap", 1)
 
             if chunk_logic == "sentence":
-                return ChunkingStrategies.chunk_by_sentences(
-                    text, tokenizer, max_tokens, overlap
-                )
+                return ChunkingStrategies.chunk_by_sentences(text, tokenizer, max_tokens, overlap)
             elif chunk_logic == "paragraph":
-                return ChunkingStrategies.chunk_by_paragraphs(
-                    text, tokenizer, max_tokens, overlap
-                )
+                return ChunkingStrategies.chunk_by_paragraphs(text, tokenizer, max_tokens, overlap)
             elif chunk_logic == "fixed":
                 chunk_size = getattr(model_config, "chunk_size", max_tokens // 2)
-                return ChunkingStrategies.chunk_fixed_size(
-                    text, tokenizer, chunk_size, overlap
-                )
+                return ChunkingStrategies.chunk_fixed_size(text, tokenizer, chunk_size, overlap)
             else:
                 # Default fallback
-                return ChunkingStrategies.chunk_by_sentences(
-                    text, tokenizer, max_tokens, overlap
-                )
+                return ChunkingStrategies.chunk_by_sentences(text, tokenizer, max_tokens, overlap)
         except AttributeError as e:
             logger.error("Model config attribute error: %s", str(e))
             return [text]
@@ -68,9 +60,7 @@ class ChunkingStrategies:
         text: str, tokenizer: Any, max_tokens: int, overlap: int = 1
     ) -> List[str]:
         """Efficient sentence-based chunking with smart overlap and token-aware joining."""
-        logger.debug(
-            "Splitting text into optimized overlapping sentence chunks (NLTK)."
-        )
+        logger.debug("Splitting text into optimized overlapping sentence chunks (NLTK).")
 
         # Sentence segmentation
         sentences = [s.strip() for s in nltk.sent_tokenize(text) if s.strip()]
@@ -84,10 +74,7 @@ class ChunkingStrategies:
             chunk_token_count = 0
             j = i
 
-            while (
-                j < len(sentences)
-                and (chunk_token_count + sentence_tokens[j]) < max_tokens
-            ):
+            while j < len(sentences) and (chunk_token_count + sentence_tokens[j]) < max_tokens:
                 chunk_sentences.append(sentences[j])
                 chunk_token_count += sentence_tokens[j]
                 j += 1
@@ -122,7 +109,7 @@ class ChunkingStrategies:
         i = 0
 
         while i < len(paragraphs):
-            chunk_paragraphs = []
+            chunk_paragraphs: List[str] = []
             j = i
 
             while j < len(paragraphs):
@@ -158,9 +145,7 @@ class ChunkingStrategies:
         return chunks
 
     @staticmethod
-    def chunk_fixed_size(
-        text: str, tokenizer: Any, chunk_size: int, overlap: int = 0
-    ) -> List[str]:
+    def chunk_fixed_size(text: str, tokenizer: Any, chunk_size: int, overlap: int = 0) -> List[str]:
         """Fixed-size chunking with character estimation."""
         logger.debug(f"Splitting text into fixed chunks of {chunk_size} tokens.")
 

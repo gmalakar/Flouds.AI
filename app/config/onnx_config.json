@@ -14,9 +14,6 @@
         "remove_emojis": false,
         "force_pooling": false,
         "chunk_overlap": 0,
-        "use_optimized": false,
-        "encoder_optimized_onnx_model": "",
-        "decoder_optimized_onnx_model": "",
         "special_tokens_map_path": "",
         "quantize": false,
         "quantize_type": null,
@@ -55,7 +52,7 @@
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
         "force_pooling": true,
-        "encoder_onnx_model": "model_optimized.onnx"       
+        "encoder_onnx_model": "model_optimized.onnx"
     },
 
     "e5-small-v2": {
@@ -146,9 +143,7 @@
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
         "encoder_onnx_model": "encoder_model_optimized.onnx",
-        "decoder_onnx_model": "decoder_model_optimized.onnx",
-        "encoder_optimized_onnx_model": "encoder_model_optimized.onnx",
-        "decoder_optimized_onnx_model": "decoder_model_optimized.onnx",
+        "decoder_onnx_model": "decoder_model.onnx",
         "special_tokens_map_path": "special_tokens_map.json",
         "use_seq2seqlm": true,
         "num_beams": 4,
@@ -171,8 +166,8 @@
             "mask": "encoder_attention_mask"
         },
 
-        "encoder_onnx_model": "encoder_model_merged.onnx",
-        "decoder_onnx_model": "decoder_model_merged.onnx",
+        "encoder_onnx_model": "encoder_model_optimized.onnx",
+        "decoder_onnx_model": "decoder_model.onnx",
         "special_tokens_map_path": "special_tokens_map.json",
         "generation_config_path": "generation_config.json",
         "num_beams": 4,

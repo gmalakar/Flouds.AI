@@ -5,14 +5,15 @@
 # =============================================================================
 
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from app.exceptions import FloudsBaseException
 from app.logger import get_logger
 from app.models.prompt_request import PromptBatchRequest, PromptRequest
 from app.models.prompt_response import PromptResponse
 from app.services.prompt_service import DEFAULT_MODEL, PromptProcessor
-from app.utils.error_handler import ErrorHandler
+
+# ErrorHandler not used in this router
 from app.utils.log_sanitizer import sanitize_for_log
 
 router = APIRouter()
@@ -40,7 +41,7 @@ async def summarize(request: PromptRequest) -> PromptResponse:
             results=[],
             time_taken=0.0,
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in summarization endpoint")
         return PromptResponse(
             success=False,
@@ -67,7 +68,7 @@ async def summarize_batch(
             results=[],
             time_taken=0.0,
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in batch summarization endpoint")
         return PromptResponse(
             success=False,

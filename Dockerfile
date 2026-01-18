@@ -1,11 +1,73 @@
-FROM python:3.12-slim
+# =============================================================================
+# Multi-stage build for Flouds AI Service
+# Builder stage: compile dependencies and clean up build artifacts
+# Runtime stage: minimal runtime environment with only necessary files
+# =============================================================================
+
+# ==================== BUILDER STAGE ====================
+FROM python:3.12-slim AS builder
 
 ARG GPU=false
 ARG TORCH_VERSION=2.9.1
 
+# Build-time environment
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_NO_COMPILE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment for isolation
+RUN python -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+
+# Copy requirements
+COPY app/requirements-prod.txt /tmp/requirements-prod.txt
+
+# Install dependencies in virtual environment
+RUN set -ex \
+    # Upgrade pip to fix CVE vulnerabilities
+    && python -m pip install --upgrade --no-deps "pip>=25.3" \
+    # Install PyTorch (CPU or GPU)
+    && if [ "$GPU" = "true" ]; then \
+        echo "Installing GPU PyTorch and ONNX Runtime GPU..."; \
+        pip install --no-cache-dir --prefer-binary "torch==${TORCH_VERSION}" || true; \
+        pip install --no-cache-dir --prefer-binary "onnxruntime-gpu>=1.18.0,<1.23.0"; \
+    else \
+        echo "Installing CPU PyTorch and ONNX Runtime CPU..."; \
+        pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+            "torch==${TORCH_VERSION}+cpu" || true; \
+        pip install --no-cache-dir --prefer-binary "onnxruntime>=1.18.0,<1.23.0"; \
+    fi \
+    # Install all required dependencies
+    && pip install --no-cache-dir -r /tmp/requirements-prod.txt \
+    # Aggressive cleanup in builder to reduce copied size
+    && find /opt/venv -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true \
+    && find /opt/venv -type f -name '*.pyc' -delete \
+    && find /opt/venv -type f -name '*.pyo' -delete \
+    && find /opt/venv -type d -name test -exec rm -rf {} + 2>/dev/null || true \
+    && find /opt/venv -type d -name tests -exec rm -rf {} + 2>/dev/null || true \
+    && find /opt/venv -type d -name examples -exec rm -rf {} + 2>/dev/null || true \
+    && find /opt/venv -type f -name '*.a' -delete \
+    && find /opt/venv -type f -name '*.so*' -exec strip --strip-unneeded {} + 2>/dev/null || true \
+    && rm -rf /tmp/* /root/.cache
+
+# ==================== RUNTIME STAGE ====================
+FROM python:3.12-slim
+
+# ==================== RUNTIME STAGE ====================
+FROM python:3.12-slim
+
+# Runtime environment configuration
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/flouds-ai \
+    PATH=/opt/venv/bin:$PATH \
     # Basic environment
     FLOUDS_API_ENV=Production \
     APP_DEBUG_MODE=0 \
@@ -59,71 +121,19 @@ ENV PYTHONUNBUFFERED=1 \
 # secrets, Docker secrets, or environment injection) so they are not baked
 # into the image.
 
-WORKDIR ${PYTHONPATH}
-
-# Copy requirements first for better layer caching
-COPY app/requirements-prod.txt requirements-prod.txt
-
-# Install dependencies in single optimized layer
-RUN set -ex \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
-        ca-certificates \
-    && apt-get install -y --only-upgrade tar \
-    # Upgrade pip to fix CVE vulnerabilities (pip <=25.2 affected)
-    && python -m pip install --upgrade --no-cache-dir "pip>=25.3" \
-    # Install PyTorch (CPU or GPU)
-    && if [ "$GPU" = "true" ]; then \
-        echo "Installing GPU PyTorch and ONNX Runtime GPU..."; \
-        pip install --no-cache-dir --prefer-binary "torch==${TORCH_VERSION}" || true; \
-        pip install --no-cache-dir --prefer-binary "onnxruntime-gpu>=1.18.0,<1.23.0"; \
-    else \
-        echo "Installing CPU PyTorch and ONNX Runtime CPU..."; \
-        pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
-            "torch==${TORCH_VERSION}+cpu" || true; \
-        pip install --no-cache-dir --prefer-binary "onnxruntime>=1.18.0,<1.23.0"; \
-    fi \
-    # Install all required dependencies from requirements-prod.txt
-    && pip install --no-cache-dir -r requirements-prod.txt \
-    # Aggressive cleanup to minimize layer size
-    && apt-get purge -y build-essential \
-    && apt-get autoremove -y --purge \
+# Install minimal runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     && apt-get clean \
-    && rm -rf \
-        /var/lib/apt/lists/* \
-        /root/.cache \
-        /tmp/* \
-        /root/.pip-cache \
-        /usr/share/doc/* \
-        /usr/share/man/* \
-        /usr/share/locale/* \
-        /usr/share/info/* \
-        /var/cache/apt/* \
-        /var/log/* \
-    # Remove Python compiled bytecode and cache directories
-    && find /usr/local -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local -type f -name '*.pyc' -delete \
-    && find /usr/local -type f -name '*.pyo' -delete \
-    # Remove test directories and files
-    && find /usr/local -type d -name test -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local -type d -name tests -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local/lib/python*/site-packages -maxdepth 2 -type d -name tests -exec rm -rf {} + 2>/dev/null || true \
-    # Remove examples and documentation directories
-    && find /usr/local -type d -name examples -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local/lib/python*/site-packages -maxdepth 2 -type d -name examples -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local -type d -name idle_test -exec rm -rf {} + 2>/dev/null || true \
-    # Remove package metadata that's not needed at runtime
-    && find /usr/local -type f \( -name '*.dist-info' -o -name '*.egg-info' \) -exec rm -rf {} + 2>/dev/null || true \
-    # Remove static libraries and archives
-    && find /usr/local -type f -name '*.a' -delete \
-    # Remove pip cache and build artifacts
-    && rm -rf /root/.cargo /root/.rustup \
-    # Strip debugging symbols from shared libraries
-    && find /usr/local -type f -name '*.so*' -exec strip --strip-unneeded {} + 2>/dev/null || true \
-    # Remove any remaining temporary build files
-    && find /usr/local -type f -name '*.c' -delete 2>/dev/null || true \
-    && find /usr/local -type f -name '*.h' ! -name 'pyconfig.h' -delete 2>/dev/null || true
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+
+WORKDIR ${PYTHONPATH}
 
 # Copy application code
 COPY app ./app

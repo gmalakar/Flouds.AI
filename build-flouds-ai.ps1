@@ -7,20 +7,26 @@
 # This script builds and optionally pushes a Docker image for Flouds AI.
 #
 # Usage:
-#   ./build-flouds-ai.ps1 [-Tag <tag>] [-GPU] [-PushImage] [-Force]
+#   ./build-flouds-ai.ps1 [-Tag <tag>] [-GPU] [-PushImage] [-Force] [-NoCache] [-Platform <arch>] [-AlsoTagLatest]
 #
 # Parameters:
 #   -Tag           : Tag for the Docker image (default: "latest")
 #   -GPU           : Build with GPU support (uses gmalakar/flouds-ai-gpu instead of gmalakar/flouds-ai-cpu)
 #   -PushImage     : Push the image to a Docker registry after building
 #   -Force         : Force rebuild even if the image already exists
+#   -NoCache       : Disable Docker layer cache (slower but ensures clean build)
+#   -Platform      : Target platform (e.g., "linux/amd64" or "linux/arm64")
+#   -AlsoTagLatest : Also tag the image as 'latest' when using a custom tag
 # =============================================================================
 
 param (
     [string]$Tag = "latest",
     [switch]$GPU = $false,
     [switch]$PushImage = $false,
-    [switch]$Force = $false
+    [switch]$Force = $false,
+    [switch]$NoCache = $false,
+    [string]$Platform = "",
+    [switch]$AlsoTagLatest = $false
 )
 
 # ========================== HELPER FUNCTIONS ==========================
@@ -47,9 +53,9 @@ function Write-Error {
 
 function Test-Docker {
     try {
-        $process = Start-Process -FilePath "docker" -ArgumentList "version" -NoNewWindow -Wait -PassThru -RedirectStandardError "NUL"
+        $null = docker version 2>&1
         
-        if ($process.ExitCode -ne 0) {
+        if ($LASTEXITCODE -ne 0) {
             Write-Error "Docker is not running or not accessible. Please start Docker and try again."
             exit 1
         }
@@ -80,6 +86,13 @@ Write-Host "Full Image     : $fullImageName"
 Write-Host "GPU Support    : $GPU"
 Write-Host "Push to Registry: $PushImage"
 Write-Host "Force Rebuild  : $Force"
+Write-Host "Use Cache      : $(-not $NoCache)"
+if ($Platform) {
+    Write-Host "Platform       : $Platform"
+}
+if ($AlsoTagLatest) {
+    Write-Host "Also Tag       : ${ImageName}:latest"
+}
 Write-Host "========================================================="
 
 # Check Docker installation
@@ -128,10 +141,32 @@ Write-Host "This may take several minutes..." -ForegroundColor Yellow
 
 $buildStartTime = Get-Date
 
+# Enable BuildKit for faster builds
+$env:DOCKER_BUILDKIT = "1"
+
 $buildArgs = @(
-    "build",
-    "--no-cache",
-    "--platform", "linux/amd64",
+    "build"
+)
+
+# Add cache flag only if explicitly requested
+if ($NoCache) {
+    $buildArgs += "--no-cache"
+    Write-Host "Building without cache (clean build)" -ForegroundColor Yellow
+}
+else {
+    Write-Host "Using Docker layer cache for faster builds" -ForegroundColor Yellow
+}
+
+# Add platform if specified, otherwise default to linux/amd64
+if ($Platform) {
+    $buildArgs += "--platform", $Platform
+    Write-Host "Building for platform: $Platform" -ForegroundColor Yellow
+}
+else {
+    $buildArgs += "--platform", "linux/amd64"
+}
+
+$buildArgs += @(
     "-t", $fullImageName,
     "."
 )
@@ -186,6 +221,19 @@ try {
             Write-Host "Image size: $sizeInMB MB" -ForegroundColor Cyan
         }
         
+        # Tag as latest if requested and tag is not already 'latest'
+        if ($AlsoTagLatest -and $Tag -ne "latest") {
+            $latestImageName = "${ImageName}:latest"
+            Write-Host "Tagging as latest: $latestImageName" -ForegroundColor Yellow
+            docker tag $fullImageName $latestImageName
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "Also tagged as: $latestImageName"
+            }
+            else {
+                Write-Warning "Failed to tag as latest"
+            }
+        }
+        
         # Push image if requested
         if ($PushImage) {
             Write-StepHeader "Pushing image to registry"
@@ -207,7 +255,20 @@ try {
                 
                 if ($LASTEXITCODE -eq 0) {
                     $pushSuccess = $true
-                    Write-Success "Image pushed successfully to registry"
+                    Write-Success "Image pushed successfully: $fullImageName"
+                    
+                    # Push latest tag if it was created
+                    if ($AlsoTagLatest -and $Tag -ne "latest") {
+                        $latestImageName = "${ImageName}:latest"
+                        Write-Host "Pushing latest tag: $latestImageName" -ForegroundColor Yellow
+                        docker push $latestImageName
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-Success "Latest tag pushed successfully"
+                        }
+                        else {
+                            Write-Warning "Failed to push latest tag"
+                        }
+                    }
                 }
                 else {
                     Write-Warning "Push attempt $pushAttempt failed"

@@ -5,7 +5,7 @@
 # =============================================================================
 
 import numpy as np
-import pytest
+import pytest  # noqa: F401
 
 from app.services.embedder_service import SentenceTransformer
 
@@ -102,9 +102,7 @@ class TestQuantization:
             embedding = np.random.randn(*shape).astype(np.float32)
             for qtype in ["int8", "uint8", "binary"]:
                 quantized = SentenceTransformer._quantize_embedding(embedding, qtype)
-                assert (
-                    quantized.shape == shape
-                ), f"Shape mismatch for {qtype} with shape {shape}"
+                assert quantized.shape == shape, f"Shape mismatch for {qtype} with shape {shape}"
 
     def test_int8_roundtrip_accuracy(self):
         """Test int8 quantization preserves approximate values after dequantization."""
@@ -179,9 +177,7 @@ class TestQuantization:
         float32_size = embedding.nbytes
         int8_size = SentenceTransformer._quantize_embedding(embedding, "int8").nbytes
         uint8_size = SentenceTransformer._quantize_embedding(embedding, "uint8").nbytes
-        binary_size = SentenceTransformer._quantize_embedding(
-            embedding, "binary"
-        ).nbytes
+        binary_size = SentenceTransformer._quantize_embedding(embedding, "binary").nbytes
 
         # int8 and uint8 should be 4x smaller than float32
         assert int8_size == float32_size // 4
@@ -191,9 +187,7 @@ class TestQuantization:
 
     def test_batch_quantization_independence(self):
         """Test that batch quantization processes each row independently (uint8)."""
-        embeddings = np.array(
-            [[1.0, 2.0, 3.0], [100.0, 200.0, 300.0]], dtype=np.float32
-        )
+        embeddings = np.array([[1.0, 2.0, 3.0], [100.0, 200.0, 300.0]], dtype=np.float32)
         quantized = SentenceTransformer._quantize_embedding(embeddings, "uint8")
 
         # Each row should be independently scaled to [0, 255]

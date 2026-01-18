@@ -11,11 +11,7 @@ from typing import Any, Dict, Optional, cast
 
 from app.config.appsettings import AppSettings
 from app.config.onnx_config import OnnxConfig
-from app.exceptions import (
-    CacheInvalidationError,
-    InvalidConfigError,
-    MissingConfigError,
-)
+from app.exceptions import CacheInvalidationError, InvalidConfigError, MissingConfigError
 from app.logger import get_logger
 from app.utils.log_sanitizer import sanitize_for_log
 
@@ -81,9 +77,7 @@ class ConfigLoader:
             if parsed is not None:
                 ConfigLoader.__appsettings.server.port = parsed
             else:
-                logger.warning(
-                    f"Invalid SERVER PORT value: {server_port}; using config value"
-                )
+                logger.warning(f"Invalid SERVER PORT value: {server_port}; using config value")
 
         server_host = ConfigLoader._getenv_first("FLOUDS_HOST", "SERVER_HOST")
         if server_host:
@@ -195,18 +189,14 @@ class ConfigLoader:
         elif enc_out_cache is not None:
             logger.warning(f"Invalid encoder output cache max: {enc_out_cache}")
 
-        enc_out_max_bytes = ConfigLoader._getenv_first(
-            "FLOUDS_ENCODER_OUTPUT_CACHE_MAX_BYTES"
-        )
+        enc_out_max_bytes = ConfigLoader._getenv_first("FLOUDS_ENCODER_OUTPUT_CACHE_MAX_BYTES")
         parsed_enc_out_bytes = ConfigLoader._parse_int(enc_out_max_bytes)
         if parsed_enc_out_bytes is not None:
             ConfigLoader.__appsettings.cache.encoder_output_cache_max_array_bytes = (
                 parsed_enc_out_bytes
             )
         elif enc_out_max_bytes is not None:
-            logger.warning(
-                f"Invalid encoder output cache max bytes: {enc_out_max_bytes}"
-            )
+            logger.warning(f"Invalid encoder output cache max bytes: {enc_out_max_bytes}")
 
         max_req = ConfigLoader._getenv_first("FLOUDS_MAX_REQUEST_SIZE")
         parsed_max_req = ConfigLoader._parse_int(max_req)
@@ -237,13 +227,9 @@ class ConfigLoader:
         )
         parsed_bg_enabled = ConfigLoader._parse_bool(bg_enabled)
         if parsed_bg_enabled is not None:
-            ConfigLoader.__appsettings.monitoring.enable_background_cleanup = (
-                parsed_bg_enabled
-            )
+            ConfigLoader.__appsettings.monitoring.enable_background_cleanup = parsed_bg_enabled
 
-        bg_interval = ConfigLoader._getenv_first(
-            "FLOUDS_BACKGROUND_CLEANUP_INTERVAL_SECONDS"
-        )
+        bg_interval = ConfigLoader._getenv_first("FLOUDS_BACKGROUND_CLEANUP_INTERVAL_SECONDS")
         parsed_bg_interval = ConfigLoader._parse_int(bg_interval)
         if parsed_bg_interval is not None:
             ConfigLoader.__appsettings.monitoring.background_cleanup_interval_seconds = (
@@ -252,9 +238,7 @@ class ConfigLoader:
         elif bg_interval is not None:
             logger.warning(f"Invalid background cleanup interval: {bg_interval}")
 
-        bg_jitter = ConfigLoader._getenv_first(
-            "FLOUDS_BACKGROUND_CLEANUP_INITIAL_JITTER_SECONDS"
-        )
+        bg_jitter = ConfigLoader._getenv_first("FLOUDS_BACKGROUND_CLEANUP_INITIAL_JITTER_SECONDS")
         parsed_bg_jitter = ConfigLoader._parse_int(bg_jitter)
         if parsed_bg_jitter is not None:
             ConfigLoader.__appsettings.monitoring.background_cleanup_initial_jitter_seconds = (
@@ -263,9 +247,7 @@ class ConfigLoader:
         elif bg_jitter is not None:
             logger.warning(f"Invalid background cleanup initial jitter: {bg_jitter}")
 
-        bg_max_backoff = ConfigLoader._getenv_first(
-            "FLOUDS_BACKGROUND_CLEANUP_MAX_BACKOFF_SECONDS"
-        )
+        bg_max_backoff = ConfigLoader._getenv_first("FLOUDS_BACKGROUND_CLEANUP_MAX_BACKOFF_SECONDS")
         parsed_bg_max_backoff = ConfigLoader._parse_int(bg_max_backoff)
         if parsed_bg_max_backoff is not None:
             ConfigLoader.__appsettings.monitoring.background_cleanup_max_backoff_seconds = (
@@ -302,28 +284,20 @@ class ConfigLoader:
             # Validate ONNX root path
             if settings.onnx.onnx_path:
                 if not os.path.exists(settings.onnx.onnx_path):
-                    logger.error(
-                        f"ONNX root path does not exist: {settings.onnx.onnx_path}"
-                    )
+                    logger.error(f"ONNX root path does not exist: {settings.onnx.onnx_path}")
                     sys.exit(1)
                 if not os.path.isdir(settings.onnx.onnx_path):
-                    logger.error(
-                        f"ONNX root path is not a directory: {settings.onnx.onnx_path}"
-                    )
+                    logger.error(f"ONNX root path is not a directory: {settings.onnx.onnx_path}")
                     sys.exit(1)
                 logger.info(f"Validated ONNX root path: {settings.onnx.onnx_path}")
 
             # Validate ONNX config file
             if settings.onnx.config_file:
                 if not os.path.exists(settings.onnx.config_file):
-                    logger.error(
-                        f"ONNX config file does not exist: {settings.onnx.config_file}"
-                    )
+                    logger.error(f"ONNX config file does not exist: {settings.onnx.config_file}")
                     sys.exit(1)
                 if not os.path.isfile(settings.onnx.config_file):
-                    logger.error(
-                        f"ONNX config file is not a file: {settings.onnx.config_file}"
-                    )
+                    logger.error(f"ONNX config file is not a file: {settings.onnx.config_file}")
                     sys.exit(1)
                 # Validate that the ONNX config file is valid JSON. A malformed
                 # config is a fatal startup error.
@@ -354,7 +328,7 @@ class ConfigLoader:
                 try:
                     os.makedirs(db_dir, exist_ok=True)
                     logger.info(f"Created clients database directory: {db_dir}")
-                except (OSError, PermissionError) as e:
+                except OSError as e:
                     logger.error(
                         "Failed to create clients database directory %s: %s",
                         sanitize_for_log(db_dir),
@@ -368,9 +342,7 @@ class ConfigLoader:
                         sanitize_for_log(str(e)),
                     )
                     sys.exit(1)
-            logger.info(
-                f"Validated clients database path: {settings.security.clients_db_path}"
-            )
+            logger.info(f"Validated clients database path: {settings.security.clients_db_path}")
 
         # Create log directory if specified
         log_path = os.getenv("FLOUDS_LOG_PATH")
@@ -379,7 +351,7 @@ class ConfigLoader:
                 try:
                     os.makedirs(log_path, exist_ok=True)
                     logger.info(f"Created log directory: {log_path}")
-                except (OSError, PermissionError) as e:
+                except OSError as e:
                     logger.error(
                         "Failed to create log directory %s: %s",
                         sanitize_for_log(log_path),
@@ -414,9 +386,7 @@ class ConfigLoader:
         if ConfigLoader.__onnx_config_cache is None or (
             key not in ConfigLoader.__onnx_config_cache
         ):
-            raise MissingConfigError(
-                f"Model config '{key}' not found in onnx_config.json"
-            )
+            raise MissingConfigError(f"Model config '{key}' not found in onnx_config.json")
         return ConfigLoader.__onnx_config_cache[key]
 
     @staticmethod
@@ -428,7 +398,7 @@ class ConfigLoader:
         try:
             current_mtime = os.path.getmtime(config_file_name)
             return ConfigLoader.__config_file_mtime != current_mtime
-        except (OSError, FileNotFoundError):
+        except OSError:
             return True
 
     @staticmethod
@@ -445,7 +415,7 @@ class ConfigLoader:
             logger.debug(
                 f"Refreshed ONNX config cache with {len(ConfigLoader.__onnx_config_cache)} models"
             )
-        except (OSError, FileNotFoundError) as e:
+        except OSError as e:
             logger.error(f"ONNX config file not accessible: {e}")
             raise MissingConfigError(f"Cannot access ONNX config file: {e}")
         except (json.JSONDecodeError, ValueError) as e:
@@ -456,9 +426,7 @@ class ConfigLoader:
             raise CacheInvalidationError(f"Cannot refresh config cache: {e}")
 
     @staticmethod
-    def _load_config_data(
-        config_file_name: str, check_env_file: bool = False
-    ) -> Dict[str, Any]:
+    def _load_config_data(config_file_name: str, check_env_file: bool = False) -> Dict[str, Any]:
         """
         Loads a config file and merges with environment-specific override if present.
         Performs a deep merge for nested config sections.
@@ -471,7 +439,7 @@ class ConfigLoader:
         def deep_update(d: Dict[str, Any], u: Dict[str, Any]) -> None:
             for k, v in u.items():
                 if isinstance(v, dict) and isinstance(d.get(k), dict):
-                    deep_update(d[k], v)  # type: ignore[arg-type]
+                    deep_update(d[k], v)
                 else:
                     d[k] = v
 
@@ -489,7 +457,7 @@ class ConfigLoader:
                 with open(env_path, "r", encoding="utf-8") as f:
                     env_data = cast(Dict[str, Any], json.load(f))
                 deep_update(data, env_data)
-            except (OSError, FileNotFoundError):
+            except OSError:
                 logger.warning(
                     f"Environment-specific config file not found: {env_file}. Using base config."
                 )
@@ -522,9 +490,7 @@ class ConfigLoader:
         """Get cache statistics for monitoring."""
         return {
             "onnx_configs_cached": (
-                len(ConfigLoader.__onnx_config_cache)
-                if ConfigLoader.__onnx_config_cache
-                else 0
+                len(ConfigLoader.__onnx_config_cache) if ConfigLoader.__onnx_config_cache else 0
             ),
             "cache_file_mtime": ConfigLoader.__config_file_mtime,
             "cache_loaded": ConfigLoader.__onnx_config_cache is not None,

@@ -14,7 +14,9 @@
 Move routing and middleware registration out of `main.py` so startup
 concerns are easier to test and maintain.
 """
-from typing import Optional
+
+
+from typing import Any, Callable
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,13 +27,13 @@ from starlette.requests import Request as StarletteRequest
 from app.app_init import APP_SETTINGS
 from app.dependencies.auth import AuthMiddleware, common_headers
 from app.dependencies.auth import router as auth_router
+from app.middleware.log_context import LogContextMiddleware
 from app.middleware.path_security import PathSecurityMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.request_size_limit import RequestSizeLimitMiddleware
 from app.middleware.request_validation import RequestValidationMiddleware
-from app.middleware.tenant_security import (
-    TenantCorsMiddleware,
-    TenantTrustedHostMiddleware,
-)
+from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.middleware.tenant_security import TenantCorsMiddleware, TenantTrustedHostMiddleware
 from app.routers import (
     admin,
     config,
@@ -54,7 +56,9 @@ def setup_routing(app: FastAPI) -> None:
     # Small diagnostic middleware: log requests for /favicon.ico so we can
     # identify the client (useful when a runtime error arises when serving it).
     class FaviconLoggerMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request: StarletteRequest, call_next):
+        async def dispatch(
+            self, request: StarletteRequest, call_next: Callable[[StarletteRequest], Any]
+        ) -> Any:
             try:
                 if request.url.path == "/favicon.ico":
                     client = request.client.host if request.client else "unknown"
@@ -69,8 +73,22 @@ def setup_routing(app: FastAPI) -> None:
             return await call_next(request)
 
     app.add_middleware(FaviconLoggerMiddleware)
+    # Add log context early so downstream logs include request context
+    app.add_middleware(LogContextMiddleware)
 
-    # Add security middleware
+    # Add security middleware early in the chain
+    # Security headers added to all responses
+    app.add_middleware(SecurityHeadersMiddleware, is_production=APP_SETTINGS.app.is_production)
+
+    # Request size limit protection (early to reject large requests)
+    # `max_request_size` is an application-level setting (AppConfig), not under `security`.
+    if APP_SETTINGS.app.max_request_size:
+        app.add_middleware(
+            RequestSizeLimitMiddleware,
+            max_size=APP_SETTINGS.app.max_request_size,
+        )
+
+    # Add other security middleware
     if APP_SETTINGS.app.is_production:
         app.add_middleware(
             TrustedHostMiddleware, allowed_hosts=["*"]  # Configure based on deployment

@@ -37,7 +37,7 @@ class PerformanceMonitor:
                 "cpu": {"percent": cpu_percent, "count": psutil.cpu_count()},
                 "timestamp": time.time(),
             }
-        except (PermissionError, OSError) as e:
+        except OSError as e:
             logger.error("System access denied for metrics: %s", str(e))
             return {}
         except (AttributeError, ImportError) as e:
@@ -49,7 +49,7 @@ class PerformanceMonitor:
 
     @staticmethod
     @contextmanager
-    def measure_time(operation_name: str):
+    def measure_time(operation_name: str) -> Any:
         """Context manager to measure execution time."""
         start_time = time.time()
         start_memory = psutil.Process().memory_info().rss / 1024 / 1024
@@ -78,12 +78,8 @@ class PerformanceMonitor:
         try:
             metrics = PerformanceMonitor.get_system_metrics()
 
-            memory_exceeded = (
-                metrics.get("memory", {}).get("used_mb", 0) > memory_threshold_mb
-            )
-            cpu_exceeded = (
-                metrics.get("cpu", {}).get("percent", 0) > cpu_threshold_percent
-            )
+            memory_exceeded = metrics.get("memory", {}).get("used_mb", 0) > memory_threshold_mb
+            cpu_exceeded = metrics.get("cpu", {}).get("percent", 0) > cpu_threshold_percent
 
             if memory_exceeded:
                 logger.warning(
@@ -100,7 +96,7 @@ class PerformanceMonitor:
                 "cpu_exceeded": cpu_exceeded,
                 "healthy": not (memory_exceeded or cpu_exceeded),
             }
-        except (PermissionError, OSError) as e:
+        except OSError as e:
             logger.error("System access denied for threshold check: %s", str(e))
             return {"memory_exceeded": False, "cpu_exceeded": False, "healthy": True}
         except Exception as e:

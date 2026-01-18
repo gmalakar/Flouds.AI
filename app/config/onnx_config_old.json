@@ -15,7 +15,7 @@
         "use_optimized": false,
         "encoder_optimized_onnx_model": "",
         "decoder_optimized_onnx_model": "",
-        "special_tokens_map_path": "",       
+        "special_tokens_map_path": "",
         "quantize": false,
         "quantize_type": null,
         "forced_bos_token_id": null
@@ -38,7 +38,7 @@
             "decoder_input_name": ""
         },
 
-        "encoder_onnx_model": "model.onnx"        
+        "encoder_onnx_model": "model.onnx"
     },
     "all-MiniLM-L6-v2": {
         "max_length": 256,
@@ -53,7 +53,7 @@
         "force_pooling": true,
         "encoder_onnx_model": "model.onnx",
         "use_optimized": true,
-        "encoder_optimized_onnx_model": "model_optimized.onnx"        
+        "encoder_optimized_onnx_model": "model_optimized.onnx"
     },
     "e5-base-v2": {
         "max_length": 512,
@@ -87,7 +87,7 @@
 
         "encoder_onnx_model": "model.onnx"
 
-        
+
     },
     "pleiaspico": {
         "max_length": 2048,
@@ -105,7 +105,7 @@
             "mask": "attention_mask"
         },
         "encoder_onnx_model": "model.onnx"
-        
+
     },
     "sentence-t5-base": {
         "max_length": 256,
@@ -125,8 +125,8 @@
             "decoder_input_name": "decoder_input_ids"
         },
         "encoder_onnx_model": "model.onnx"
-        
-    }, 
+
+    },
     "t5-small": {
         "max_length": 512,
 
@@ -178,7 +178,7 @@
         "special_tokens_map_path": "special_tokens_map.json",
         "num_beams": 2,
         "early_stopping": true,
-        "use_seq2seqlm": true      
+        "use_seq2seqlm": true
     },
     "bart-large-cnn": {
         "max_length": 512,

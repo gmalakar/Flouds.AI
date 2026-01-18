@@ -164,7 +164,7 @@ function Set-DirectoryPermissions {
     else {
         Write-Success "Found $Description directory: $Path"
     }
-    
+
     # Test if directory is writable
     if (Test-DirectoryWritable -Path $Path) {
         Write-Success "$Description directory is writable: $Path"
@@ -318,6 +318,16 @@ foreach ($key in $envVars.Keys) {
     }
 }
 
+# Cache-related default environment variables (applied only if missing in .env)
+$cacheDefaults = @{
+    "FLOUDS_ENCODER_CACHE_MAX" = "3";
+    "FLOUDS_DECODER_CACHE_MAX" = "3";
+    "FLOUDS_MODEL_CACHE_MAX" = "2";
+    "FLOUDS_SPECIAL_TOKENS_CACHE_MAX" = "8";
+    "FLOUDS_GENERATION_CACHE_MAX" = "256";
+    "FLOUDS_ENCODER_OUTPUT_CACHE_MAX" = "128";
+    "FLOUDS_ENCODER_OUTPUT_CACHE_MAX_BYTES" = "10485760"; # 10MB
+}
 
 foreach ($key in $cacheDefaults.Keys) {
     if (-not $envVars.ContainsKey($key)) {

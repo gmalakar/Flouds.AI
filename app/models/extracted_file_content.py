@@ -10,15 +10,11 @@ from pydantic import BaseModel, Field
 
 
 class ExtractedFileContent(BaseModel):
-    content: str = Field(
-        cast(Any, ...), description="The extracted file content as text."
-    )
+    content: str = Field(cast(Any, ...), description="The extracted file content as text.")
 
     item_number: int = Field(
         0,
         description="The item number (page, paragraph, row, etc.) from which the content was extracted.",
     )
 
-    content_as: str = Field(
-        "text", description="The format in which the content was extracted."
-    )
+    content_as: str = Field("text", description="The format in which the content was extracted.")

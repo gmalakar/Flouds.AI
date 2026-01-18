@@ -203,11 +203,11 @@ python -m pytest tests/test_prompt_service.py -v
 
 ## Benefits of Minimal Config
 
-✅ **Less Maintenance:** Fewer lines to update when changing models  
-✅ **Fewer Errors:** Auto-detection ensures accuracy  
-✅ **Easier Onboarding:** New models work with minimal setup  
-✅ **Self-Documenting:** Config shows only behavioral choices  
-✅ **Future-Proof:** Model upgrades don't require config changes  
+✅ **Less Maintenance:** Fewer lines to update when changing models
+✅ **Fewer Errors:** Auto-detection ensures accuracy
+✅ **Easier Onboarding:** New models work with minimal setup
+✅ **Self-Documenting:** Config shows only behavioral choices
+✅ **Future-Proof:** Model upgrades don't require config changes
 
 ---
 

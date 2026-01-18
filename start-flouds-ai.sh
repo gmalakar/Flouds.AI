@@ -102,11 +102,11 @@ test_docker() {
     if ! command -v docker &> /dev/null; then
         write_error "Docker is not installed or not in PATH"
     fi
-    
+
     if ! docker version &> /dev/null; then
         write_error "Docker is not running or not accessible"
     fi
-    
+
     write_success "Docker is running"
 }
 
@@ -115,7 +115,7 @@ read_env_file() {
     if [[ ! -f "$file_path" ]]; then
         return 1
     fi
-    
+
     # Export variables from .env file
     set -a
     source "$file_path"
@@ -125,7 +125,7 @@ read_env_file() {
 set_directory_permissions() {
     local path="$1"
     local description="$2"
-    
+
     if [[ ! -d "$path" ]]; then
         write_warning "$description directory does not exist: $path"
         echo "Creating directory..."
@@ -136,7 +136,7 @@ set_directory_permissions() {
     else
         write_success "Found $description directory: $path"
     fi
-    
+
     # Test if directory is writable
     if [[ ! -w "$path" ]]; then
         write_warning "$description directory is not writable: $path"
@@ -272,23 +272,34 @@ DOCKER_ARGS+=(
     "-p" "19690:19690"
 )
 
+# Cache-related default environment variables (applied only if missing in .env)
+declare -A CACHE_DEFAULTS=(
+    [FLOUDS_ENCODER_CACHE_MAX]="3"
+    [FLOUDS_DECODER_CACHE_MAX]="3"
+    [FLOUDS_MODEL_CACHE_MAX]="2"
+    [FLOUDS_SPECIAL_TOKENS_CACHE_MAX]="8"
+    [FLOUDS_GENERATION_CACHE_MAX]="256"
+    [FLOUDS_ENCODER_OUTPUT_CACHE_MAX]="128"
+    [FLOUDS_ENCODER_OUTPUT_CACHE_MAX_BYTES]="10485760" # 10MB
+)
+
 # Load all environment variables from .env file
 while IFS='=' read -r key value; do
     # Skip comments and empty lines
     [[ $key =~ ^#.*$ ]] && continue
     [[ -z $key ]] && continue
-    
+
     # Skip _AT_HOST variables as they are for host path mapping
     [[ $key =~ .*_AT_HOST$ ]] && continue
-    
+
     # Remove quotes from value
     value=$(echo "$value" | sed 's/^"\(.*\)"$/\1/' | sed "s/^'\(.*\)'$/\1/")
-    
+
     DOCKER_ARGS+=("-e" "$key=$value")
 done < "$ENV_FILE"
 
+# Inject cache defaults only if not set via .env
 for key in "${!CACHE_DEFAULTS[@]}"; do
-    # Check if variable is not already set from .env
     if [[ -z "${!key}" ]]; then
         value="${CACHE_DEFAULTS[$key]}"
         DOCKER_ARGS+=("-e" "$key=$value")
@@ -350,7 +361,7 @@ if docker "${DOCKER_ARGS[@]}"; then
     write_success "API available at: http://localhost:19690/docs"
     echo "Waiting for container to initialize..."
     sleep 3
-    
+
     write_step_header "Container Status"
     docker ps --filter "name=$INSTANCE_NAME" --format "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
 else

@@ -21,13 +21,13 @@ logger = get_logger("rag_router")
 @router.post("/generate", response_model=PromptResponse)
 async def generate_answer(request: RAGRequest) -> PromptResponse:
     """Generate answer using RAG (Retrieval-Augmented Generation)."""
-    logger.debug(
-        f"RAG request for model: {request.model}, query: {request.query[:100]}"
-    )
+    logger.debug(f"RAG request for model: {request.model}, query: {request.query[:100]}")
 
     try:
         # Format prompt for T5/summarization model
-        prompt = f"{request.instruction}\nQuestion: {request.query}\nContext: {request.context}\nAnswer:"
+        prompt = (
+            f"{request.instruction}\nQuestion: {request.query}\nContext: {request.context}\nAnswer:"
+        )
 
         # Convert to prompt request, carry tenant context through
         prompt_request = PromptRequest(
@@ -46,6 +46,6 @@ async def generate_answer(request: RAGRequest) -> PromptResponse:
     except FloudsBaseException as e:
         status_code = ErrorHandler.get_http_status(e)
         raise HTTPException(status_code=status_code, detail=e.message)
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in RAG endpoint")
         raise HTTPException(status_code=500, detail="Internal server error")

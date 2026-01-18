@@ -25,9 +25,7 @@ def test_openapi_contains_model_info_and_response_matches_model():
     spec = spec_resp.json()
 
     # ensure the path exists in the OpenAPI spec
-    assert "/api/v1/model/info" in spec.get(
-        "paths", {}
-    ), "OpenAPI spec missing /api/v1/model/info"
+    assert "/api/v1/model/info" in spec.get("paths", {}), "OpenAPI spec missing /api/v1/model/info"
 
     # call the endpoint for a non-existent model (safe path)
     # include a valid token from key_manager so AuthMiddleware permits the request
@@ -40,10 +38,7 @@ def test_openapi_contains_model_info_and_response_matches_model():
         # derive tenant code from client record when available; default to 'master'
         try:
             client_id = token.split("|", 1)[0]
-            tenant = (
-                getattr(key_manager.clients.get(client_id), "tenant_code", "")
-                or "master"
-            )
+            tenant = getattr(key_manager.clients.get(client_id), "tenant_code", "") or "master"
         except Exception:
             tenant = "master"
         auth_header = {"Authorization": f"Bearer {token}", "X-Tenant-Code": tenant}
@@ -62,7 +57,7 @@ def test_openapi_contains_model_info_and_response_matches_model():
     # Optional: if openapi-core is available, try to perform an operation-level validation.
     try:
         from openapi_core import create_spec
-        from openapi_core.templating.media_types.finders import MediaTypeFinder
+        from openapi_core.templating.media_types.finders import MediaTypeFinder  # noqa: F401
         from openapi_core.validation.response.validators import ResponseValidator
 
         spec_obj = create_spec(spec)
@@ -81,9 +76,7 @@ def test_openapi_contains_model_info_and_response_matches_model():
 
         # Try to validate using validator.validate (some versions expect wrapper objects).
         try:
-            result = validator.validate(
-                openapi_response, path="/api/v1/model/info", method="get"
-            )
+            result = validator.validate(openapi_response, path="/api/v1/model/info", method="get")
             # If result has errors attribute, assert there are no errors
             errors = getattr(result, "errors", None)
             if errors:

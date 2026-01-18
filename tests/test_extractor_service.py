@@ -180,9 +180,7 @@ def test_extract_text_csv():
 
 
 def test_extract_text_unsupported_format():
-    req = FileRequest(
-        file_content=base64.b64encode(b"dummy content").decode(), extention="xyz"
-    )
+    req = FileRequest(file_content=base64.b64encode(b"dummy content").decode(), extention="xyz")
     response = ExtractorService.extract_text(req)
 
     assert response.success is False
@@ -190,9 +188,7 @@ def test_extract_text_unsupported_format():
 
 
 def test_extract_text_doc_missing_library():
-    with patch(
-        "app.services.extractor_service.Document", side_effect=Exception("no docx")
-    ):
+    with patch("app.services.extractor_service.Document", side_effect=Exception("no docx")):
         req = FileRequest(
             file_content=base64.b64encode(b"dummy doc content").decode(),
             extention="doc",
