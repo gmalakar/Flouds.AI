@@ -20,7 +20,8 @@ param (
     [string]$Tag = "latest",
     [switch]$GPU = $false,
     [switch]$PushImage = $false,
-    [switch]$Force = $false
+    [switch]$Force = $false,
+    [string]$TorchVersion = $null
 )
 
 # ========================== HELPER FUNCTIONS ==========================
@@ -78,6 +79,7 @@ Write-Host "Image Name     : $ImageName"
 Write-Host "Tag            : $Tag"
 Write-Host "Full Image     : $fullImageName"
 Write-Host "GPU Support    : $GPU"
+if ($TorchVersion) { Write-Host "Torch Version  : $TorchVersion" } else { Write-Host "Torch Version  : (use Dockerfile default)" }
 Write-Host "Push to Registry: $PushImage"
 Write-Host "Force Rebuild  : $Force"
 Write-Host "========================================================="
@@ -128,19 +130,35 @@ Write-Host "This may take several minutes..." -ForegroundColor Yellow
 
 $buildStartTime = Get-Date
 
-$buildArgs = @(
-    "build",
-    "--no-cache",
-    "--platform", "linux/amd64",
-    "-t", $fullImageName,
-    "."
-)
+# Buildx + BuildKit provides cache mounts used by the Dockerfile.
+$buildArgs = @()
 
-# Add GPU flag if requested
-if ($GPU) {
-    $buildArgs += "--build-arg", "GPU=true"
-    Write-Host "Building with GPU support enabled" -ForegroundColor Yellow
+# Use buildx build so BuildKit cache mounts are available. We'll pass args to docker as array.
+$buildArgs += "buildx"
+$buildArgs += "build"
+
+if ($Force) {
+    $buildArgs += "--no-cache"
 }
+
+$buildArgs += "--progress"
+$buildArgs += "plain"
+$buildArgs += "--load"
+$buildArgs += "-t"
+$buildArgs += $fullImageName
+
+# Pass build args
+$buildArgs += "--build-arg"
+$buildArgs += "GPU=$($GPU.IsPresent)"
+# Add TORCH_VERSION build-arg only when provided
+if ($TorchVersion) {
+    $buildArgs += "--build-arg"
+    $buildArgs += "TORCH_VERSION=$TorchVersion"
+}
+
+$buildArgs += "."
+
+if ($GPU) { Write-Host "Building with GPU support enabled" -ForegroundColor Yellow }
 
 # Execute docker build command with retry logic
 try {
@@ -148,29 +166,32 @@ try {
     $retryCount = 0
     $success = $false
     
-    Write-Host "Starting Docker build with max $maxRetries attempts..." -ForegroundColor Yellow
-    
-    while (-not $success -and $retryCount -lt $maxRetries) {
-        $retryCount++
-        
-        if ($retryCount -gt 1) {
-            $waitTime = [math]::Pow(2, $retryCount - 1) * 10 # Exponential backoff: 10s, 20s, 40s...
-            Write-Warning "Retrying in $waitTime seconds (Attempt $retryCount of $maxRetries)..."
-            Start-Sleep -Seconds $waitTime
-        }
-        
-        Write-Host "Docker build attempt $retryCount of $maxRetries..." -ForegroundColor Yellow
-        & docker $buildArgs
-        
-        if ($LASTEXITCODE -eq 0) {
-            $success = $true
-        }
-        else {
-            if ($retryCount -lt $maxRetries) {
-                Write-Warning "Docker build failed. Will retry..."
+        Write-Host "Starting Docker build with max $maxRetries attempts..." -ForegroundColor Yellow
+
+        # Enable BuildKit for mount support
+        $env:DOCKER_BUILDKIT = "1"
+
+        while (-not $success -and $retryCount -lt $maxRetries) {
+            $retryCount++
+
+            if ($retryCount -gt 1) {
+                $waitTime = [math]::Pow(2, $retryCount - 1) * 10 # Exponential backoff: 10s, 20s, 40s...
+                Write-Warning "Retrying in $waitTime seconds (Attempt $retryCount of $maxRetries)..."
+                Start-Sleep -Seconds $waitTime
+            }
+
+            Write-Host "Docker build attempt $retryCount of $maxRetries..." -ForegroundColor Yellow
+            & docker @buildArgs
+
+            if ($LASTEXITCODE -eq 0) {
+                $success = $true
+            }
+            else {
+                if ($retryCount -lt $maxRetries) {
+                    Write-Warning "Docker build failed. Will retry..."
+                }
             }
         }
-    }
     
     if ($success) {
         $buildEndTime = Get-Date
