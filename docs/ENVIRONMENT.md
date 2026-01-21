@@ -13,7 +13,7 @@ Format: `NAME` — Default — Required? — Where used — Short description
 - `FLOUDS_CLIENTS_DB` — `clients.db` — Optional (recommended set) — `app/app_init.py`, `app/config/config_loader.py`, `app/key_manager.py` — Path/name of the clients DB file.
 - `FLOUDS_ONNX_ROOT` — none — Optional — `app/app_init.py`, `app/config/config_loader.py` — Root folder for ONNX models. Optional in Development; required in Production if ONNX usage expected.
 - `FLOUDS_ONNX_CONFIG_FILE` — none — Optional — `app/app_init.py` — ONNX config filename (optional in Development).
-- `ONNX_PATH` — `../onnx` (used by export utilities) — Optional — `onnx_loaders/export_model.py`, `onnx_loaders/export_model_v2.py` — Fallback path for ONNX export scripts.
+- `ONNX_PATH` — `../onnx` (used by export utilities) — Optional — `onnx_exporter/export_model.py`, `onnx_exporter/export_model_v2.py` — Fallback path for ONNX export scripts.
 - `FLOUDS_ENCRYPTION_KEY` — none — Required in Production for secure operations — `app/services/config_service.py`, `app/modules/key_manager.py` — Encryption key for tokens/secrets. Treat as sensitive (store in vault/CI secrets).
 - `FLOUDS_ENCODER_CACHE_MAX` — `3` — Optional — `app/services/base_nlp_service.py`, `app/services/cache_registry.py` — Max entries in encoder session cache.
 - `FLOUDS_DECODER_CACHE_MAX` — `3` — Optional — `app/services/prompt_service.py`, `app/services/cache_registry.py` — Max entries in decoder/session cache.

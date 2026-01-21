@@ -61,7 +61,7 @@ app/
     memory_monitor.py            # Memory usage monitoring
     model_cache.py              # LRU model caching
   main.py                       # Enhanced FastAPI application
-onnx_loaders/                   # Model export utilities
+onnx_exporter/                   # Model export utilities
 tests/                          # Comprehensive test suite
 .env.example                    # Environment configuration template
 ```
