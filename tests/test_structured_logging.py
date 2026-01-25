@@ -91,7 +91,10 @@ def test_json_formatter_without_request_context():
     assert log_entry["level"] == "WARNING"
     assert log_entry["message"] == "Warning without context"
     # Context vars persist across tests; accept either default or previous value
-    assert log_entry["request_id"] in ("-", "test-123")  # May carry over from previous test
+    assert log_entry["request_id"] in (
+        "-",
+        "test-123",
+    )  # May carry over from previous test
     # Path and method should not be present when not set
     # (unless they were set in a previous test due to contextvars persistence)
 

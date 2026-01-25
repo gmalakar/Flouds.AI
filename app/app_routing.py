@@ -57,7 +57,9 @@ def setup_routing(app: FastAPI) -> None:
     # identify the client (useful when a runtime error arises when serving it).
     class FaviconLoggerMiddleware(BaseHTTPMiddleware):
         async def dispatch(
-            self, request: StarletteRequest, call_next: Callable[[StarletteRequest], Any]
+            self,
+            request: StarletteRequest,
+            call_next: Callable[[StarletteRequest], Any],
         ) -> Any:
             try:
                 if request.url.path == "/favicon.ico":

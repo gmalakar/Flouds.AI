@@ -34,7 +34,9 @@ def test_public_endpoint_bypasses_auth(mock_app_settings):
     mock_app_settings.security.enabled = True
     with (
         patch("app.modules.key_manager.key_manager.load_clients", return_value=None),
-        patch("app.modules.key_manager.key_manager.get_all_tokens", return_value=["tok"]),
+        patch(
+            "app.modules.key_manager.key_manager.get_all_tokens", return_value=["tok"]
+        ),
     ):
         app = _make_app()
         client = TestClient(app)
@@ -47,7 +49,9 @@ def test_private_requires_tenant_and_auth(mock_app_settings):
 
     with (
         patch("app.modules.key_manager.key_manager.load_clients", return_value=None),
-        patch("app.modules.key_manager.key_manager.get_all_tokens", return_value=["tok"]),
+        patch(
+            "app.modules.key_manager.key_manager.get_all_tokens", return_value=["tok"]
+        ),
     ):
         app = _make_app()
         client = TestClient(app)
@@ -63,7 +67,9 @@ def test_private_requires_tenant_and_auth(mock_app_settings):
         assert "Missing Authorization" in r.json().get("message", "")
 
         # With tenant and Authorization but invalid token -> 401
-        with patch("app.modules.key_manager.key_manager.authenticate_client", return_value=None):
+        with patch(
+            "app.modules.key_manager.key_manager.authenticate_client", return_value=None
+        ):
             r = client.get(
                 "/private",
                 headers={"X-Tenant-Code": "t1", "Authorization": "Bearer badtoken"},

@@ -96,7 +96,6 @@ class ModelInfoService:
             "lowercase": False,
             "remove_emojis": False,
             "chunk_overlap": 0,
-            "use_optimized": False,
         }
 
         types: List[str] = [model_type] if isinstance(model_type, str) else list(model_type or [])
@@ -138,9 +137,7 @@ class ModelInfoService:
             "chunk_overlap",
             "chunk_size",
             "encoder_onnx_model",
-            "encoder_optimized_onnx_model",
             "legacy_tokenizer",
-            "use_optimized",
             "lowercase",
             "remove_emojis",
         }
@@ -162,7 +159,6 @@ class ModelInfoService:
             "bos_token_id",
             "decoder_start_token_id",
             "decoder_onnx_model",
-            "decoder_optimized_onnx_model",
             "decoder_inputnames",
             "use_seq2seqlm",
             "vocab_size",
@@ -201,12 +197,8 @@ class ModelInfoService:
         files_info: Dict[str, Any] = {
             "encoder_file": None,
             "encoder_exists": False,
-            "encoder_optimized_file": None,
-            "encoder_optimized_exists": False,
             "decoder_file": None,
             "decoder_exists": False,
-            "decoder_optimized_file": None,
-            "decoder_optimized_exists": False,
         }
 
         # Check encoder file
@@ -215,13 +207,6 @@ class ModelInfoService:
         files_info["encoder_file"] = encoder_file
         files_info["encoder_exists"] = os.path.exists(encoder_path)
 
-        # Check encoder optimized file
-        if hasattr(config, "encoder_optimized_onnx_model"):
-            encoder_opt_file = config.encoder_optimized_onnx_model
-            encoder_opt_path = os.path.join(model_path, encoder_opt_file)
-            files_info["encoder_optimized_file"] = encoder_opt_file
-            files_info["encoder_optimized_exists"] = os.path.exists(encoder_opt_path)
-
         # Check decoder file
         if hasattr(config, "decoder_onnx_model"):
             decoder_file = config.decoder_onnx_model
@@ -229,12 +214,7 @@ class ModelInfoService:
             files_info["decoder_file"] = decoder_file
             files_info["decoder_exists"] = os.path.exists(decoder_path)
 
-        # Check decoder optimized file
-        if hasattr(config, "decoder_optimized_onnx_model"):
-            decoder_opt_file = config.decoder_optimized_onnx_model
-            decoder_opt_path = os.path.join(model_path, decoder_opt_file)
-            files_info["decoder_optimized_file"] = decoder_opt_file
-            files_info["decoder_optimized_exists"] = os.path.exists(decoder_opt_path)
+        # (Optimized artifact checks removed - project no longer uses optimized filenames)
 
         return files_info
 

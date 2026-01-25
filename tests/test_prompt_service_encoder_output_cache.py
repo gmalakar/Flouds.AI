@@ -11,7 +11,10 @@ from types import SimpleNamespace
 import numpy as np
 
 import app.services.cache_registry as cache_registry
-from app.services.cache_registry import clear_encoder_output_cache, get_encoder_output_cache
+from app.services.cache_registry import (
+    clear_encoder_output_cache,
+    get_encoder_output_cache,
+)
 from app.services.prompt_service import PromptProcessor
 from app.utils.simple_cache import SimpleCache
 

@@ -90,8 +90,9 @@ dmypy.json
 .pyre/
 
 # Documentation
+# Ignore Markdown files at any depth to keep image/context small
 docs/
-*.md
+**/*.md
 
 # Logs
 **/logs
@@ -115,8 +116,9 @@ test_*.py
 *_test.py
 
 # Development configuration files
-appsettings.*.json
-!appsettings.json
+# Ignore appsettings variants anywhere (development overrides should not be copied)
+**/appsettings.*.json
+!/appsettings.json
 
 # Development dependencies and tools
 requirements-dev.txt
@@ -124,6 +126,8 @@ requirements.lock
 .pre-commit-config.yaml
 pyproject.toml
 pytest.ini
+requirements.txt
+**/requirements.txt
 
 # Docker files (avoid recursion)
 **/Dockerfile*
@@ -183,6 +187,8 @@ data/
 *.safetensors
 
 # Configuration backups
+# Ignore backup files anywhere in the tree (explicit recursive pattern)
+**/*.bak
 *.bak
 *.backup
 *.orig

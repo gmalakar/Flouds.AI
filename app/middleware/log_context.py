@@ -37,7 +37,14 @@ def _sanitize_body(body: bytes, max_length: int = 200) -> str:
         # Try to parse as JSON
         parsed = json.loads(body)
         # Remove sensitive keys
-        sensitive_keys = {"password", "token", "secret", "api_key", "apikey", "authorization"}
+        sensitive_keys = {
+            "password",
+            "token",
+            "secret",
+            "api_key",
+            "apikey",
+            "authorization",
+        }
         if isinstance(parsed, dict):
             sanitized = {
                 k: "***REDACTED***" if k.lower() in sensitive_keys else v for k, v in parsed.items()

@@ -28,7 +28,9 @@ class ConfigRequest(BaseModel):
         if any(ch.isspace() for ch in v):
             raise ValueError("key must not contain whitespace")
         if not KEY_REGEX.fullmatch(v):
-            raise ValueError("key contains invalid characters; allowed: A-Z a-z 0-9 _ . : -")
+            raise ValueError(
+                "key contains invalid characters; allowed: A-Z a-z 0-9 _ . : -"
+            )
         return v
 
     @field_validator("value")

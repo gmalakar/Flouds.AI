@@ -6,7 +6,7 @@
     "reportMissingImports": true,
     "reportOptionalMemberAccess": true,
     "exclude": [
-        "onnx_loaders/**",
+        "onnx_exporter/**",
         "onnx/**",
         "logs/**",
         ".env/**",

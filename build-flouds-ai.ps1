@@ -7,16 +7,13 @@
 # This script builds and optionally pushes a Docker image for Flouds AI.
 #
 # Usage:
-#   ./build-flouds-ai.ps1 [-Tag <tag>] [-GPU] [-PushImage] [-Force] [-NoCache] [-Platform <arch>] [-AlsoTagLatest]
+#   ./build-flouds-ai.ps1 [-Tag <tag>] [-GPU] [-PushImage] [-Force]
 #
 # Parameters:
 #   -Tag           : Tag for the Docker image (default: "latest")
 #   -GPU           : Build with GPU support (uses gmalakar/flouds-ai-gpu instead of gmalakar/flouds-ai-cpu)
 #   -PushImage     : Push the image to a Docker registry after building
 #   -Force         : Force rebuild even if the image already exists
-#   -NoCache       : Disable Docker layer cache (slower but ensures clean build)
-#   -Platform      : Target platform (e.g., "linux/amd64" or "linux/arm64")
-#   -AlsoTagLatest : Also tag the image as 'latest' when using a custom tag
 # =============================================================================
 
 param (
@@ -24,9 +21,7 @@ param (
     [switch]$GPU = $false,
     [switch]$PushImage = $false,
     [switch]$Force = $false,
-    [switch]$NoCache = $false,
-    [string]$Platform = "",
-    [switch]$AlsoTagLatest = $false
+    [string]$TorchVersion = $null
 )
 
 # ========================== HELPER FUNCTIONS ==========================
@@ -53,9 +48,9 @@ function Write-Error {
 
 function Test-Docker {
     try {
-        $null = docker version 2>&1
+        $process = Start-Process -FilePath "docker" -ArgumentList "version" -NoNewWindow -Wait -PassThru -RedirectStandardError "NUL"
         
-        if ($LASTEXITCODE -ne 0) {
+        if ($process.ExitCode -ne 0) {
             Write-Error "Docker is not running or not accessible. Please start Docker and try again."
             exit 1
         }
@@ -84,15 +79,9 @@ Write-Host "Image Name     : $ImageName"
 Write-Host "Tag            : $Tag"
 Write-Host "Full Image     : $fullImageName"
 Write-Host "GPU Support    : $GPU"
+if ($TorchVersion) { Write-Host "Torch Version  : $TorchVersion" } else { Write-Host "Torch Version  : (use Dockerfile default)" }
 Write-Host "Push to Registry: $PushImage"
 Write-Host "Force Rebuild  : $Force"
-Write-Host "Use Cache      : $(-not $NoCache)"
-if ($Platform) {
-    Write-Host "Platform       : $Platform"
-}
-if ($AlsoTagLatest) {
-    Write-Host "Also Tag       : ${ImageName}:latest"
-}
 Write-Host "========================================================="
 
 # Check Docker installation
@@ -141,41 +130,35 @@ Write-Host "This may take several minutes..." -ForegroundColor Yellow
 
 $buildStartTime = Get-Date
 
-# Enable BuildKit for faster builds
-$env:DOCKER_BUILDKIT = "1"
+# Buildx + BuildKit provides cache mounts used by the Dockerfile.
+$buildArgs = @()
 
-$buildArgs = @(
-    "build"
-)
+# Use buildx build so BuildKit cache mounts are available. We'll pass args to docker as array.
+$buildArgs += "buildx"
+$buildArgs += "build"
 
-# Add cache flag only if explicitly requested
-if ($NoCache) {
+if ($Force) {
     $buildArgs += "--no-cache"
-    Write-Host "Building without cache (clean build)" -ForegroundColor Yellow
-}
-else {
-    Write-Host "Using Docker layer cache for faster builds" -ForegroundColor Yellow
 }
 
-# Add platform if specified, otherwise default to linux/amd64
-if ($Platform) {
-    $buildArgs += "--platform", $Platform
-    Write-Host "Building for platform: $Platform" -ForegroundColor Yellow
-}
-else {
-    $buildArgs += "--platform", "linux/amd64"
+$buildArgs += "--progress"
+$buildArgs += "plain"
+$buildArgs += "--load"
+$buildArgs += "-t"
+$buildArgs += $fullImageName
+
+# Pass build args
+$buildArgs += "--build-arg"
+$buildArgs += "GPU=$($GPU.IsPresent)"
+# Add TORCH_VERSION build-arg only when provided
+if ($TorchVersion) {
+    $buildArgs += "--build-arg"
+    $buildArgs += "TORCH_VERSION=$TorchVersion"
 }
 
-$buildArgs += @(
-    "-t", $fullImageName,
-    "."
-)
+$buildArgs += "."
 
-# Add GPU flag if requested
-if ($GPU) {
-    $buildArgs += "--build-arg", "GPU=true"
-    Write-Host "Building with GPU support enabled" -ForegroundColor Yellow
-}
+if ($GPU) { Write-Host "Building with GPU support enabled" -ForegroundColor Yellow }
 
 # Execute docker build command with retry logic
 try {
@@ -183,29 +166,32 @@ try {
     $retryCount = 0
     $success = $false
     
-    Write-Host "Starting Docker build with max $maxRetries attempts..." -ForegroundColor Yellow
-    
-    while (-not $success -and $retryCount -lt $maxRetries) {
-        $retryCount++
-        
-        if ($retryCount -gt 1) {
-            $waitTime = [math]::Pow(2, $retryCount - 1) * 10 # Exponential backoff: 10s, 20s, 40s...
-            Write-Warning "Retrying in $waitTime seconds (Attempt $retryCount of $maxRetries)..."
-            Start-Sleep -Seconds $waitTime
-        }
-        
-        Write-Host "Docker build attempt $retryCount of $maxRetries..." -ForegroundColor Yellow
-        & docker $buildArgs
-        
-        if ($LASTEXITCODE -eq 0) {
-            $success = $true
-        }
-        else {
-            if ($retryCount -lt $maxRetries) {
-                Write-Warning "Docker build failed. Will retry..."
+        Write-Host "Starting Docker build with max $maxRetries attempts..." -ForegroundColor Yellow
+
+        # Enable BuildKit for mount support
+        $env:DOCKER_BUILDKIT = "1"
+
+        while (-not $success -and $retryCount -lt $maxRetries) {
+            $retryCount++
+
+            if ($retryCount -gt 1) {
+                $waitTime = [math]::Pow(2, $retryCount - 1) * 10 # Exponential backoff: 10s, 20s, 40s...
+                Write-Warning "Retrying in $waitTime seconds (Attempt $retryCount of $maxRetries)..."
+                Start-Sleep -Seconds $waitTime
+            }
+
+            Write-Host "Docker build attempt $retryCount of $maxRetries..." -ForegroundColor Yellow
+            & docker @buildArgs
+
+            if ($LASTEXITCODE -eq 0) {
+                $success = $true
+            }
+            else {
+                if ($retryCount -lt $maxRetries) {
+                    Write-Warning "Docker build failed. Will retry..."
+                }
             }
         }
-    }
     
     if ($success) {
         $buildEndTime = Get-Date
@@ -219,19 +205,6 @@ try {
         if ($imageInfo) {
             $sizeInMB = [math]::Round($imageInfo / 1024 / 1024, 2)
             Write-Host "Image size: $sizeInMB MB" -ForegroundColor Cyan
-        }
-        
-        # Tag as latest if requested and tag is not already 'latest'
-        if ($AlsoTagLatest -and $Tag -ne "latest") {
-            $latestImageName = "${ImageName}:latest"
-            Write-Host "Tagging as latest: $latestImageName" -ForegroundColor Yellow
-            docker tag $fullImageName $latestImageName
-            if ($LASTEXITCODE -eq 0) {
-                Write-Success "Also tagged as: $latestImageName"
-            }
-            else {
-                Write-Warning "Failed to tag as latest"
-            }
         }
         
         # Push image if requested
@@ -255,20 +228,7 @@ try {
                 
                 if ($LASTEXITCODE -eq 0) {
                     $pushSuccess = $true
-                    Write-Success "Image pushed successfully: $fullImageName"
-                    
-                    # Push latest tag if it was created
-                    if ($AlsoTagLatest -and $Tag -ne "latest") {
-                        $latestImageName = "${ImageName}:latest"
-                        Write-Host "Pushing latest tag: $latestImageName" -ForegroundColor Yellow
-                        docker push $latestImageName
-                        if ($LASTEXITCODE -eq 0) {
-                            Write-Success "Latest tag pushed successfully"
-                        }
-                        else {
-                            Write-Warning "Failed to push latest tag"
-                        }
-                    }
+                    Write-Success "Image pushed successfully to registry"
                 }
                 else {
                     Write-Warning "Push attempt $pushAttempt failed"

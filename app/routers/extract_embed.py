@@ -75,7 +75,6 @@ def _create_batch_embedding_request(
     force_pooling: Optional[bool] = None,
     lowercase: Optional[bool] = None,
     remove_emojis: Optional[bool] = None,
-    use_optimized: Optional[bool] = None,
 ) -> EmbeddingBatchRequest:
     """
     Create a batch embedding request from extracted file contents.
@@ -87,7 +86,6 @@ def _create_batch_embedding_request(
     Returns:
         EmbeddingBatchRequest instance
     """
-    # Extract all text content
     texts = [content.content for content in extracted_contents]
 
     # Build request dict with only non-None values
@@ -123,8 +121,6 @@ def _create_batch_embedding_request(
         request_data["lowercase"] = lowercase
     if remove_emojis is not None:
         request_data["remove_emojis"] = remove_emojis
-    if use_optimized is not None:
-        request_data["use_optimized"] = use_optimized
 
     return EmbeddingBatchRequest(
         inputs=texts,
@@ -144,7 +140,6 @@ def _create_batch_embedding_request(
         force_pooling=force_pooling,
         lowercase=lowercase,
         remove_emojis=remove_emojis,
-        use_optimized=use_optimized,
     )
 
 
@@ -189,7 +184,6 @@ async def extract_and_embed(request: ExtractEmbedRequest) -> EmbeddingBatchRespo
             force_pooling=request.force_pooling,
             lowercase=request.lowercase,
             remove_emojis=request.remove_emojis,
-            use_optimized=request.use_optimized,
         )
 
         # Generate embeddings for all extracted contents
@@ -232,7 +226,7 @@ async def extract_file_and_embed(
     force_pooling: Annotated[Optional[bool], DEFAULT_FORM] = None,
     lowercase: Annotated[Optional[bool], DEFAULT_FORM] = None,
     remove_emojis: Annotated[Optional[bool], DEFAULT_FORM] = None,
-    use_optimized: Annotated[Optional[bool], DEFAULT_FORM] = None,
+    # removed `use_optimized` parameter
 ) -> EmbeddingBatchResponse:
     """
     Combined endpoint that extracts text from an uploaded file and then generates embeddings.
@@ -309,7 +303,6 @@ async def extract_file_and_embed(
             force_pooling=force_pooling,
             lowercase=lowercase,
             remove_emojis=remove_emojis,
-            use_optimized=use_optimized,
         )
 
         # Generate embeddings for all extracted contents

@@ -14,7 +14,9 @@ class BaseResponse(BaseModel):
     Base response model for API responses.
     """
 
-    success: bool = Field(True, description="Indicates whether the operation was successful.")
+    success: bool = Field(
+        True, description="Indicates whether the operation was successful."
+    )
     message: str = Field(
         "Operation completed successfully.",
         description="A message providing additional information about the operation.",

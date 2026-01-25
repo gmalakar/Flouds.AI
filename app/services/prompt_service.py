@@ -191,12 +191,27 @@ class PromptProcessor(BaseNLPService):
             logger.debug(f"Loading model from path: {model_to_use_path}")
 
             def _load_ort_model():
-                # If the path exists on filesystem, prefer a local-only load to
-                # avoid HF hub repo id validation which rejects Windows paths.
-                if os.path.exists(model_to_use_path):
+                # Detect whether the identifier looks like a filesystem path and
+                # prefer a local-only load in that case to avoid HF hub repo-id
+                # validation errors (common on Windows paths).
+                try:
+                    is_path_like = False
+                    if isinstance(model_to_use_path, (str, bytes, os.PathLike)):
+                        mstr = str(model_to_use_path)
+                        if os.path.isabs(mstr) or "\\" in mstr or "/" in mstr:
+                            is_path_like = True
+                except Exception:
+                    is_path_like = False
+
+                if is_path_like:
+                    try:
+                        local_path = os.path.abspath(os.path.normpath(model_to_use_path))
+                    except Exception:
+                        local_path = model_to_use_path
                     return cast(Any, ORTModelForSeq2SeqLM).from_pretrained(
-                        model_to_use_path, use_cache=False, local_files_only=True
+                        local_path, use_cache=False, local_files_only=True
                     )
+
                 return cast(Any, ORTModelForSeq2SeqLM).from_pretrained(
                     model_to_use_path, use_cache=False
                 )
@@ -212,21 +227,25 @@ class PromptProcessor(BaseNLPService):
         except FileNotFoundError:
             raise ModelNotFoundError(f"Model not found: {model_to_use_path}")
         except Exception as e:
-            # HuggingFace/optimum may validate repository ids and raise a
-            # user-unfriendly error when given a local Windows path (contains
-            # drive letters/backslashes). If the path exists on the filesystem
-            # treat this as a local path and fall back to ONNX session-based
-            # generation by returning None so callers can continue.
+            # If the identifier appears path-like (absolute path or contains
+            # path separators), transformers/optimum may still raise a
+            # repository-id validation error. In that case prefer to fall back
+            # to ONNX session-based generation by returning None so callers can
+            # continue. For non-path identifiers, surface a ModelLoadError.
             try:
-                msg = str(e)
+                is_path_like = False
+                if isinstance(model_to_use_path, (str, bytes, os.PathLike)):
+                    mstr = str(model_to_use_path)
+                    if os.path.isabs(mstr) or "\\" in mstr or "/" in mstr:
+                        is_path_like = True
             except Exception:
-                msg = ""
+                is_path_like = False
 
-            # If the path exists on-disk, prefer to treat it as a local
-            # filesystem model and fall back to ONNX sessions. Optimum/Transformers
-            # may sometimes validate repository ids even when `local_files_only`
-            # was requested; avoid hard failures in that case.
-            if os.path.exists(model_to_use_path):
+            if is_path_like:
+                try:
+                    msg = str(e)
+                except Exception:
+                    msg = ""
                 logger.warning(
                     "Optimum repo-id validation rejected local path %s; falling back to ONNX: %s",
                     sanitize_for_log(model_to_use_path),
@@ -609,32 +628,6 @@ class PromptProcessor(BaseNLPService):
         return encoder_path, decoder_path
 
     @staticmethod
-    def _get_model_filename(
-        model_config: OnnxConfig, model_type: str = "encoder", fallback_to_regular: bool = False
-    ) -> str:
-        """Get model filename based on type and optimization settings."""
-        use_optimized = getattr(model_config, "use_optimized", False)
-
-        if model_type == "encoder":
-            if use_optimized:
-                return getattr(
-                    model_config,
-                    "encoder_optimized_onnx_model",
-                    "encoder_model_optimized.onnx",
-                )
-            else:
-                return model_config.encoder_onnx_model or "encoder_model.onnx"
-        else:  # decoder
-            if use_optimized:
-                return getattr(
-                    model_config,
-                    "decoder_optimized_onnx_model",
-                    "decoder_model_optimized.onnx",
-                )
-            else:
-                return model_config.decoder_onnx_model or "decoder_model.onnx"
-
-    @staticmethod
     def _generate_seq2seq(
         model: Any,
         tokenizer: Any,
@@ -781,9 +774,26 @@ class PromptProcessor(BaseNLPService):
 
                 # Greedy decoding: take argmax on last token logits
                 try:
-                    next_token = np.argmax(logits[:, -1, :], axis=-1).astype(np.int64)
+                    # Ensure logits is a numpy array to allow advanced indexing
+                    try:
+                        logits_arr = np.ascontiguousarray(np.asarray(logits))
+                    except Exception:
+                        logits_arr = logits
+
+                    # Coerce to a concrete numpy ndarray for safe indexing (avoids SparseTensor __getitem__ issues)
+                    arr = np.asarray(logits_arr)
+                    ndim = getattr(arr, "ndim", None)
+
+                    if ndim == 3:
+                        next_token = np.argmax(arr[:, -1, :], axis=-1).astype(np.int64)
+                    elif ndim == 2:
+                        next_token = np.argmax(arr, axis=-1).astype(np.int64)
+                    else:
+                        # Ensure result is at least 1D to keep downstream code consistent
+                        next_token = np.atleast_1d(np.argmax(arr)).astype(np.int64)
                 except Exception:
-                    next_token = np.argmax(logits, axis=-1).astype(np.int64)
+                    # Fallback: coerce to numpy and compute argmax as a 1D array
+                    next_token = np.atleast_1d(np.argmax(np.asarray(logits))).astype(np.int64)
 
                 generated = np.concatenate([generated, next_token[:, None]], axis=1)
 
@@ -1672,17 +1682,22 @@ class PromptProcessor(BaseNLPService):
                 pass
             for idx, result in enumerate(results):
                 # Handle exceptions and objects without `success` safely
-                if isinstance(result, Exception) or (
-                    hasattr(result, "success") and not result.success
-                ):
+                if isinstance(result, Exception):
                     err_msg = getattr(result, "message", str(result))
                     logger.error(f"Error in input {idx}: {err_msg}")
                     response.success = False
                     response.message = f"Error in input {idx}: {err_msg}"
                 else:
-                    summary_val = getattr(result, "summary", None)
-                    if summary_val is not None:
-                        response.results.append(summary_val)
+                    # result is not an Exception; safely check `success` via getattr
+                    if not getattr(result, "success", True):
+                        err_msg = getattr(result, "message", str(result))
+                        logger.error(f"Error in input {idx}: {err_msg}")
+                        response.success = False
+                        response.message = f"Error in input {idx}: {err_msg}"
+                    else:
+                        summary_val = getattr(result, "summary", None)
+                        if summary_val is not None:
+                            response.results.append(summary_val)
 
         except (ValueError, TypeError) as e:
             response.success = False

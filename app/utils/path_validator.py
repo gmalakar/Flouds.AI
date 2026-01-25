@@ -106,7 +106,10 @@ def safe_join(base_dir: Union[str, Path], *paths: str) -> str:
 
 
 def safe_open(
-    file_path: Union[str, Path], base_dir: Union[str, Path], mode: str = "r", **kwargs: Any
+    file_path: Union[str, Path],
+    base_dir: Union[str, Path],
+    mode: str = "r",
+    **kwargs: Any,
 ) -> IO[Any]:
     """
     Safely open a file with path validation.

@@ -7,7 +7,10 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.middleware.tenant_security import TenantCorsMiddleware, TenantTrustedHostMiddleware
+from app.middleware.tenant_security import (
+    TenantCorsMiddleware,
+    TenantTrustedHostMiddleware,
+)
 
 
 class MockClient:
@@ -30,7 +33,9 @@ def make_app(monkeypatch, cors_origins=None, trusted_hosts=None, auth_return=Non
     monkeypatch.setattr(
         config_service,
         "get_trusted_hosts",
-        lambda tenant_code="": (trusted_hosts if trusted_hosts is not None else ["*.example.com"]),
+        lambda tenant_code="": (
+            trusted_hosts if trusted_hosts is not None else ["*.example.com"]
+        ),
     )
 
     # monkeypatch key_manager.authenticate_client on the module's singleton

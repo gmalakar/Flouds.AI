@@ -82,12 +82,6 @@ class EmbeddingBaseRequest(BaseRequest):
         default=None,
         description="Remove emojis and non-ASCII characters from input text. Overrides model config if provided.",
     )
-
-    use_optimized: Optional[bool] = Field(
-        default=None,
-        description="Use optimized ONNX model if available. Overrides model config if provided.",
-    )
-
     quantize: Optional[bool] = Field(
         default=None,
         description="Enable embedding quantization for reduced storage/memory. Overrides model config if provided.",

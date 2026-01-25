@@ -9,7 +9,9 @@ import time
 from threading import RLock
 from typing import Any, Callable, Dict, List, Optional
 
-logger: Optional[logging.Logger] = None  # Will be set by caller to avoid circular imports
+logger: Optional[logging.Logger] = (
+    None  # Will be set by caller to avoid circular imports
+)
 
 
 class ConcurrentDict:
@@ -132,7 +134,9 @@ class ConcurrentDict:
                     self._on_evict(lru_key, evicted_value)
                 except Exception as e:
                     if logger:
-                        logger.warning(f"Error in on_evict callback for key {lru_key}: {e}")
+                        logger.warning(
+                            f"Error in on_evict callback for key {lru_key}: {e}"
+                        )
 
     def cleanup_unused(self, max_age_seconds: float = 60.0) -> int:
         """

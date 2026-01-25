@@ -294,41 +294,18 @@ class BaseNLPService:
         """Return the preferred ONNX filename for a given model config and model type.
 
         model_type: 'encoder' or 'decoder' (or 'embedding' treated as encoder).
-        Respects `use_optimized` and `fallback_to_regular` flags and tries sensible
-        fallbacks to maintain compatibility with existing naming patterns.
+        The project no longer supports a `use_optimized` flag; prefer the
+        canonical filename fields and fall back to optimized variants when
+        a primary name is not present.
         """
-        use_optimized = getattr(model_config, "use_optimized", False) and not fallback_to_regular
 
         # Normalize type
         t = model_type.lower()
         if t in ("embedding", "encoder"):
-            # Preferred optimized encoder filename
-            if use_optimized:
-                return (
-                    getattr(model_config, "encoder_optimized_onnx_model", None)
-                    or getattr(model_config, "encoder_onnx_model", None)
-                    or "model_optimized.onnx"
-                )
-            else:
-                return (
-                    getattr(model_config, "encoder_onnx_model", None)
-                    or getattr(model_config, "encoder_optimized_onnx_model", None)
-                    or "model.onnx"
-                )
+            # No `use_optimized` support: always prefer canonical filename fields.
+            return getattr(model_config, "encoder_onnx_model", None) or "model.onnx"
         else:
-            # decoder
-            if use_optimized:
-                return (
-                    getattr(model_config, "decoder_optimized_onnx_model", None)
-                    or getattr(model_config, "decoder_onnx_model", None)
-                    or "decoder_model_optimized.onnx"
-                )
-            else:
-                return (
-                    getattr(model_config, "decoder_onnx_model", None)
-                    or getattr(model_config, "decoder_optimized_onnx_model", None)
-                    or "decoder_model.onnx"
-                )
+            return getattr(model_config, "decoder_onnx_model", None) or "decoder_model.onnx"
 
     @staticmethod
     def _validate_model_availability(
@@ -449,8 +426,7 @@ class BaseNLPService:
                 enc_candidates.extend(
                     [
                         getattr(cfg, "encoder_onnx_model", "model.onnx"),
-                        getattr(cfg, "encoder_optimized_onnx_model", "model_optimized.onnx"),
-                        getattr(cfg, "encoder_onnx_model", "encoder_model.onnx"),
+                        "encoder_model.onnx",
                     ]
                 )
 
@@ -476,16 +452,10 @@ class BaseNLPService:
                         model_path,
                         getattr(cfg, "encoder_onnx_model", "model.onnx"),
                         "model.onnx",
-                        getattr(cfg, "encoder_optimized_onnx_model", "model_optimized.onnx"),
                     )
                     has_decoder_files = BaseNLPService._file_exists_in_model(
                         model_path,
                         getattr(cfg, "decoder_onnx_model", "decoder_model.onnx"),
-                        getattr(
-                            cfg,
-                            "decoder_optimized_onnx_model",
-                            "decoder_model_optimized.onnx",
-                        ),
                     )
                     # Only infer encoder-only when the model is not explicitly
                     # configured as a seq2seq LM. If `use_seq2seqlm` is True we
@@ -517,16 +487,7 @@ class BaseNLPService:
                     dec_cand = None
                 if dec_cand:
                     dec_candidates.append(dec_cand)
-                dec_candidates.extend(
-                    [
-                        getattr(cfg, "decoder_onnx_model", "decoder_model.onnx"),
-                        getattr(
-                            cfg,
-                            "decoder_optimized_onnx_model",
-                            "decoder_model_optimized.onnx",
-                        ),
-                    ]
-                )
+                dec_candidates.extend([getattr(cfg, "decoder_onnx_model", "decoder_model.onnx")])
 
                 dec_exists = BaseNLPService._file_exists_in_model(model_path, *dec_candidates)
                 # Store result in local metadata map; will persist below

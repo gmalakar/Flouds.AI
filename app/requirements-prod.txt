@@ -1,3 +1,5 @@
+# Note: heavy native packages (torch, onnxruntime, etc.) are installed by the Dockerfile
+# and should NOT be added to this file to avoid duplicate or platform-specific installs.
 # Core FastAPI and server
 fastapi>=0.116.1
 uvicorn[standard]>=0.32.0

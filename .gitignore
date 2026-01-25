@@ -86,11 +86,7 @@ onnx/
 tools/
 onnx_old/
 app/onnx/
-onnx_loaders/
-onnx_loaders/onnx/
-onnx_loaders/tools/
-/models/
-!app/models/
+
 data/
 datasets/
 checkpoints/
@@ -174,3 +170,6 @@ admin_credentials.txt
 !**/requirements-dev.txt
 !**/requirements-onnx-loaders.txt
 !**/load_scripts_examples.txt
+
+Flouds.AI/
+Flouds.AI.git/

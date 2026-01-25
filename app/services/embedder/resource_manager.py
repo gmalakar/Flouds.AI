@@ -135,19 +135,17 @@ def load_session(model_to_use_path: str, model_config: Any, base_service_class: 
     try:
         session = base_service_class._get_encoder_session(model_path)
     except ModelLoadError as e:
-        # If optimized model fails, try fallback to regular model
-        use_optimized = getattr(model_config, "use_optimized", False)
-        if use_optimized and "optimized" in str(e).lower():
-            logger.warning(f"Optimized model failed: {e}, trying regular model")
-            # Get regular model path
-            regular_filename = getattr(model_config, "encoder_onnx_model", None) or "model.onnx"
-            fallback_path = validate_safe_path(
-                os.path.join(model_to_use_path, regular_filename),
-                base_service_class._root_path,
-            )
-            session = base_service_class._get_encoder_session(fallback_path)
-        else:
-            raise e
+        # If loading the preferred encoder session failed, try a sensible
+        # fallback to the regular model filename regardless of any removed
+        # `use_optimized` flag. This ensures optimized artifacts do not cause
+        # hard failures when unavailable.
+        logger.warning(f"Encoder session load failed ({e}), attempting fallback to regular model")
+        regular_filename = getattr(model_config, "encoder_onnx_model", None) or "model.onnx"
+        fallback_path = validate_safe_path(
+            os.path.join(model_to_use_path, regular_filename),
+            base_service_class._root_path,
+        )
+        session = base_service_class._get_encoder_session(fallback_path)
 
     if not session:
         raise ModelLoadError(f"Failed to load ONNX session: {model_path}")
@@ -270,7 +268,6 @@ def override_config_with_request(model_config: Any, request_params: dict) -> Any
         "force_pooling",
         "lowercase",
         "remove_emojis",
-        "use_optimized",
     ]
 
     for field in override_fields:

@@ -13,7 +13,9 @@ class EmbededChunk(BaseModel):
     vector: list[float] = Field(
         cast(Any, ...), description="The generated embedding for the text chunk."
     )
-    chunk: str = Field(cast(Any, ...), description="The original text chunk that was embedded.")
+    chunk: str = Field(
+        cast(Any, ...), description="The original text chunk that was embedded."
+    )
 
     joined_chunk: bool = Field(
         False,

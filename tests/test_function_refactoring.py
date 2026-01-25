@@ -74,9 +74,8 @@ class TestSummarizerRefactoring:
             mock_path.side_effect = lambda x, y: x  # Return path as-is
 
             mock_config = Mock()
-            mock_config.use_optimized = True
-            mock_config.encoder_optimized_onnx_model = "encoder_opt.onnx"
-            mock_config.decoder_optimized_onnx_model = "decoder_opt.onnx"
+            mock_config.encoder_onnx_model = "encoder_opt.onnx"
+            mock_config.decoder_onnx_model = "decoder_opt.onnx"
 
             encoder_path, decoder_path = PromptProcessor._get_model_file_paths(
                 "/model/path", mock_config

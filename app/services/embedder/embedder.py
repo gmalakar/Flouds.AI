@@ -157,12 +157,14 @@ class SentenceTransformer(BaseNLPService):
     )
     _get_native_dimension_from_session = staticmethod(
         lambda session: __import__(
-            "app.services.embedder.onnx_utils", fromlist=["get_native_dimension_from_session"]
+            "app.services.embedder.onnx_utils",
+            fromlist=["get_native_dimension_from_session"],
         ).get_native_dimension_from_session(session)
     )
     _get_output_names_from_session = staticmethod(
         lambda session: __import__(
-            "app.services.embedder.onnx_utils", fromlist=["get_output_names_from_session"]
+            "app.services.embedder.onnx_utils",
+            fromlist=["get_output_names_from_session"],
         ).get_output_names_from_session(session)
     )
     _get_embedding_model_path = staticmethod(
@@ -248,8 +250,6 @@ class SentenceTransformer(BaseNLPService):
             force_pooling = request.force_pooling
             lowercase = request.lowercase
             remove_emojis = request.remove_emojis
-            use_optimized = request.use_optimized
-
             request_params = {
                 "pooling_strategy": pooling_strategy,
                 "max_length": max_length,
@@ -261,7 +261,6 @@ class SentenceTransformer(BaseNLPService):
                 "force_pooling": force_pooling,
                 "lowercase": lowercase,
                 "remove_emojis": remove_emojis,
-                "use_optimized": use_optimized,
             }
 
             result = SentenceTransformer._embed_text_local(
@@ -335,15 +334,19 @@ class SentenceTransformer(BaseNLPService):
                 "force_pooling": request.force_pooling,
                 "lowercase": request.lowercase,
                 "remove_emojis": request.remove_emojis,
-                "use_optimized": request.use_optimized,
+                # 'use_optimized' removed: not supported in requests anymore
             }
 
             # Try batch inference if possible
             if SentenceTransformer._can_use_batch_inference(
-                request.inputs, request.model  # Changed from request.texts to request.inputs
+                request.inputs,
+                request.model,  # Changed from request.texts to request.inputs
             ):
                 try:
-                    logger.info("Using optimized batch inference for %d texts", len(request.inputs))
+                    logger.info(
+                        "Using optimized batch inference for %d texts",
+                        len(request.inputs),
+                    )
                     result = SentenceTransformer._embed_batch_texts(
                         request.inputs,  # Changed from request.texts to request.inputs
                         request.model,
@@ -468,7 +471,6 @@ class SentenceTransformer(BaseNLPService):
                 "chunk_size": getattr(model_config, "chunk_size", None),
                 "normalize": getattr(model_config, "normalize", True),
                 "force_pooling": getattr(model_config, "force_pooling", False),
-                "use_optimized": getattr(model_config, "use_optimized", False),
                 "legacy_tokenizer": getattr(model_config, "legacy_tokenizer", False),
                 "remove_emojis": getattr(model_config, "remove_emojis", False),
                 "lowercase": getattr(model_config, "lowercase", False),

@@ -217,7 +217,9 @@ def get_cache_stats() -> Dict[str, int]:
         "models": cast(ConcurrentDict, MODELS).size(),
         "special_tokens": cast(ConcurrentDict, SPECIAL_TOKENS).size(),
         "model_configs": MODEL_CONFIG_CACHE.size(),
-        "generation_cache": (GENERATION_CACHE.size() if GENERATION_CACHE is not None else 0),
+        "generation_cache": (
+            GENERATION_CACHE.size() if GENERATION_CACHE is not None else 0
+        ),
         "encoder_output_cache": (
             ENCODER_OUTPUT_CACHE.size() if ENCODER_OUTPUT_CACHE is not None else 0
         ),

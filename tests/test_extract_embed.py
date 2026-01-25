@@ -176,7 +176,6 @@ def test_create_batch_embedding_request_all_params():
         force_pooling=False,
         lowercase=True,
         remove_emojis=True,
-        use_optimized=True,
     )
 
     assert result.inputs == ["Test text 1", "Test text 2"]
@@ -188,7 +187,7 @@ def test_create_batch_embedding_request_all_params():
     assert result.chunk_logic == "sentence"
     assert result.normalize is True
     assert result.lowercase is True
-    assert result.use_optimized is True
+    # `use_optimized` removed from request model; ensure other fields present
 
 
 def test_create_batch_embedding_request_minimal_params():
@@ -295,7 +294,6 @@ async def test_extract_and_embed_with_all_parameters():
         max_length=512,
         chunk_logic="sentence",
         normalize=True,
-        use_optimized=True,
     )
 
     with patch(
@@ -476,7 +474,6 @@ async def test_extract_file_and_embed_with_form_parameters():
             max_length=256,
             normalize=True,
             lowercase=False,
-            use_optimized=True,
         )
 
         assert response.success is True
@@ -488,7 +485,7 @@ async def test_extract_file_and_embed_with_form_parameters():
         assert called_request.max_length == 256
         assert called_request.normalize is True
         assert called_request.lowercase is False
-        assert called_request.use_optimized is True
+        # `use_optimized` removed; verify other params passed through
 
 
 @pytest.mark.asyncio

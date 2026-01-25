@@ -47,7 +47,9 @@ def test_generate_tokens_returns_cached_result_and_does_not_mutate_cache():
         mask="encoder_attention_mask",
     )
 
-    request = SimpleNamespace(model="test-model", temperature=0.0, seed=None, tenant_code=None)
+    request = SimpleNamespace(
+        model="test-model", temperature=0.0, seed=None, tenant_code=None
+    )
 
     # Build the cache key using the same helper the service uses
     cache_key = PromptProcessor._build_generation_cache_key(
