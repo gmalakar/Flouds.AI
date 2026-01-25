@@ -1,0 +1,27 @@
+## Exporter preference manifest
+# Keys are HuggingFace model identifiers (or short names) and values are
+# preferred exporter: 'v2' (default/main_export) or 'v1' (legacy ORTModel path).
+# Use this manifest to guide batch exports and CI. If a model isn't listed,
+# the exporter will default to v2 and fall back to v1 on failure.
+
+
+# Models listed in load_scripts_examples.txt
+# Keep only models that appear in the canonical example list.
+
+# LLM / text-generation
+microsoft/phi-2: v2
+google/gemma-2b-it: v2
+
+# Embeddings / feature-extraction
+nomic-ai/nomic-embed-text-v1.5: v2
+BAAI/bge-small-en-v1.5: v2
+sentence-transformers/all-MiniLM-L6-v2: v2
+intfloat/e5-small-v2: v2
+BAAI/bge-m3: v2
+thenlper/gte-small: v2
+
+# Seq2Seq / summarization
+t5-small: v2
+facebook/bart-large-cnn: v2
+
+# Add any additional models here and set v1 if you know v2 fails for them.

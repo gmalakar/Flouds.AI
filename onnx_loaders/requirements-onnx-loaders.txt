@@ -1,0 +1,21 @@
+# Development dependencies
+# Install with: pip install -r onnx_loaders/requirements-onnx-loaders.txt
+# Core model + transformer stack
+sentence-transformers==2.6.1
+transformers==4.37.2
+torch==2.2.2
+
+# ONNX + Optimum (stable trio)
+onnx==1.16.1
+onnxruntime==1.20.1
+optimum==1.20.0
+
+# Supporting libraries
+numpy==1.26.4
+huggingface_hub==0.25.1
+psutil==5.9.8
+accelerate==0.27.2
+safetensors==0.4.2
+sentencepiece==0.2.0
+einops==0.6.0
+protobuf==4.25.3

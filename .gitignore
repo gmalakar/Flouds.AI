@@ -170,3 +170,6 @@ admin_credentials.txt
 !**/requirements-dev.txt
 !**/requirements-onnx-loaders.txt
 !**/load_scripts_examples.txt
+
+Flouds.AI/
+Flouds.AI.git/

@@ -1,0 +1,61 @@
+# ============================
+# LLM MODELS (text-generation)
+# ============================
+## Export policy: see `export_policy.yaml` for preferred exporter per-model.
+## If not listed in the manifest, default is v2 (main_export) and the exporter will
+## attempt v1 only as a fallback. Use `--usev1` to force legacy ORTModel export.
+##
+## Task mapping quick reference:
+## - Embeddings / feature extraction: `--model_for fe` and `--task feature-extraction`
+## - Seq2Seq (summarization/translation): `--model_for s2s` and `--task seq2seq-lm` (no KV-cache; CPU-friendly)
+## - Seq2Seq with KV-cache (fast autoregressive decoding): use `--task text2text-generation-with-past` (KV-cache auto-detected)
+## - LLM / text generation: `--model_for llm` and `--task text-generation`
+
+# ============================
+# LLM MODELS (text generation)
+# ============================
+
+# Phi-2 (best small LLM for CPU)
+python onnx_loaders/export_model.py --model-for llm --model-name microsoft/phi-2 --task text-generation-with-past --optimize --library transformers --trust_remote_code --skip-validator
+
+# Gemma-2B-Instruct (optional, requires HF license acceptance)
+python onnx_loaders/export_model.py --model-for llm --model-name google/gemma-2b-it --task text-generation-with-past --optimize --library transformers --trust_remote_code --skip-validator
+
+
+# ============================
+# EMBEDDING MODELS (feature extraction)
+# ============================
+
+# Nomic Embed Text v1.5 (fast, long context)
+python onnx_loaders/export_model.py --model-for fe --model-name nomic-ai/nomic-embed-text-v1.5 --task feature-extraction --optimize --library sentence_transformers --skip-validator
+
+# BGE-Small-EN v1.5 (best accuracy/speed balance)
+python onnx_loaders/export_model.py --model-for fe --model-name BAAI/bge-small-en-v1.5 --task feature-extraction --optimize --library sentence_transformers --normalize-embeddings
+
+# MiniLM-L6-v2 (tiny, fast baseline)
+python onnx_loaders/export_model.py --model-for fe --model-name sentence-transformers/all-MiniLM-L6-v2 --task feature-extraction --optimize --library sentence_transformers --normalize-embeddings 
+
+# E5-Small-v2 (instruction-tuned embeddings)
+python onnx_loaders/export_model.py --model-for fe --model-name intfloat/e5-small-v2 --task feature-extraction --optimize --library transformers --normalize-embeddings --force
+
+# BGE-M3 (multilingual + dense + sparse)
+python onnx_loaders/export_model.py --model-for fe --model-name BAAI/bge-m3 --task feature-extraction --optimize --library transformers --trust_remote_code
+
+# GTE-Small (lightweight, CPU-friendly)
+python onnx_loaders/export_model.py --model-for fe --model-name thenlper/gte-small --task feature-extraction --optimize --library transformers
+
+
+# ============================
+# SEQ2SEQ MODELS (summarization)
+# ============================
+
+# T5-Small (tiny, fast summarizer)
+# - Without KV-cache (encoder-decoder export; no past key/values) — recommended for CPU/batch summarization (smaller, simpler):
+python onnx_loaders/export_model.py --model-for s2s --model-name t5-small --task seq2seq-lm --optimize --library transformers
+# - With KV-cache (autoregressive decoding; produces decoder_with_past_model.onnx when supported) — useful for interactive/low-latency decoding; larger and higher memory use on CPU:
+python onnx_loaders/export_model.py --model-for s2s --model-name t5-small --task text2text-generation-with-past --optimize --pack-single-file --library transformers
+
+# BART-Large-CNN (strong summarizer)
+# Note: encoder+decoder merging is disallowed by policy; merging is only
+# supported for decoder-only causal LLMs via the single `--merge` flag.
+python onnx_loaders/export_model.py --model-for s2s --model-name facebook/bart-large-cnn --task text2text-generation-with-past --optimize --library transformers --cleanup --force --prune-canonical
