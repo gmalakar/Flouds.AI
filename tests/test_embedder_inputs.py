@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from app.services.embedder_service import SentenceTransformer
+from app.services.embedder import SentenceTransformer
 
 
 def test_prepare_onnx_inputs_batch_and_dtype():

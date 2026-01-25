@@ -10,7 +10,7 @@ from app.exceptions import FloudsBaseException
 from app.logger import get_logger
 from app.models.prompt_request import PromptRequest
 from app.models.prompt_response import PromptResponse
-from app.services.prompt_service import PromptProcessor
+from app.services.prompt.processor import PromptProcessor
 from app.utils.error_handler import ErrorHandler
 
 router = APIRouter()
@@ -21,9 +21,7 @@ logger = get_logger("sendprompt")
 async def send_prompt(request: PromptRequest) -> PromptResponse:
     """Process input string prompt using PromptProcessor."""
     try:
-        logger.info(
-            "Processing prompt for model %s: %s", request.model, request.input[:100]
-        )
+        logger.info("Processing prompt for model %s: %s", request.model, request.input[:100])
 
         # Use PromptProcessor to process the prompt
         response = PromptProcessor.process_prompt(request)

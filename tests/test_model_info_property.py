@@ -22,10 +22,7 @@ def _auth_header():
             # Derive tenant from client record when available; default to 'master'
             try:
                 client_id = token.split("|", 1)[0]
-                tenant = (
-                    getattr(key_manager.clients.get(client_id), "tenant_code", "")
-                    or "master"
-                )
+                tenant = getattr(key_manager.clients.get(client_id), "tenant_code", "") or "master"
             except Exception:
                 tenant = "master"
             return {"Authorization": f"Bearer {token}", "X-Tenant-Code": tenant}

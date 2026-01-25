@@ -51,7 +51,7 @@ class TestRequestSizeLimit:
     def test_missing_or_small_content_length_passes(self):
         client = create_app_with_size_limit(max_size=5)
         # Send without JSON to avoid setting content-length; should pass to endpoint
-        resp = client.post("/echo", data="hi")
+        resp = client.post("/echo", content="hi")
         # Starlette/TestClient may set content-length and FastAPI may return 422 for invalid JSON
         assert resp.status_code in (200, 413, 422)
         # If 413, confirm it's because limit is very small

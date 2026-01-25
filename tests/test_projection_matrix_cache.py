@@ -6,11 +6,8 @@
 
 import numpy as np
 
-from app.services.cache_registry import (
-    clear_projection_matrix_cache,
-    get_projection_matrix_cache,
-)
-from app.services.embedder_service import SentenceTransformer
+from app.services.cache_registry import clear_projection_matrix_cache, get_projection_matrix_cache
+from app.services.embedder import SentenceTransformer
 
 
 def test_projection_matrix_cache_recreation():

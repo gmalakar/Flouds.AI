@@ -21,9 +21,10 @@ class TestConfigCaching:
 
     def test_onnx_config_caching(self):
         """Test that ONNX configs are cached properly."""
-        with patch.object(ConfigLoader, "_load_config_data") as mock_load, patch(
-            "os.path.getmtime"
-        ) as mock_mtime:
+        with (
+            patch.object(ConfigLoader, "_load_config_data") as mock_load,
+            patch("os.path.getmtime") as mock_mtime,
+        ):
 
             mock_load.return_value = {
                 "test-model": {
@@ -50,9 +51,10 @@ class TestConfigCaching:
 
     def test_cache_invalidation_on_file_change(self):
         """Test that cache is invalidated when config file changes."""
-        with patch.object(ConfigLoader, "_load_config_data") as mock_load, patch(
-            "os.path.getmtime"
-        ) as mock_mtime:
+        with (
+            patch.object(ConfigLoader, "_load_config_data") as mock_load,
+            patch("os.path.getmtime") as mock_mtime,
+        ):
 
             mock_load.return_value = {
                 "test-model": {
@@ -140,13 +142,12 @@ class TestConfigCaching:
 
     def test_cache_clear_all(self):
         """Test clearing all caches."""
-        with patch.object(ConfigLoader, "clear_cache") as mock_clear_config, patch(
-            "app.utils.cache_manager.clear_encoder_sessions"
-        ) as mock_clear_sessions, patch(
-            "app.utils.cache_manager.clear_thread_tokenizers"
-        ) as mock_clear_tokenizers, patch(
-            "app.utils.cache_manager.clear_model_config_cache"
-        ) as mock_clear_model_config:
+        with (
+            patch.object(ConfigLoader, "clear_cache") as mock_clear_config,
+            patch("app.utils.cache_manager.clear_encoder_sessions") as mock_clear_sessions,
+            patch("app.utils.cache_manager.clear_thread_tokenizers") as mock_clear_tokenizers,
+            patch("app.utils.cache_manager.clear_model_config_cache") as mock_clear_model_config,
+        ):
 
             CacheManager.clear_all_caches()
 
@@ -161,9 +162,10 @@ class TestCachePerformance:
 
     def test_config_loading_performance(self):
         """Test that caching improves config loading performance."""
-        with patch.object(ConfigLoader, "_load_config_data") as mock_load, patch(
-            "os.path.getmtime"
-        ) as mock_mtime:
+        with (
+            patch.object(ConfigLoader, "_load_config_data") as mock_load,
+            patch("os.path.getmtime") as mock_mtime,
+        ):
 
             # Simulate slow file loading
             def slow_load(*args, **kwargs):

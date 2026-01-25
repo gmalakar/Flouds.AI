@@ -10,8 +10,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.services.embedder_service import SentenceTransformer
-from app.services.prompt_service import PromptProcessor
+from app.services.embedder import SentenceTransformer
+from app.services.prompt import generator
+from app.services.prompt.config import get_model_file_paths, get_token_config
+from app.services.prompt.parameters import build_generation_params
+from app.services.prompt.processor import PromptProcessor
 
 
 class TestSummarizerRefactoring:
@@ -19,24 +22,23 @@ class TestSummarizerRefactoring:
 
     def test_prepare_model_resources(self):
         """Test model resource preparation."""
-        with patch(
-            "app.services.base_nlp_service.BaseNLPService._get_model_config"
-        ) as mock_config, patch.object(
-            PromptProcessor, "_get_tokenizer_threadsafe"
-        ) as mock_tokenizer, patch(
-            "app.services.base_nlp_service.BaseNLPService._get_model_path"
-        ) as mock_model_path:
+        with (
+            patch("app.services.prompt.processor.get_model_path") as mock_model_path,
+            patch("app.services.prompt.processor.validate_model_availability") as mock_validate,
+            patch("app.services.prompt.processor.get_tokenizer_threadsafe") as mock_tokenizer,
+        ):
 
-            mock_config.return_value = Mock(
+            mock_config = Mock(
                 tasks=["summarization"],
                 legacy_tokenizer=False,
                 model_folder_name="test-model",
             )
             mock_tokenizer.return_value = Mock()
             mock_model_path.return_value = "/safe/path"
+            mock_validate.return_value = True
 
             model_path, tokenizer = PromptProcessor._prepare_model_resources(
-                mock_config.return_value, "test-model"
+                mock_config, "test-model"
             )
 
             assert model_path == "/safe/path"
@@ -59,7 +61,7 @@ class TestSummarizerRefactoring:
         mock_request = Mock()
         mock_request.temperature = 0.8
 
-        params = PromptProcessor._build_generation_params(mock_config, mock_request)
+        params = build_generation_params(mock_config, mock_request)
 
         assert params["max_length"] == 256
         assert params["min_length"] == 10
@@ -70,16 +72,14 @@ class TestSummarizerRefactoring:
 
     def test_get_model_file_paths(self):
         """Test model file path generation."""
-        with patch("app.services.prompt_service.validate_safe_path") as mock_path:
+        with patch("app.services.prompt.config.validate_safe_path") as mock_path:
             mock_path.side_effect = lambda x, y: x  # Return path as-is
 
             mock_config = Mock()
             mock_config.encoder_onnx_model = "encoder_opt.onnx"
             mock_config.decoder_onnx_model = "decoder_opt.onnx"
 
-            encoder_path, decoder_path = PromptProcessor._get_model_file_paths(
-                "/model/path", mock_config
-            )
+            encoder_path, decoder_path = get_model_file_paths("/model/path", mock_config)
 
             assert "encoder_opt.onnx" in encoder_path
             assert "decoder_opt.onnx" in decoder_path
@@ -104,15 +104,13 @@ class TestEmbedderRefactoring:
 
     def test_prepare_embedding_resources(self):
         """Test embedding resource preparation."""
-        with patch.object(SentenceTransformer, "_get_model_config") as mock_config, patch.object(
-            SentenceTransformer, "_get_model_path"
-        ) as mock_model_path, patch.object(
-            SentenceTransformer, "_get_tokenizer_threadsafe"
-        ) as mock_tokenizer, patch.object(
-            SentenceTransformer, "_get_encoder_session"
-        ) as mock_session, patch.object(
-            SentenceTransformer, "_get_embedding_model_path"
-        ) as mock_embedding_path:
+        with (
+            patch.object(SentenceTransformer, "_get_model_config") as mock_config,
+            patch.object(SentenceTransformer, "_get_model_path") as mock_model_path,
+            patch.object(SentenceTransformer, "_get_tokenizer_threadsafe") as mock_tokenizer,
+            patch.object(SentenceTransformer, "_get_encoder_session") as mock_session,
+            patch.object(SentenceTransformer, "_get_embedding_model_path") as mock_embedding_path,
+        ):
 
             mock_config_obj = Mock()
             mock_config_obj.tasks = ["embedding"]
@@ -134,7 +132,7 @@ class TestEmbedderRefactoring:
 
     def test_get_embedding_model_path(self):
         """Test embedding model path generation."""
-        with patch("app.services.embedder_service.validate_safe_path") as mock_path:
+        with patch("app.utils.path_validator.validate_safe_path") as mock_path:
             mock_path.return_value = "/safe/model/path"
 
             mock_config = Mock()
@@ -183,10 +181,10 @@ class TestFunctionComplexity:
         # Check summarizer functions
         summarizer_methods = [
             PromptProcessor._prepare_model_resources,
-            PromptProcessor._build_generation_params,
-            PromptProcessor._get_model_file_paths,
-            PromptProcessor._get_token_config,
-            PromptProcessor._sample_next_token,
+            build_generation_params,
+            get_model_file_paths,
+            get_token_config,
+            generator._sample_next_token,
         ]
 
         for method in summarizer_methods:

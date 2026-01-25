@@ -7,7 +7,7 @@
 import numpy as np
 import pytest  # noqa: F401
 
-from app.services.embedder_service import SentenceTransformer
+from app.services.embedder import SentenceTransformer
 
 
 class TestQuantization:

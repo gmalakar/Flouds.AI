@@ -222,14 +222,13 @@ class ConfigLoader:
             ConfigLoader.__appsettings.security.enabled = parsed_sec_flag
 
         # Background cleanup monitor overrides (enable flag and tuning)
-        bg_enabled = ConfigLoader._getenv_first(
-            "FLOUDS_BACKGROUND_CLEANUP_ENABLED", "FLOUDS_ENABLE_BACKGROUND_CLEANUP"
-        )
+        # Use compact canonical env var prefix for background cleanup
+        bg_enabled = ConfigLoader._getenv_first("FLOUDS_BG_CLEANUP_ENABLED")
         parsed_bg_enabled = ConfigLoader._parse_bool(bg_enabled)
         if parsed_bg_enabled is not None:
             ConfigLoader.__appsettings.monitoring.enable_background_cleanup = parsed_bg_enabled
 
-        bg_interval = ConfigLoader._getenv_first("FLOUDS_BACKGROUND_CLEANUP_INTERVAL_SECONDS")
+        bg_interval = ConfigLoader._getenv_first("FLOUDS_BG_CLEANUP_INTERVAL_SECONDS")
         parsed_bg_interval = ConfigLoader._parse_int(bg_interval)
         if parsed_bg_interval is not None:
             ConfigLoader.__appsettings.monitoring.background_cleanup_interval_seconds = (
@@ -238,7 +237,7 @@ class ConfigLoader:
         elif bg_interval is not None:
             logger.warning(f"Invalid background cleanup interval: {bg_interval}")
 
-        bg_jitter = ConfigLoader._getenv_first("FLOUDS_BACKGROUND_CLEANUP_INITIAL_JITTER_SECONDS")
+        bg_jitter = ConfigLoader._getenv_first("FLOUDS_BG_CLEANUP_INITIAL_JITTER_SECONDS")
         parsed_bg_jitter = ConfigLoader._parse_int(bg_jitter)
         if parsed_bg_jitter is not None:
             ConfigLoader.__appsettings.monitoring.background_cleanup_initial_jitter_seconds = (
@@ -247,7 +246,7 @@ class ConfigLoader:
         elif bg_jitter is not None:
             logger.warning(f"Invalid background cleanup initial jitter: {bg_jitter}")
 
-        bg_max_backoff = ConfigLoader._getenv_first("FLOUDS_BACKGROUND_CLEANUP_MAX_BACKOFF_SECONDS")
+        bg_max_backoff = ConfigLoader._getenv_first("FLOUDS_BG_CLEANUP_MAX_BACKOFF_SECONDS")
         parsed_bg_max_backoff = ConfigLoader._parse_int(bg_max_backoff)
         if parsed_bg_max_backoff is not None:
             ConfigLoader.__appsettings.monitoring.background_cleanup_max_backoff_seconds = (

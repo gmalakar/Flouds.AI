@@ -397,6 +397,17 @@ Configuration follows a hierarchical override system:
 
 ### Key Configuration Options
 
+### Background Cleanup
+
+Background cleanup is an optional background monitor that performs periodic maintenance (cache cleanup, stale resource reclamation). Configure it via environment variables or `appsettings.json` under the `monitoring` section.
+
+- **FLOUDS_BG_CLEANUP_ENABLED**: Enable the background cleanup monitor (default: `false`).
+- **FLOUDS_BG_CLEANUP_INTERVAL_SECONDS**: Interval between cleanup runs in seconds (default: `60`).
+- **FLOUDS_BG_CLEANUP_INITIAL_JITTER_SECONDS**: Initial random jitter to stagger startups in seconds (default: `5`).
+- **FLOUDS_BG_CLEANUP_MAX_BACKOFF_SECONDS**: Maximum exponential backoff in seconds on repeated failures (default: `600`).
+
+These map to the following `appsettings.json` keys in the `monitoring` section: `enable_background_cleanup`, `background_cleanup_interval_seconds`, `background_cleanup_initial_jitter_seconds`, and `background_cleanup_max_backoff_seconds`.
+
 **Logging**
 ```bash
 FLOUDS_LOG_JSON=1                    # Enable structured JSON logging

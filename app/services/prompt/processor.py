@@ -23,6 +23,7 @@ from app.logger import get_logger
 from app.models.prompt_request import PromptBatchRequest, PromptRequest
 from app.models.prompt_response import PromptResponse
 from app.services.base_nlp_service import BaseNLPService
+from app.services.prompt import generator as generator_module
 
 # Import submodule functions
 from app.services.prompt.config import (
@@ -32,6 +33,7 @@ from app.services.prompt.config import (
     validate_model_availability,
 )
 from app.services.prompt.generator import (
+    run_decoder_only_generation,
     run_encoder_only_generation,
     run_onnx_generation,
     run_seq2seq_generation,
@@ -42,12 +44,15 @@ from app.services.prompt.models import (
     DEFAULT_TIMEOUT,
     SummaryResults,
 )
+from app.services.prompt.parameters import build_generation_params
 from app.services.prompt.resource_manager import (
     clear_all_caches,
     get_cached_model,
     get_decoder_session,
+    get_encoder_session,
     get_special_tokens,
 )
+from app.services.prompt.text_utils import capitalize_sentences, remove_special_tokens
 
 # prepare_input_text not used in this module
 from app.utils.batch_limiter import BatchLimiter
@@ -106,12 +111,12 @@ class PromptProcessor(BaseNLPService):
             timer.start()
 
             try:
-                result = PromptProcessor._process_prompt_local(request)
+                result: SummaryResults = PromptProcessor._process_prompt_local(request)
                 if timeout_occurred[0]:
                     raise ProcessingTimeoutError(
                         f"Prompt processing timed out after {timeout} seconds"
                     )
-                elif result.success:
+                elif isinstance(result, SummaryResults) and result.success:
                     response.results.append(result.summary)
                     response.message = result.message
                 else:
@@ -175,14 +180,38 @@ class PromptProcessor(BaseNLPService):
             try:
                 use_seq2seqlm = bool(getattr(model_config, "use_seq2seqlm", False))
                 encoder_only = bool(getattr(model_config, "encoder_only", False))
+                decoder_only = bool(getattr(model_config, "decoder_only", False))
                 logger.info(
-                    "Generation path selection for model=%s: use_seq2seqlm=%s encoder_only=%s",
+                    "Generation path selection for model=%s: use_seq2seqlm=%s encoder_only=%s decoder_only=%s",
                     sanitize_for_log(model_to_use),
                     use_seq2seqlm,
                     encoder_only,
+                    decoder_only,
                 )
             except Exception:
                 logger.debug("Failed to log generation path flags")
+
+            # If no explicit flags provided, attempt to infer decoder-only
+            # when encoder artifact is missing but decoder artifact exists.
+            try:
+                if not use_seq2seqlm and not decoder_only and not encoder_only:
+                    from app.services.prompt.config import get_model_file_paths
+
+                    enc_path, dec_path = get_model_file_paths(model_path, model_config)
+                    import os
+
+                    enc_exists = os.path.exists(enc_path) if enc_path else False
+                    dec_exists = os.path.exists(dec_path) if dec_path else False
+                    if not enc_exists and dec_exists:
+                        logger.info(
+                            "Inferring decoder-only for %s (encoder missing, decoder present)",
+                            sanitize_for_log(model_to_use),
+                        )
+                        decoder_only = True
+
+            except Exception:
+                # Non-fatal: fall back to explicit flags
+                logger.debug("Failed to infer decoder-only; using explicit flags if present")
 
             # Dispatch to appropriate generation strategy
             if use_seq2seqlm:
@@ -195,6 +224,13 @@ class PromptProcessor(BaseNLPService):
                         success=False,
                     )
                 return run_seq2seq_generation(model, tokenizer, model_config, request)
+
+            elif decoder_only:
+                logger.info(
+                    "Using decoder-only generation for %s",
+                    sanitize_for_log(model_to_use),
+                )
+                return run_decoder_only_generation(model_path, tokenizer, model_config, request)
 
             elif encoder_only:
                 logger.info(
@@ -214,7 +250,7 @@ class PromptProcessor(BaseNLPService):
 
                 encoder_path, decoder_path = get_model_file_paths(model_path, model_config)
                 encoder_session = PromptProcessor._get_encoder_session(encoder_path)
-                decoder_session = get_decoder_session(decoder_path)
+                decoder_session = PromptProcessor._get_decoder_session(decoder_path)
 
                 if not encoder_session or not decoder_session:
                     return SummaryResults(
@@ -277,7 +313,7 @@ class PromptProcessor(BaseNLPService):
         logger.info("Using model path: %s", sanitize_for_log(model_path))
 
         use_legacy = getattr(model_config, "legacy_tokenizer", False)
-        tokenizer = get_tokenizer_threadsafe(model_path, use_legacy)
+        tokenizer = PromptProcessor._get_tokenizer_threadsafe(model_path, use_legacy)
         if not tokenizer:
             raise TokenizerError(f"Failed to load tokenizer: {model_path}")
 
@@ -293,25 +329,19 @@ class PromptProcessor(BaseNLPService):
         Returns:
             ONNX inference session, or None if creation failed
         """
-        import onnxruntime as ort
-
-        from app.app_init import APP_SETTINGS
-
         try:
-            provider = APP_SETTINGS.server.session_provider or "CPUExecutionProvider"
-            available_providers = ort.get_available_providers()
-
-            if provider not in available_providers:
-                logger.warning(
-                    f"Provider {provider} not available for encoder, using CPUExecutionProvider"
-                )
-                provider = "CPUExecutionProvider"
-
-            logger.debug("Creating encoder session with provider %s", sanitize_for_log(provider))
-            return ort.InferenceSession(encoder_model_path, providers=[provider])
-
+            return get_encoder_session(encoder_model_path)
         except Exception as e:
             logger.error(f"Failed to create encoder session: {e}")
+            return None
+
+    @staticmethod
+    def _get_decoder_session(decoder_model_path: str) -> Optional[Any]:
+        """Get or create ONNX decoder session (wrapper for test overrides)."""
+        try:
+            return get_decoder_session(decoder_model_path)
+        except Exception as e:
+            logger.error(f"Failed to create decoder session: {e}")
             return None
 
     @staticmethod
@@ -363,14 +393,17 @@ class PromptProcessor(BaseNLPService):
                 )
                 for text in request.inputs
             ]
-
+            loop.close()
             results = await gather(*tasks, return_exceptions=True)
 
             for idx, result in enumerate(results):
-                if isinstance(result, Exception) or (
-                    hasattr(result, "success") and not result.success
-                ):
-                    err_msg = getattr(result, "message", str(result))
+                if isinstance(result, Exception):
+                    err_msg = str(result)
+                    logger.error(f"Error in input {idx}: {err_msg}")
+                    response.success = False
+                    response.message = f"Error in input {idx}: {err_msg}"
+                elif getattr(result, "success", True) is False:
+                    err_msg = getattr(result, "message", "")
                     logger.error(f"Error in input {idx}: {err_msg}")
                     response.success = False
                     response.message = f"Error in input {idx}: {err_msg}"
@@ -411,6 +444,74 @@ class PromptProcessor(BaseNLPService):
         import asyncio
 
         return asyncio.run(cls.summarize_batch_async(request))
+
+    # ------------------------------------------------------------------
+    # Legacy-compatible helper wrappers for tests and compatibility
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _get_tokenizer_threadsafe(model_path: str, use_legacy: bool = False) -> Any:
+        """Delegate to shared tokenizer loader (kept as override point for tests)."""
+        return get_tokenizer_threadsafe(model_path, use_legacy)
+
+    @staticmethod
+    def _decode_output(output_ids, tokenizer, special_tokens, input_text):
+        return generator_module._decode_output(output_ids, tokenizer, special_tokens, input_text)
+
+    @staticmethod
+    def _remove_special_tokens(text, special_tokens):
+        return remove_special_tokens(text, special_tokens)
+
+    @staticmethod
+    def _capitalize_sentences(text):
+        return capitalize_sentences(text)
+
+    @staticmethod
+    def _hash_array(arr, quantize_dtype=None):
+        return generator_module._hash_array(arr, quantize_dtype)
+
+    @staticmethod
+    def _build_generation_cache_key(
+        decoder_session,
+        encoder_outputs,
+        inputs,
+        token_config,
+        model_config,
+        request,
+        tokenizer=None,
+    ):
+        return generator_module._build_generation_cache_key(
+            decoder_session,
+            encoder_outputs,
+            inputs,
+            token_config,
+            model_config,
+            request,
+            tokenizer,
+        )
+
+    @staticmethod
+    def _generate_tokens(
+        decoder_session,
+        encoder_outputs,
+        inputs,
+        token_config,
+        model_config,
+        request,
+        tokenizer=None,
+    ):
+        return generator_module._generate_tokens(
+            decoder_session,
+            encoder_outputs,
+            inputs,
+            token_config,
+            model_config,
+            request,
+            tokenizer,
+        )
+
+    @staticmethod
+    def _build_generation_params(model_config, request):
+        return build_generation_params(model_config, request)
 
 
 def get_special_tokens_path(model_path: str, model_config: Any) -> str:

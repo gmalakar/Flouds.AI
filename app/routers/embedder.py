@@ -11,7 +11,7 @@ from app.exceptions import FloudsBaseException
 from app.logger import get_logger
 from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
 from app.models.embedding_response import EmbeddingBatchResponse, EmbeddingResponse
-from app.services.embedder_service import SentenceTransformer
+from app.services.embedder import SentenceTransformer
 from app.utils.error_handler import ErrorHandler
 from app.utils.log_sanitizer import sanitize_for_log
 

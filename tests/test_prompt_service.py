@@ -18,24 +18,25 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.prompt_response import PromptResponse
-from app.services.prompt_service import PromptProcessor
+from app.services.prompt.models import SummaryResults
+from app.services.prompt.processor import PromptProcessor
+from app.services.prompt.text_utils import remove_special_tokens
 
 
 @pytest.fixture(autouse=True)
 def _cleanup_sync_tests():
-    """Cleanup for synchronous tests: cancel remaining tasks, shutdown
-    async generators and close the loop if it's not running.
-    """
+    """Best-effort cleanup for synchronous tests to avoid stray asyncio tasks."""
     yield
+    loop = None
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        # No event loop present; nothing to do
-        return
+        # No running loop; check whether one was created earlier without starting
+        policy = asyncio.get_event_loop_policy()
+        loop = getattr(getattr(policy, "_local", None), "loop", None)
 
-    # If an event loop is running, assume the async autouse fixture will
-    # handle cleanup for async tests and skip sync-level cleanup.
-    if loop.is_running():
+    # Skip cleanup when no loop or loop is already running/closed
+    if loop is None or loop.is_running() or loop.is_closed():
         return
 
     try:
@@ -44,40 +45,13 @@ def _cleanup_sync_tests():
             t.cancel()
         if tasks:
             loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-        try:
-            loop.run_until_complete(loop.shutdown_asyncgens())
-        except Exception:
-            # Best-effort
-            pass
+        loop.run_until_complete(loop.shutdown_asyncgens())
     except Exception:
-        # Swallow any cleanup error to avoid hiding test failures
+        # Swallow cleanup errors to avoid masking test failures
         pass
 
     try:
-        if not loop.is_closed():
-            loop.close()
-    except Exception:
-        pass
-
-
-@pytest.fixture(autouse=True)
-async def _cleanup_async_tests():
-    """Cleanup for asynchronous tests: cancel background tasks and
-    shutdown async generators after test completes.
-    """
-    yield
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-
-    tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
-    for t in tasks:
-        t.cancel()
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-    try:
-        await loop.shutdown_asyncgens()
+        loop.close()
     except Exception:
         pass
 
@@ -185,17 +159,23 @@ def dummy_model_config():
 
 
 # ---- Single summarization (seq2seq) ----
+@patch("app.services.prompt.processor.get_tokenizer_threadsafe", return_value=DummyTokenizerEmpty())
+@patch("app.services.prompt.processor.get_cached_model", return_value=DummyModel())
+@patch("app.services.prompt.processor.get_model_path", return_value="/safe/path")
+@patch("app.services.prompt.processor.validate_model_availability", return_value=True)
+@patch("app.services.prompt.processor.get_model_config")
 @patch(
-    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
-    return_value=DummyTokenizerEmpty(),
+    "app.services.prompt.processor.run_seq2seq_generation",
+    return_value=SummaryResults(summary="", message="", success=True),
 )
-@patch(
-    "app.services.prompt_service.PromptProcessor.get_model",
-    return_value=DummyModel(),
-)
-@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
 def test_summarize_empty_summary(
-    mock_get_config, mock_get_model, mock_get_tokenizer, dummy_model_config
+    mock_run_seq2seq,
+    mock_get_config,
+    mock_validate,
+    mock_get_path,
+    mock_get_cached_model,
+    mock_get_tokenizer,
+    dummy_model_config,
 ):
     mock_get_config.return_value = dummy_model_config
     from app.models.prompt_request import PromptRequest
@@ -208,17 +188,23 @@ def test_summarize_empty_summary(
 
 
 # ---- Single summarization with temperature ----
+@patch("app.services.prompt.processor.get_tokenizer_threadsafe", return_value=DummyTokenizerEmpty())
+@patch("app.services.prompt.processor.get_cached_model", return_value=DummyModel())
+@patch("app.services.prompt.processor.get_model_path", return_value="/safe/path")
+@patch("app.services.prompt.processor.validate_model_availability", return_value=True)
+@patch("app.services.prompt.processor.get_model_config")
 @patch(
-    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
-    return_value=DummyTokenizerEmpty(),
+    "app.services.prompt.processor.run_seq2seq_generation",
+    return_value=SummaryResults(summary="", message="", success=True),
 )
-@patch(
-    "app.services.prompt_service.PromptProcessor.get_model",
-    return_value=DummyModel(),
-)
-@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
 def test_summarize_empty_summary_with_config(
-    mock_get_config, mock_get_model, mock_get_tokenizer, dummy_model_config
+    mock_run_seq2seq,
+    mock_get_config,
+    mock_validate,
+    mock_get_path,
+    mock_get_cached_model,
+    mock_get_tokenizer,
+    dummy_model_config,
 ):
     mock_get_config.return_value = dummy_model_config
     from app.models.prompt_request import PromptRequest
@@ -231,17 +217,23 @@ def test_summarize_empty_summary_with_config(
 
 
 # ---- Exception handling ----
+@patch("app.services.prompt.processor.get_tokenizer_threadsafe", return_value=DummyTokenizer())
+@patch("app.services.prompt.processor.get_cached_model", return_value=DummyModelException())
+@patch("app.services.prompt.processor.get_model_path", return_value="/safe/path")
+@patch("app.services.prompt.processor.validate_model_availability", return_value=True)
+@patch("app.services.prompt.processor.get_model_config")
 @patch(
-    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
-    return_value=DummyTokenizer(),
+    "app.services.prompt.processor.run_seq2seq_generation",
+    side_effect=RuntimeError("Generation failed"),
 )
-@patch(
-    "app.services.prompt_service.PromptProcessor.get_model",
-    return_value=DummyModelException(),
-)
-@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
 def test_summarize_generation_exception(
-    mock_get_config, mock_get_model, mock_get_tokenizer, dummy_model_config
+    mock_run_seq2seq,
+    mock_get_config,
+    mock_validate,
+    mock_get_path,
+    mock_get_cached_model,
+    mock_get_tokenizer,
+    dummy_model_config,
 ):
     mock_get_config.return_value = dummy_model_config
     from app.models.prompt_request import PromptRequest
@@ -256,22 +248,23 @@ def test_summarize_generation_exception(
 def test_remove_special_tokens():
     text = "This is <pad> a test <eos>."
     special_tokens = {"<pad>", "<eos>"}
-    result = PromptProcessor._remove_special_tokens(text, special_tokens)
+    result = remove_special_tokens(text, special_tokens)
     assert result == "This is a test ."
 
 
 # ---- Batch summarization ----
-@patch(
-    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
-    return_value=DummyTokenizer(),
-)
-@patch(
-    "app.services.prompt_service.PromptProcessor.get_model",
-    return_value=DummyModel(),
-)
-@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
+@patch("app.services.prompt.processor.get_model_config")
+@patch("app.services.prompt.processor.get_tokenizer_threadsafe", return_value=DummyTokenizer())
+@patch("app.services.prompt.processor.get_cached_model", return_value=DummyModel())
+@patch("app.services.prompt.processor.get_model_path", return_value="/safe/path")
+@patch("app.services.prompt.processor.validate_model_availability", return_value=True)
 def test_summarize_batch_seq2seqlm(
-    mock_get_config, mock_get_model, mock_get_tokenizer, dummy_model_config
+    mock_validate,
+    mock_get_path,
+    mock_get_cached_model,
+    mock_get_tokenizer,
+    mock_get_config,
+    dummy_model_config,
 ):
     from app.services.base_nlp_service import BaseNLPService
 
@@ -290,23 +283,26 @@ def test_summarize_batch_seq2seqlm(
 
 
 # ---- ONNX summarization ----
-@patch("app.services.prompt_service.PromptProcessor._get_decoder_session")
-@patch("app.services.prompt_service.PromptProcessor._get_encoder_session")
+@patch("app.services.prompt.processor.get_model_config")
+@patch("app.services.prompt.processor.get_model_path", return_value="/safe/path")
+@patch("app.services.prompt.processor.validate_model_availability", return_value=True)
+@patch("app.services.prompt.processor.get_tokenizer_threadsafe", return_value=DummyTokenizer())
+@patch("app.services.prompt.resource_manager.get_special_tokens", return_value=set())
+@patch("app.services.prompt.processor.PromptProcessor._get_encoder_session")
+@patch("app.services.prompt.resource_manager.get_decoder_session")
 @patch(
-    "app.services.prompt_service.PromptProcessor._get_tokenizer_threadsafe",
-    return_value=DummyTokenizer(),
+    "app.services.prompt.config.get_model_file_paths",
+    return_value=("/safe/path/encoder_model.onnx", "/safe/path/decoder_model.onnx"),
 )
-@patch(
-    "app.services.prompt_service.PromptProcessor._get_special_tokens",
-    return_value=set(),
-)
-@patch("app.config.config_loader.ConfigLoader.get_onnx_config")
 def test_summarize_other(
-    mock_get_config,
+    mock_get_model_file_paths,
+    mock_get_decoder_session,
+    mock_get_encoder_session,
     mock_get_special_tokens,
     mock_get_tokenizer,
-    mock_get_encoder_session,
-    mock_get_decoder_session,
+    mock_validate,
+    mock_get_path,
+    mock_get_config,
     dummy_model_config,
 ):
     from app.services.base_nlp_service import BaseNLPService

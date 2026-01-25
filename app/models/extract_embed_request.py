@@ -6,7 +6,7 @@
 
 from typing import Optional, Union, cast
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from app.models.embedding_request import EmbeddingBaseRequest
 
@@ -32,11 +32,12 @@ class ExtractEmbedRequest(EmbeddingBaseRequest):
         description="Optional model name or identifier to use for embedding when extracting files.",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "file_content": "SGVsbG8gd29ybGQ=",  # base64 for "Hello world"
                 "extention": "txt",
                 "model": "all-MiniLM-L6-v2",
             }
         }
+    )

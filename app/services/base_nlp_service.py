@@ -854,7 +854,7 @@ class BaseNLPService:
                 return val
             # If stored as ModelMetadata, return its dict representation
             if isinstance(val, ModelMetadata):
-                return val.dict()
+                return val.model_dump()
             # Unknown stored type: attempt to coerce to dict
             try:
                 return dict(val)

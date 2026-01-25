@@ -26,6 +26,7 @@ class DecoderInputNames(BaseModel):
     input: str = Field(default="input_ids")
     mask: str = Field(default="encoder_attention_mask")
     encoder_output: str = Field(default="encoder_hidden_states")
+    position_ids: Optional[str] = Field(default=None)
 
 
 class OnnxConfig(BaseModel):
@@ -62,7 +63,8 @@ class OnnxConfig(BaseModel):
     repetition_penalty: Optional[float] = Field(default=None)
     early_stopping: bool = True
     use_seq2seqlm: bool = Field(default=False)
-    encoder_only: bool = Field(default=False)  # For GPT-style models that use only encoder
+    encoder_only: bool = Field(default=False)  # For models that use only encoder
+    decoder_only: bool = Field(default=False)  # For decoder-only (causal) models
     prepend_text: str = Field(default="summarize: ")
     chunk_logic: str = Field(default="sentence")
     chunk_overlap: int = Field(default=1)
@@ -76,4 +78,5 @@ class OnnxConfig(BaseModel):
     quantize_type: str = Field(default="int8")  # Quantization type: int8, uint8, binary
     forced_bos_token_id: Optional[int] = Field(default=None)  # Forced BOS token ID for generation
     # Preferred limit on newly generated tokens (recommended over total `max_length`)
-    max_new_tokens: Optional[int] = Field(default=None)
+    max_new_tokens: Optional[int] = Field(default=512)
+    merged_with_past: bool = Field(default=False)

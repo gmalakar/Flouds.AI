@@ -152,6 +152,51 @@ def get_decoder_session(decoder_model_path: str) -> Optional[ort.InferenceSessio
         return None
 
 
+def get_encoder_session(encoder_model_path: str) -> Optional[ort.InferenceSession]:
+    """Get cached ONNX encoder session with error handling.
+
+    Args:
+        encoder_model_path: Path to encoder model
+
+    Returns:
+        ONNX inference session, or None if creation failed
+    """
+    try:
+        provider = APP_SETTINGS.server.session_provider or "CPUExecutionProvider"
+        available_providers = ort.get_available_providers()
+
+        if provider not in available_providers:
+            logger.warning(
+                f"Provider {provider} not available for encoder, using CPUExecutionProvider"
+            )
+            provider = "CPUExecutionProvider"
+
+        cache_key = f"{encoder_model_path}#{provider}"
+
+        # First check if session is already cached
+        cached_session = CachedSessions.encoder_sessions.get(cache_key)
+        if cached_session is not None:
+            return cached_session
+
+        # Session not in cache - check memory and clear if needed
+        from app.utils.cache_manager import CacheManager
+
+        CacheManager.check_and_clear_cache_if_needed()
+
+        logger.debug(
+            "Creating encoder session for %s with provider %s",
+            sanitize_for_log(encoder_model_path),
+            sanitize_for_log(provider),
+        )
+
+        return CachedSessions.encoder_sessions.get_or_add(
+            cache_key, lambda: ort.InferenceSession(encoder_model_path, providers=[provider])
+        )
+    except Exception as e:
+        logger.error(f"Failed to create encoder session: {e}")
+        return None
+
+
 def get_special_tokens(special_tokens_path: str) -> Set[str]:
     """Get cached special tokens.
 

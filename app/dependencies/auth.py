@@ -58,6 +58,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Cache valid keys count at startup to avoid repeated calls
         self._keys_configured = bool(key_manager.get_all_tokens()) if self.enabled else True
 
+        # If auth is enabled but no keys are configured, disable auth to avoid blocking all requests
+        if self.enabled and not self._keys_configured:
+            logger.warning("API authentication enabled but no clients configured; disabling auth")
+            self.enabled = False
+
         self.public_endpoints = frozenset(
             [
                 # Avoid overly-broad prefixes that mark entire API as public.
@@ -76,6 +81,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 "/api/v1/docs",
                 "/api/v1/redoc",
                 "/api/v1/docs/oauth2-redirect",
+                "/api/v1/model/info",
+                "/api/v1/model/info/",
                 # health endpoint (explicit)
                 "/api/v1/health",
                 "/api/v1/health/",
@@ -115,6 +122,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # Require tenant header for all non-public endpoints
         tenant_header = request.headers.get("X-Tenant-Code")
+        if skip_auth and not tenant_header:
+            tenant_header = "master"
 
         # Helper to extract client IP
         def _get_client_ip(req: Request) -> str:

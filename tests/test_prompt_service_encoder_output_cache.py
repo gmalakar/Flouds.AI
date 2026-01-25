@@ -11,11 +11,8 @@ from types import SimpleNamespace
 import numpy as np
 
 import app.services.cache_registry as cache_registry
-from app.services.cache_registry import (
-    clear_encoder_output_cache,
-    get_encoder_output_cache,
-)
-from app.services.prompt_service import PromptProcessor
+from app.services.cache_registry import clear_encoder_output_cache, get_encoder_output_cache
+from app.services.prompt import generator
 from app.utils.simple_cache import SimpleCache
 
 
@@ -79,12 +76,12 @@ def test_encoder_output_cache_key_build_and_clear():
     ids = np.ascontiguousarray(np.array([[1, 2, 3]], dtype=np.int64))
     m.update(b"||input_ids||")
     m.update(str(ids.shape).encode())
-    m.update(PromptProcessor._hash_array(ids, quantize_dtype=np.int64).encode())
+    m.update(generator._hash_array(ids, quantize_dtype=np.int64).encode())
 
     mask = np.ascontiguousarray(np.array([[1, 1, 1]], dtype=np.int8))
     m.update(b"||attention_mask||")
     m.update(str(mask.shape).encode())
-    m.update(PromptProcessor._hash_array(mask, quantize_dtype=np.int8).encode())
+    m.update(generator._hash_array(mask, quantize_dtype=np.int8).encode())
 
     enc_key = m.hexdigest()
 

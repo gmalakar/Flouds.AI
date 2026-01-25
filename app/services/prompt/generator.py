@@ -17,7 +17,7 @@ import onnxruntime as ort
 from app.config.onnx_config import OnnxConfig
 from app.logger import get_logger
 from app.models.prompt_request import PromptRequest
-from app.services.cache_registry import get_generation_cache
+from app.services.cache_registry import get_decode_cache, get_generation_cache
 from app.services.prompt.models import DEFAULT_MAX_LENGTH, DEFAULT_VOCAB_SIZE, SummaryResults
 from app.services.prompt.text_utils import capitalize_sentences, remove_special_tokens
 
@@ -151,6 +151,39 @@ def run_encoder_only_generation(
         )
 
 
+def run_decoder_only_generation(
+    model_path: str,
+    tokenizer: Any,
+    model_config: OnnxConfig,
+    request: PromptRequest,
+) -> SummaryResults:
+    """Generate text from a decoder-only ONNX session (causal/autoregressive).
+
+    This function loads the decoder ONNX session for the provided model path
+    and performs autoregressive decoding using the same logic as the
+    combined ONNX generation loop but without an encoder run.
+    """
+    from app.services.prompt.config import get_model_file_paths
+    from app.services.prompt.resource_manager import (
+        check_memory_and_clear_cache,
+        get_decoder_session,
+    )
+
+    check_memory_and_clear_cache()
+
+    # Resolve decoder path
+    _, decoder_path = get_model_file_paths(model_path, model_config)
+    session = get_decoder_session(decoder_path)
+    if session is None:
+        return SummaryResults(summary="", message="Failed to load decoder session", success=False)
+
+    # Choose decoding strategy based on model_config.merged_with_past
+    if getattr(model_config, "merged_with_past", False):
+        return _generate_decoder_only_with_past(session, tokenizer, model_config, request)
+    else:
+        return _generate_decoder_only(session, tokenizer, model_config, request)
+
+
 def run_onnx_generation(
     encoder_session: ort.InferenceSession,
     decoder_session: ort.InferenceSession,
@@ -225,6 +258,255 @@ def run_onnx_generation(
         return SummaryResults(summary="", message=f"Error generating text: {str(e)}", success=False)
 
 
+def _generate_decoder_only_with_past(
+    session: ort.InferenceSession,
+    tokenizer: Any,
+    model_config: OnnxConfig,
+    request: PromptRequest,
+) -> SummaryResults:
+    """Efficient generation from a merged decoder-only ONNX model with past_key_values."""
+    try:
+        from app.services.prompt.text_utils import prepare_input_text
+
+        input_text = prepare_input_text(request, getattr(model_config, "prepend_text", None))
+        eos_token_id = getattr(tokenizer, "eos_token_id", None)
+
+        inputs = tokenizer(input_text, return_tensors="np")
+        input_ids = np.asarray(inputs.get("input_ids", [[0]]), dtype=np.int64)
+        attention_mask = np.asarray(
+            inputs.get("attention_mask", np.ones_like(input_ids)), dtype=np.int64
+        )
+
+        raw_max = getattr(request, "max_new_tokens", None)
+        if raw_max is None:
+            raw_max = getattr(model_config, "max_new_tokens", 128)
+        if isinstance(raw_max, (int, float, str)):
+            try:
+                max_new = int(raw_max)
+            except Exception:
+                max_new = 128
+        else:
+            max_new = 128
+
+        decoder_input_map = getattr(model_config, "decoder_inputnames", None)
+        input_id_name = (
+            getattr(decoder_input_map, "input", "input_ids") if decoder_input_map else "input_ids"
+        )
+        attention_mask_name = (
+            getattr(decoder_input_map, "mask", "attention_mask")
+            if decoder_input_map
+            else "attention_mask"
+        )
+        position_ids_name = (
+            getattr(decoder_input_map, "position_ids", "position_ids")
+            if decoder_input_map
+            else "position_ids"
+        )
+
+        session_inputs = session.get_inputs()
+        past_inputs = [
+            inp
+            for inp in session_inputs
+            if "past" in inp.name.lower() or "key_values" in inp.name.lower()
+        ]
+
+        generated_tokens = input_ids[0].tolist()
+        pos_counter = int(input_ids.shape[1])
+
+        # Step 0: full prompt with empty pasts
+        step_inputs = {
+            input_id_name: input_ids,
+            attention_mask_name: attention_mask,
+            position_ids_name: np.arange(pos_counter, dtype=np.int64)[None, :],
+        }
+        for inp in past_inputs:
+            # Build empty past tensors; seq_len=0 only if dim name contains both 'past' and 'seq'
+            shape = [
+                (
+                    0
+                    if ("past" in str(dim).lower() and "seq" in str(dim).lower())
+                    else 1 if (dim is None or dim == -1 or isinstance(dim, str)) else int(dim)
+                )
+                for dim in inp.shape
+            ]
+            step_inputs[inp.name] = cast(np.ndarray, np.zeros(tuple(shape), dtype=np.float32))
+
+        # Only include keys that are valid session inputs
+        valid_input_names = {i.name for i in session_inputs}
+        step_inputs = {k: v for k, v in step_inputs.items() if k in valid_input_names}
+
+        step_start = time.time()
+        step_timeout = getattr(request, "timeout", 60) / max_new if max_new > 0 else 1.0
+
+        outputs = session.run(None, step_inputs)
+        logits = outputs[0]
+        past_key_values = outputs[1:]
+        next_token_id = int(np.argmax(np.asarray(logits), axis=-1)[0, -1])
+        generated_tokens.append(next_token_id)
+        pos_counter += 1
+
+        # Subsequent steps: feed one token and pasts
+        for _step in range(1, max_new):
+            if time.time() - step_start > step_timeout * (_step + 1):
+                logger.warning(f"Decoder-only merged-past generation timeout at step {_step}")
+                break
+
+            if eos_token_id is not None and next_token_id == eos_token_id:
+                break
+
+            new_token = np.array([[next_token_id]], dtype=np.int64)
+            new_mask = np.ones((1, 1), dtype=np.int64)
+            new_pos = np.array([[pos_counter]], dtype=np.int64)
+
+            step_inputs = {
+                input_id_name: new_token,
+                attention_mask_name: new_mask,
+                position_ids_name: new_pos,
+            }
+            for past_inp, past_val in zip(past_inputs, past_key_values):
+                step_inputs[past_inp.name] = past_val
+
+            # Filter to valid inputs
+            step_inputs = {k: v for k, v in step_inputs.items() if k in valid_input_names}
+
+            outputs = session.run(None, step_inputs)
+            logits = outputs[0]
+            past_key_values = outputs[1:]
+            next_token_id = int(np.argmax(np.asarray(logits), axis=-1)[0, -1])
+            generated_tokens.append(next_token_id)
+            pos_counter += 1
+
+        summary_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        return SummaryResults(summary=summary_text, message="", success=True)
+
+    except Exception as e:
+        logger.exception(f"Decoder-only generation with past failed: {e}")
+        return SummaryResults(summary="", message=f"Generation error: {e}", success=False)
+
+
+def _generate_decoder_only(
+    session: ort.InferenceSession,
+    tokenizer: Any,
+    model_config: OnnxConfig,
+    request: PromptRequest,
+) -> SummaryResults:
+    """Generate text using the decoder-only ONNX model with incremental decoding (past_key_values)."""
+    try:
+        from app.services.prompt.text_utils import prepare_input_text
+
+        # Prepare input text
+        input_text = prepare_input_text(request, getattr(model_config, "prepend_text", None))
+        eos_token_id = getattr(tokenizer, "eos_token_id", None)
+
+        # Tokenize input
+        inputs = tokenizer(input_text, return_tensors="np")
+        input_ids = np.asarray(inputs["input_ids"], dtype=np.int64)
+        attention_mask = np.asarray(inputs["attention_mask"], dtype=np.int64)
+
+        # Generation limits
+        raw_max_new = getattr(request, "max_new_tokens", None)
+        if raw_max_new is None:
+            raw_max_new = getattr(model_config, "max_new_tokens", 128)
+        if isinstance(raw_max_new, (int, float, str)):
+            try:
+                max_new = int(raw_max_new)
+            except Exception:
+                max_new = 128
+        else:
+            max_new = 128
+
+        # Input names mapping
+        decoder_input_map = getattr(model_config, "decoder_inputnames", None)
+        input_id_name = (
+            getattr(decoder_input_map, "input", "input_ids") if decoder_input_map else "input_ids"
+        )
+        attention_mask_name = (
+            getattr(decoder_input_map, "mask", "attention_mask")
+            if decoder_input_map
+            else "attention_mask"
+        )
+        position_ids_name = (
+            getattr(decoder_input_map, "position_ids", "position_ids")
+            if decoder_input_map
+            else "position_ids"
+        )
+
+        # Cache session inputs once
+        session_inputs = session.get_inputs()
+        past_inputs = [
+            inp
+            for inp in session_inputs
+            if "past" in inp.name.lower() or "key_values" in inp.name.lower()
+        ]
+
+        # Collect generated tokens
+        generated_tokens = input_ids[0].tolist()
+        pos_counter = int(input_ids.shape[1])
+
+        # Step 0: full prompt with empty pasts
+        step_inputs = {
+            input_id_name: input_ids,
+            attention_mask_name: attention_mask,
+            position_ids_name: np.arange(pos_counter, dtype=np.int64)[None, :],
+        }
+        for inp in past_inputs:
+            # Build empty past tensors; seq_len=0 only if dim name contains both 'past' and 'seq'
+            shape = [
+                (
+                    0
+                    if ("past" in str(dim).lower() and "seq" in str(dim).lower())
+                    else 1 if (dim is None or dim == -1 or isinstance(dim, str)) else int(dim)
+                )
+                for dim in inp.shape
+            ]
+            step_inputs[inp.name] = cast(np.ndarray, np.zeros(tuple(shape), dtype=np.float32))
+
+        step_start = time.time()
+        step_timeout = getattr(request, "timeout", 60) / max_new if max_new > 0 else 1.0
+
+        outputs = session.run(None, step_inputs)
+        logits = outputs[0]
+        past_key_values = outputs[1:]
+        next_token_id = int(np.asarray(logits).argmax(axis=-1)[0, -1])
+        generated_tokens.append(next_token_id)
+        pos_counter += 1
+
+        # Subsequent steps: new token + past
+        for _step in range(1, max_new):
+            if time.time() - step_start > step_timeout * (_step + 1):
+                logger.warning(f"Decoder-only generation timeout at step {_step}")
+                break
+
+            if eos_token_id is not None and next_token_id == eos_token_id:
+                break
+
+            new_token = np.array([[next_token_id]], dtype=np.int64)
+            new_mask = np.ones((1, 1), dtype=np.int64)
+            new_pos = np.array([[pos_counter]], dtype=np.int64)
+
+            step_inputs = {
+                input_id_name: new_token,
+                attention_mask_name: new_mask,
+                position_ids_name: new_pos,
+            }
+            for past_inp, past_val in zip(past_inputs, past_key_values):
+                step_inputs[past_inp.name] = past_val
+
+            outputs = session.run(None, step_inputs)
+            logits = outputs[0]
+            past_key_values = outputs[1:]
+            next_token_id = int(np.asarray(logits).argmax(axis=-1)[0, -1])
+            generated_tokens.append(next_token_id)
+            pos_counter += 1
+
+        summary_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        return SummaryResults(summary=summary_text, message="", success=True)
+
+    except Exception as e:
+        logger.exception(f"Decoder-only generation failed: {e}")
+        return SummaryResults(summary="", message=f"Generation error: {e}", success=False)
+
+
 # ============================================================================
 # ONNX-Specific Helper Functions
 # ============================================================================
@@ -297,6 +579,81 @@ def _run_encoder(
 
     # Run encoder
     return encoder_session.run(None, onnx_inputs)
+
+
+def _hash_array(arr: np.ndarray, quantize_dtype: Any = np.float16) -> str:
+    """Hash a numpy array after optional quantization."""
+    try:
+        a = np.ascontiguousarray(arr.astype(quantize_dtype))
+    except Exception:
+        a = np.ascontiguousarray(np.asarray(arr))
+    h = hashlib.sha256()
+    h.update(str(a.shape).encode())
+    h.update(str(a.dtype).encode())
+    try:
+        h.update(memoryview(a))
+    except Exception:
+        h.update(a.tobytes())
+    return h.hexdigest()
+
+
+def _build_generation_cache_key(
+    decoder_session: ort.InferenceSession,
+    encoder_outputs: Any,
+    inputs: Dict,
+    token_config: Dict[str, int],
+    model_config: OnnxConfig,
+    request: PromptRequest,
+    tokenizer: Optional[Any] = None,
+) -> Optional[str]:
+    """Build generation cache key including hashed inputs and encoder output."""
+    try:
+        model_id = getattr(request, "model", "") or ""
+        model_version = getattr(model_config, "model_folder_name", "") or ""
+        tokenizer_id = None
+        if tokenizer is not None:
+            tokenizer_id = getattr(tokenizer, "name_or_path", None) or getattr(
+                tokenizer, "model_max_length", None
+            )
+
+        parts = {
+            "model": model_id,
+            "model_version": model_version or "",
+            "tokenizer": tokenizer_id or "",
+            "max_length": int(token_config.get("max_length", 0)),
+            "decoder_start_token_id": int(token_config.get("decoder_start_token_id", 0)),
+            "eos_token_id": int(token_config.get("eos_token_id", 0)),
+            "tenant": getattr(request, "tenant_code", None) or "",
+        }
+
+        m = hashlib.sha256()
+        m.update(json.dumps(parts, sort_keys=True, separators=(",", ":")).encode())
+
+        if isinstance(inputs, dict) and "input_ids" in inputs:
+            ids = np.ascontiguousarray(inputs["input_ids"]).astype(np.int64)
+            m.update(b"||input_ids||")
+            m.update(str(ids.shape).encode())
+            m.update(_hash_array(ids, np.int64).encode())
+
+        if isinstance(inputs, dict) and "attention_mask" in inputs:
+            mask = np.ascontiguousarray(inputs["attention_mask"]).astype(np.int8)
+            m.update(b"||attention_mask||")
+            m.update(str(mask.shape).encode())
+            m.update(_hash_array(mask, np.int8).encode())
+
+        try:
+            if isinstance(encoder_outputs, (list, tuple)) and len(encoder_outputs) > 0:
+                enc0 = np.ascontiguousarray(encoder_outputs[0])
+                enc_digest = _hash_array(enc0, np.float16)
+                m.update(b"||enc0||")
+                m.update(str(enc0.shape).encode())
+                m.update(enc_digest.encode())
+        except Exception:
+            m.update(b"||enc_hash_failed||")
+
+        return m.hexdigest()
+    except Exception:
+        return None
 
 
 def _generate_tokens(
@@ -447,15 +804,50 @@ def _decode_output(
     special_tokens: Set[str],
     input_text: str,
 ) -> str:
-    """Decode token IDs to text with special token removal and capitalization."""
+    """Decode token IDs to text with caching, special token removal and capitalization."""
     if not output_ids:
         logger.warning("No valid tokens generated")
         return ""
+
+    # Try to use decode cache for performance
+    try:
+        dec_cache = get_decode_cache()
+    except Exception:
+        dec_cache = None
+
+    cache_key = None
+    if dec_cache is not None:
+        try:
+            tokenizer_id = getattr(tokenizer, "name_or_path", None) or getattr(
+                tokenizer, "model_max_length", None
+            )
+            parts = {
+                "tokenizer": str(tokenizer_id) or "",
+                "skip_special": True,
+                "ids": list(map(int, output_ids)),
+                "special_tokens": sorted(special_tokens) if special_tokens else [],
+            }
+            m = hashlib.sha256()
+            m.update(json.dumps(parts, sort_keys=True, separators=(",", ":")).encode())
+            cache_key = m.hexdigest()
+            cached = dec_cache.get(cache_key)
+            if cached is not None:
+                return cached
+        except Exception:
+            cache_key = None
 
     try:
         decoded = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
         decoded = remove_special_tokens(decoded, special_tokens)
         decoded = capitalize_sentences(decoded)
+
+        # Store in cache for future use
+        try:
+            if cache_key and dec_cache is not None:
+                dec_cache.put(cache_key, decoded)
+        except Exception:
+            pass
+
         return decoded
     except Exception as e:
         logger.error(f"Error decoding output: {e}")
@@ -530,41 +922,3 @@ def _sample_from_probs(probs: np.ndarray) -> int:
         return int(np.random.choice(len(probs), p=probs))
     except Exception:
         return int(np.argmax(probs))
-
-
-def _build_generation_cache_key(
-    decoder_session: ort.InferenceSession,
-    encoder_outputs: Any,
-    inputs: Dict,
-    token_config: Dict[str, int],
-    model_config: OnnxConfig,
-    request: PromptRequest,
-    tokenizer: Optional[Any] = None,
-) -> Optional[str]:
-    """Build deterministic cache key for generation outputs."""
-    try:
-        model_id = getattr(request, "model", "") or ""
-        model_version = getattr(model_config, "model_folder_name", "") or ""
-        tokenizer_id = getattr(tokenizer, "name_or_path", None) if tokenizer else None
-
-        parts = {
-            "model": model_id,
-            "model_version": model_version,
-            "tokenizer": tokenizer_id or "",
-            "max_length": int(token_config.get("max_length", 0)),
-            "decoder_start_token_id": int(token_config.get("decoder_start_token_id", 0)),
-            "eos_token_id": int(token_config.get("eos_token_id", 0)),
-            "tenant": getattr(request, "tenant_code", None) or "",
-        }
-
-        m = hashlib.sha256()
-        m.update(json.dumps(parts, sort_keys=True, separators=(",", ":")).encode())
-
-        if isinstance(inputs, dict) and "input_ids" in inputs:
-            ids = np.ascontiguousarray(inputs["input_ids"]).astype(np.int64)
-            m.update(b"||input_ids||")
-            m.update(str(ids.shape).encode())
-
-        return m.hexdigest()
-    except Exception:
-        return None

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from app.services.cache_registry import clear_generation_cache, get_generation_cache
-from app.services.prompt_service import PromptProcessor
+from app.services.prompt import generator
 
 
 def test_generate_tokens_returns_cached_result_and_does_not_mutate_cache():
@@ -47,12 +47,10 @@ def test_generate_tokens_returns_cached_result_and_does_not_mutate_cache():
         mask="encoder_attention_mask",
     )
 
-    request = SimpleNamespace(
-        model="test-model", temperature=0.0, seed=None, tenant_code=None
-    )
+    request = SimpleNamespace(model="test-model", temperature=0.0, seed=None, tenant_code=None)
 
     # Build the cache key using the same helper the service uses
-    cache_key = PromptProcessor._build_generation_cache_key(
+    cache_key = generator._build_generation_cache_key(
         decoder_session=None,
         encoder_outputs=encoder_outputs,
         inputs=inputs,
@@ -74,7 +72,7 @@ def test_generate_tokens_returns_cached_result_and_does_not_mutate_cache():
 
     # Call the generation routine; because the cache contains the key, it
     # should return the cached list rather than running the decoder.
-    result = PromptProcessor._generate_tokens(
+    result = generator._generate_tokens(
         decoder_session,
         encoder_outputs,
         inputs,

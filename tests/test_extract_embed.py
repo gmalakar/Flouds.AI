@@ -229,12 +229,15 @@ async def test_extract_and_embed_success():
     file_content = base64.b64encode(b"dummy pdf content").decode()
     request = ExtractEmbedRequest(file_content=file_content, extention="pdf", model="test-model")
 
-    with patch(
-        "app.routers.extract_embed.ExtractorService.extract_text",
-        return_value=mock_extraction_response,
-    ), patch(
-        "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
-        return_value=mock_embedding_response,
+    with (
+        patch(
+            "app.routers.extract_embed.ExtractorService.extract_text",
+            return_value=mock_extraction_response,
+        ),
+        patch(
+            "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
+            return_value=mock_embedding_response,
+        ),
     ):
         response = await extract_and_embed(request)
 
@@ -296,13 +299,16 @@ async def test_extract_and_embed_with_all_parameters():
         normalize=True,
     )
 
-    with patch(
-        "app.routers.extract_embed.ExtractorService.extract_text",
-        return_value=mock_extraction_response,
-    ), patch(
-        "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
-        return_value=mock_embedding_response,
-    ) as mock_embed:
+    with (
+        patch(
+            "app.routers.extract_embed.ExtractorService.extract_text",
+            return_value=mock_extraction_response,
+        ),
+        patch(
+            "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
+            return_value=mock_embedding_response,
+        ) as mock_embed,
+    ):
         response = await extract_and_embed(request)
 
         assert response.success is True
@@ -340,12 +346,15 @@ async def test_extract_file_and_embed_success():
     mock_file.read = AsyncMock(return_value=file_content)
     mock_file.filename = "test.pdf"
 
-    with patch(
-        "app.routers.extract_embed.ExtractorService.extract_text",
-        return_value=mock_extraction_response,
-    ), patch(
-        "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
-        return_value=mock_embedding_response,
+    with (
+        patch(
+            "app.routers.extract_embed.ExtractorService.extract_text",
+            return_value=mock_extraction_response,
+        ),
+        patch(
+            "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
+            return_value=mock_embedding_response,
+        ),
     ):
         response = await extract_file_and_embed(file=mock_file, extension="pdf", model="test-model")
 
@@ -379,12 +388,15 @@ async def test_extract_file_and_embed_auto_detect_extension():
     mock_file.read = AsyncMock(return_value=file_content)
     mock_file.filename = "document.docx"
 
-    with patch(
-        "app.routers.extract_embed.ExtractorService.extract_text",
-        return_value=mock_extraction_response,
-    ) as mock_extract, patch(
-        "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
-        return_value=mock_embedding_response,
+    with (
+        patch(
+            "app.routers.extract_embed.ExtractorService.extract_text",
+            return_value=mock_extraction_response,
+        ) as mock_extract,
+        patch(
+            "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
+            return_value=mock_embedding_response,
+        ),
     ):
         response = await extract_file_and_embed(file=mock_file, model="test-model")
 
@@ -418,12 +430,15 @@ async def test_extract_file_and_embed_no_filename_extension():
     mock_file.read = AsyncMock(return_value=file_content)
     mock_file.filename = "document"
 
-    with patch(
-        "app.routers.extract_embed.ExtractorService.extract_text",
-        return_value=mock_extraction_response,
-    ) as mock_extract, patch(
-        "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
-        return_value=mock_embedding_response,
+    with (
+        patch(
+            "app.routers.extract_embed.ExtractorService.extract_text",
+            return_value=mock_extraction_response,
+        ) as mock_extract,
+        patch(
+            "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
+            return_value=mock_embedding_response,
+        ),
     ):
         response = await extract_file_and_embed(file=mock_file, model="test-model")
 
@@ -457,13 +472,16 @@ async def test_extract_file_and_embed_with_form_parameters():
     mock_file.read = AsyncMock(return_value=file_content)
     mock_file.filename = "test.pdf"
 
-    with patch(
-        "app.routers.extract_embed.ExtractorService.extract_text",
-        return_value=mock_extraction_response,
-    ), patch(
-        "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
-        return_value=mock_embedding_response,
-    ) as mock_embed:
+    with (
+        patch(
+            "app.routers.extract_embed.ExtractorService.extract_text",
+            return_value=mock_extraction_response,
+        ),
+        patch(
+            "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
+            return_value=mock_embedding_response,
+        ) as mock_embed,
+    ):
         response = await extract_file_and_embed(
             file=mock_file,
             extension="pdf",
@@ -540,13 +558,16 @@ async def test_extract_and_embed_multiple_pages():
     file_content = base64.b64encode(b"dummy pdf content").decode()
     request = ExtractEmbedRequest(file_content=file_content, extention="pdf", model="test-model")
 
-    with patch(
-        "app.routers.extract_embed.ExtractorService.extract_text",
-        return_value=mock_extraction_response,
-    ), patch(
-        "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
-        return_value=mock_embedding_response,
-    ) as mock_embed:
+    with (
+        patch(
+            "app.routers.extract_embed.ExtractorService.extract_text",
+            return_value=mock_extraction_response,
+        ),
+        patch(
+            "app.routers.extract_embed.SentenceTransformer.embed_batch_async",
+            return_value=mock_embedding_response,
+        ) as mock_embed,
+    ):
         response = await extract_and_embed(request)
 
         assert response.success is True

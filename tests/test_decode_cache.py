@@ -9,7 +9,7 @@ from types import SimpleNamespace  # noqa: F401
 import numpy as np  # noqa: F401
 
 from app.services.cache_registry import clear_decode_cache, get_decode_cache
-from app.services.prompt_service import PromptProcessor
+from app.services.prompt import generator
 
 
 class DummyTokenizer:
@@ -33,12 +33,12 @@ def test_decode_cache_prevents_repeated_decode_calls():
     output_ids = [1, 2, 3]
 
     # First call should invoke tokenizer.decode
-    out1 = PromptProcessor._decode_output(output_ids, tokenizer, special_tokens, "input")
+    out1 = generator._decode_output(output_ids, tokenizer, special_tokens, "input")
     assert out1 == "1-2-3"
     assert tokenizer.calls == 1
 
     # Second call with same args should be served from cache (no extra decode)
-    out2 = PromptProcessor._decode_output(output_ids, tokenizer, special_tokens, "input")
+    out2 = generator._decode_output(output_ids, tokenizer, special_tokens, "input")
     assert out2 == "1-2-3"
     assert tokenizer.calls == 1
 
@@ -51,10 +51,10 @@ def test_decode_cache_separates_different_special_tokens():
     special_tokens_b = {"<t>"}
     output_ids = [4, 5]
 
-    out_a = PromptProcessor._decode_output(output_ids, tokenizer, special_tokens_a, "input")
+    out_a = generator._decode_output(output_ids, tokenizer, special_tokens_a, "input")
     assert out_a == "4-5"
     # Different special tokens should produce a separate cache entry
-    out_b = PromptProcessor._decode_output(output_ids, tokenizer, special_tokens_b, "input")
+    out_b = generator._decode_output(output_ids, tokenizer, special_tokens_b, "input")
     assert out_b == "4-5"
     # Two decode calls expected because cache keys differ
     assert tokenizer.calls == 2

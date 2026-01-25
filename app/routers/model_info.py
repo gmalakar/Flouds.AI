@@ -234,7 +234,7 @@ class ModelInfoService:
             # Load session (use cast to Any for protected helpers)
             from typing import cast
 
-            from app.services.embedder_service import SentenceTransformer
+            from app.services.embedder import SentenceTransformer
 
             session = cast(Any, SentenceTransformer)._get_encoder_session(encoder_path)
 
@@ -261,7 +261,7 @@ class ModelInfoService:
                     auto_detected["inputnames"] = input_names
 
                 # Detect vocab_size (for language models)
-                from app.services.prompt_service import PromptProcessor
+                from app.services.prompt.processor import PromptProcessor
 
                 vocab_size = cast(Any, PromptProcessor)._get_vocab_size_from_session(session)
                 if vocab_size:

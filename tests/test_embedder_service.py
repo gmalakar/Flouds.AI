@@ -11,7 +11,7 @@ import pytest
 
 from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
 from app.models.embedding_response import EmbededChunk
-from app.services.embedder_service import SentenceTransformer
+from app.services.embedder import SentenceTransformer
 
 
 class DummyTokenizer:
@@ -117,11 +117,11 @@ def test_split_text_into_chunks():
 
 @patch("app.services.base_nlp_service.BaseNLPService._get_model_config")
 @patch(
-    "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
+    "app.services.embedder.embedder.SentenceTransformer._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
 )
 @patch(
-    "app.services.embedder_service.SentenceTransformer._get_encoder_session",
+    "app.services.embedder.embedder.SentenceTransformer._get_encoder_session",
     return_value=DummySession(),
 )
 def test_embed_text_success(mock_session, mock_tokenizer, mock_config, dummy_model_config):
@@ -188,11 +188,11 @@ def test_embed_text_handles_exception(monkeypatch, dummy_model_config):
 
 @patch("app.services.base_nlp_service.BaseNLPService._get_model_config")
 @patch(
-    "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
+    "app.services.embedder.embedder.SentenceTransformer._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
 )
 @patch(
-    "app.services.embedder_service.SentenceTransformer._get_encoder_session",
+    "app.services.embedder.embedder.SentenceTransformer._get_encoder_session",
     return_value=DummySession(),
 )
 def test_embed_batch_async(mock_session, mock_tokenizer, mock_config, dummy_model_config):
@@ -313,11 +313,11 @@ def test_normalization_after_projection():
 
 @patch("app.services.base_nlp_service.BaseNLPService._get_model_config")
 @patch(
-    "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
+    "app.services.embedder.embedder.SentenceTransformer._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
 )
 @patch(
-    "app.services.embedder_service.SentenceTransformer._get_encoder_session",
+    "app.services.embedder.embedder.SentenceTransformer._get_encoder_session",
     return_value=DummySession(),
 )
 def test_dimension_used_in_response(mock_session, mock_tokenizer, mock_config, dummy_model_config):
@@ -340,11 +340,11 @@ def test_dimension_used_in_response(mock_session, mock_tokenizer, mock_config, d
 
 @patch("app.services.base_nlp_service.BaseNLPService._get_model_config")
 @patch(
-    "app.services.embedder_service.SentenceTransformer._get_tokenizer_threadsafe",
+    "app.services.embedder.embedder.SentenceTransformer._get_tokenizer_threadsafe",
     return_value=DummyTokenizer(),
 )
 @patch(
-    "app.services.embedder_service.SentenceTransformer._get_encoder_session",
+    "app.services.embedder.embedder.SentenceTransformer._get_encoder_session",
     return_value=DummySession(),
 )
 def test_warnings_in_base_response(mock_session, mock_tokenizer, mock_config, dummy_model_config):

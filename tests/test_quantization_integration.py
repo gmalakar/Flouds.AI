@@ -14,7 +14,7 @@ import pytest
 
 from app.config.onnx_config import OnnxConfig
 from app.models.embedding_request import EmbeddingBatchRequest, EmbeddingRequest
-from app.services.embedder_service import SentenceTransformer
+from app.services.embedder import SentenceTransformer
 
 
 class TestQuantizationIntegration:
@@ -35,9 +35,7 @@ class TestQuantizationIntegration:
     @pytest.fixture
     def mock_model_config_no_quantize(self):
         """Create mock model config with quantization disabled."""
-        config = OnnxConfig(
-            dimension=128, max_length=256, normalize=True, quantize=False
-        )
+        config = OnnxConfig(dimension=128, max_length=256, normalize=True, quantize=False)
         return config
 
     def test_quantization_applied_with_model_default(self, mock_model_config):
@@ -54,9 +52,7 @@ class TestQuantizationIntegration:
         assert np.all(result >= -127)
         assert np.all(result <= 127)
 
-    def test_quantization_skipped_with_model_default(
-        self, mock_model_config_no_quantize
-    ):
+    def test_quantization_skipped_with_model_default(self, mock_model_config_no_quantize):
         """Test quantization is skipped when model config has it disabled."""
         embedding = np.array([0.5, -0.3, 0.8, 0.0], dtype=np.float32)
 
@@ -176,9 +172,7 @@ class TestQuantizationIntegration:
             quantize_type="uint8",
         )
 
-        result = SentenceTransformer._process_embedding_output(
-            embedding, config, None, None
-        )
+        result = SentenceTransformer._process_embedding_output(embedding, config, None, None)
 
         assert result.dtype == np.uint8
         assert result.min() == 0
@@ -195,9 +189,7 @@ class TestQuantizationIntegration:
             quantize_type="binary",
         )
 
-        result = SentenceTransformer._process_embedding_output(
-            embedding, config, None, None
-        )
+        result = SentenceTransformer._process_embedding_output(embedding, config, None, None)
 
         assert result.dtype == np.int8
         assert np.all(np.isin(result, [-1, 1]))
@@ -228,9 +220,7 @@ class TestQuantizationIntegration:
 
     def test_quantization_with_all_pipeline_features(self):
         """Test quantization works with normalization and projection."""
-        embedding = np.array(
-            [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32
-        )
+        embedding = np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)
         config = OnnxConfig(
             dimension=128,
             max_length=256,
@@ -303,15 +293,15 @@ class TestQuantizationIntegration:
 
         config = OnnxConfig(normalize=True, quantize=True, quantize_type="int8")
 
-        q1 = SentenceTransformer._process_embedding_output(
-            emb1, config, None, None
-        ).astype(np.float32)
-        q2 = SentenceTransformer._process_embedding_output(
-            emb2, config, None, None
-        ).astype(np.float32)
-        q3 = SentenceTransformer._process_embedding_output(
-            emb3, config, None, None
-        ).astype(np.float32)
+        q1 = SentenceTransformer._process_embedding_output(emb1, config, None, None).astype(
+            np.float32
+        )
+        q2 = SentenceTransformer._process_embedding_output(emb2, config, None, None).astype(
+            np.float32
+        )
+        q3 = SentenceTransformer._process_embedding_output(emb3, config, None, None).astype(
+            np.float32
+        )
 
         # Compute cosine similarities
         sim_1_2 = np.dot(q1, q2) / (np.linalg.norm(q1) * np.linalg.norm(q2))

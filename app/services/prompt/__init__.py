@@ -19,6 +19,5 @@ into focused, maintainable components:
 """
 
 from app.services.prompt.models import SummaryResults
-from app.services.prompt.processor import PromptProcessor
 
-__all__ = ["PromptProcessor", "SummaryResults"]
+__all__ = ["SummaryResults"]

@@ -26,6 +26,7 @@ MEMORY_LOW_THRESHOLD_MB = 150  # Clear cache if available memory below this
 
 # Cache size limits (from environment or defaults)
 CACHE_LIMIT_DECODER = int(os.getenv("FLOUDS_DECODER_CACHE_MAX", "3"))
+CACHE_LIMIT_ENCODER = int(os.getenv("FLOUDS_ENCODER_CACHE_MAX", "3"))
 CACHE_LIMIT_MODELS = int(os.getenv("FLOUDS_MODEL_CACHE_MAX", "2"))
 CACHE_LIMIT_SPECIAL = int(os.getenv("FLOUDS_SPECIAL_TOKENS_CACHE_MAX", "8"))
 
@@ -54,6 +55,9 @@ class CachedSessions:
     decoder_sessions: ConcurrentDict = ConcurrentDict(
         "_decoder_sessions", max_size=CACHE_LIMIT_DECODER
     )
+    encoder_sessions: ConcurrentDict = ConcurrentDict(
+        "_encoder_sessions", max_size=CACHE_LIMIT_ENCODER
+    )
     models: ConcurrentDict = ConcurrentDict("_models", max_size=CACHE_LIMIT_MODELS)
     special_tokens: ConcurrentDict = ConcurrentDict("_special_tokens", max_size=CACHE_LIMIT_SPECIAL)
 
@@ -61,5 +65,6 @@ class CachedSessions:
     def clear_all(cls) -> None:
         """Clear all cached sessions and models."""
         cls.decoder_sessions.clear()
+        cls.encoder_sessions.clear()
         cls.models.clear()
         cls.special_tokens.clear()

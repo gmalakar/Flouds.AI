@@ -11,7 +11,8 @@ from app.exceptions import FloudsBaseException
 from app.logger import get_logger
 from app.models.prompt_request import PromptBatchRequest, PromptRequest
 from app.models.prompt_response import PromptResponse
-from app.services.prompt_service import DEFAULT_MODEL, PromptProcessor
+from app.services.prompt.models import DEFAULT_MODEL
+from app.services.prompt.processor import PromptProcessor
 
 # ErrorHandler not used in this router
 from app.utils.log_sanitizer import sanitize_for_log

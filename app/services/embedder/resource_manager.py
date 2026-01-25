@@ -222,12 +222,9 @@ def get_embedding_model_path(
         raise ModelLoadError("Service root path is not configured")
 
     model_filename = get_model_filename(model_config, is_embedding=True)
-    # Import here to allow test mocking via app.services.embedder_service
-    from app.services import embedder_service
+    from app.utils.path_validator import validate_safe_path
 
-    return embedder_service.validate_safe_path(
-        os.path.join(model_to_use_path, model_filename), root
-    )
+    return validate_safe_path(os.path.join(model_to_use_path, model_filename), root)
 
 
 def get_model_filename(

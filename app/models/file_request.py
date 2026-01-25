@@ -6,7 +6,7 @@
 
 from typing import Any, Union, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FileRequest(BaseModel):
@@ -25,10 +25,11 @@ class FileRequest(BaseModel):
         description="The file extension. This field is required and cannot be empty.",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "file_content": "SGVsbG8gd29ybGQ=",  # base64 for "Hello world"
                 "extention": "txt",
             }
         }
+    )

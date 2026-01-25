@@ -17,7 +17,7 @@ from app.models.embedding_response import EmbeddingBatchResponse
 from app.models.extract_embed_request import ExtractEmbedRequest
 from app.models.extracted_file_content import ExtractedFileContent
 from app.models.file_request import FileRequest
-from app.services.embedder_service import SentenceTransformer
+from app.services.embedder import SentenceTransformer
 from app.services.extractor_service import ExtractorService
 from app.utils.error_handler import ErrorHandler
 from app.utils.log_sanitizer import sanitize_for_log

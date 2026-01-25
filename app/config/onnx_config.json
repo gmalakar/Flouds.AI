@@ -133,6 +133,38 @@
         "encoder_onnx_model": "model.onnx"
     },
 
+    "deepseek-coder-1.3b-instruct": {
+        "max_length": 2048,
+        "max_new_tokens": 512,
+        "model_folder_name": "llm/deepseek-coder-1.3b-instruct",
+        "tasks": ["llm", "prompt"],
+        "chunk_logic": "sentence",
+        "chunk_overlap": 1,
+        "decoder_onnx_model": "model.onnx",
+        "merged_with_past": true,
+        "decoder_only": true,
+        "decoder_inputnames": {
+            "input": "input_ids",
+            "mask": "attention_mask",
+            "position_ids": "position_ids"
+        }
+    },
+
+    "Qwen2.5-Coder-1.5B": {
+        "max_length": 2048,
+        "max_new_tokens": 512,
+        "model_folder_name": "llm/Qwen2.5-Coder-1.5B",
+        "tasks": ["llm", "prompt"],
+        "decoder_onnx_model": "model.onnx",
+        "merged_with_past": true,
+        "decoder_only": true,
+        "decoder_inputnames": {
+            "input": "input_ids",
+            "mask": "attention_mask",
+            "position_ids": "position_ids"
+        }
+    },
+
     "t5-small": {
         "max_length": 512,
         "pad_token_id": 0,

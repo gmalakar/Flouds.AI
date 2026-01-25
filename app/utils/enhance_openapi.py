@@ -11,6 +11,8 @@ This module provides `enhance_openapi_schema(app)` which builds an
 enhanced OpenAPI schema and `setup_enhanced_openapi(app)` which attaches
 it to the FastAPI application.
 """
+from typing import Any, cast
+
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
@@ -46,7 +48,7 @@ def enhance_openapi_schema(app: FastAPI) -> dict:
         "license",
         {
             "name": "Proprietary",
-            "url": "https://github.com/flouds/Flouds.Py/blob/main/LICENSE",
+            "url": ("https://github.com/flouds/Flouds.Py/blob/" "main/LICENSE"),
         },
     )
 
@@ -54,7 +56,10 @@ def enhance_openapi_schema(app: FastAPI) -> dict:
     openapi_schema.setdefault(
         "servers",
         [
-            {"url": "http://localhost:19690", "description": "Development server"},
+            {
+                "url": "http://localhost:19690",
+                "description": "Development server",
+            },
         ],
     )
 
@@ -63,8 +68,14 @@ def enhance_openapi_schema(app: FastAPI) -> dict:
         "tags",
         [
             {"name": "Health", "description": "Health check endpoints"},
-            {"name": "Administration", "description": "Admin and configuration"},
-            {"name": "Model Information", "description": "Model info and metadata"},
+            {
+                "name": "Administration",
+                "description": "Admin and configuration",
+            },
+            {
+                "name": "Model Information",
+                "description": "Model info and metadata",
+            },
         ],
     )
 
@@ -112,8 +123,11 @@ def setup_enhanced_openapi(app: FastAPI) -> None:
     def _custom():
         return enhance_openapi_schema(app)
 
-    # Attach custom openapi generator
-    app.openapi = _custom
+    # Attach custom openapi generator.
+    # Cast to Any so static checkers allow assignment to the
+    # `openapi` attribute while avoiding use of `setattr` which
+    # triggers B010.
+    cast(Any, app).openapi = _custom
 
 
 if __name__ == "__main__":
