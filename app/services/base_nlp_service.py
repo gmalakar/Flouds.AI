@@ -82,9 +82,6 @@ class BaseNLPService:
     # Shared caches for other services (decoder sessions, optimum models,
     # and special tokens). Centralized here so `CacheManager` can operate
     # across all services consistently.
-    # Shared caches are provided by `cache_registry` module and referenced
-    # here via the imported module-level instances. Keep thin wrappers in
-    # this class for backward compatibility when tests patch these methods.
     pass
 
     @staticmethod

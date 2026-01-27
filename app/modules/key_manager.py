@@ -555,9 +555,12 @@ key_manager = KeyManager()
 
 # Initialize with default admin if no admin exists
 def _ensure_admin_exists():
-    # Ensure a superadmin exists. If none exists, create a bootstrap superadmin
-    # account. This account has global admin privileges across tenants.
-    if any(getattr(c, "client_type", "") == "superadmin" for c in key_manager.clients.values()):
+    # Ensure a tenant admin exists for the master tenant. This admin has
+    # privileges only within the master tenant scope.
+    if any(
+        getattr(c, "client_type", "") == "admin" and getattr(c, "tenant_code", "") == "master"
+        for c in key_manager.clients.values()
+    ):
         return
 
     from datetime import datetime
@@ -571,34 +574,21 @@ def _ensure_admin_exists():
         if ":" not in admin_secret and "|" not in admin_secret:
             break
 
-    if key_manager.add_client(admin_id, admin_secret, "admin"):
-        # Save credentials to console file next to DB
-        try:
-            key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
-            console_file_path = os.path.join(key_dir, "admin_console.txt")
-            with safe_open(console_file_path, key_dir, "w", encoding="utf-8") as console_file:
-                console_file.writelines(
-                    [
-                        "=== ADMIN CREDENTIALS CREATED ===\n",
-                        f"Admin Client ID: {admin_id}\n",
-                        f"Admin Secret: {admin_secret}\n",
-                        f"Admin Token: {admin_id}|{admin_secret}\n",
-                        "=== SAVE THESE CREDENTIALS ===\n",
-                    ]
-                )
-            logger.warning("Admin credentials saved to %s", sanitize_for_log(console_file_path))
-        except Exception as e:
-            logger.error(
-                "Failed to save admin console to %s: %s",
-                sanitize_for_log(key_manager.db_path),
-                str(e),
-            )
+    if key_manager.add_client(admin_id, admin_secret, "admin", "master"):
+        # Log credentials to console in development
+        logger.warning("=== ADMIN CREDENTIALS CREATED ===")
+        logger.warning(f"Admin Client ID: {admin_id}")
+        logger.warning(f"Admin Secret: {admin_secret}")
+        logger.warning(f"Admin Token: {admin_id}|{admin_secret}")
+        logger.warning("=== SAVE THESE CREDENTIALS ===")
 
-        # Also write a detailed credentials file
+        # Write detailed credentials file
         try:
             key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
+            logger.info("Admin credentials - key_dir: %s", sanitize_for_log(key_dir))
             creds_file = "admin_credentials.txt"
-            with safe_open(creds_file, key_dir, "w", encoding="utf-8") as f:
+            creds_path = os.path.join(key_dir, creds_file)
+            with safe_open(creds_path, key_dir, "w", encoding="utf-8") as f:
                 f.write("Flouds AI Admin Credentials\n")
                 f.write(f"Generated: {datetime.now().isoformat()}\n")
                 f.write("\n")
@@ -609,9 +599,8 @@ def _ensure_admin_exists():
                 f.write(f"Authorization: Bearer {admin_id}|{admin_secret}\n")
                 f.write("\n")
                 f.write("Example:\n")
-                f.write(f'curl -H "Authorization: Bearer {admin_id}|{admin_secret}" \\\n+')
+                f.write(f'curl -H "Authorization: Bearer {admin_id}|{admin_secret}" \\\n')
                 f.write("  http://localhost:19690/api/v1/admin/clients\n")
-            creds_path = os.path.join(key_dir, creds_file)
             logger.warning("Admin credentials saved to: %s", sanitize_for_log(creds_path))
         except Exception as e:
             logger.error("Failed to save admin credentials to file: %s", str(e))
@@ -628,6 +617,7 @@ def _ensure_superadmin_exists():
     )
 
     if not super_exists:
+        from datetime import datetime
         from secrets import token_urlsafe
 
         from app.utils.path_validator import safe_open
@@ -639,23 +629,28 @@ def _ensure_superadmin_exists():
                 break
 
         if key_manager.add_client(super_id, super_secret, "superadmin", "master"):
-            # Save credentials to console file
+            # Save credentials to file with detailed format
             try:
                 key_dir = os.path.dirname(os.path.abspath(key_manager.db_path))
-                console_path = os.path.join(key_dir, "superadmin_console.txt")
-                with safe_open(console_path, key_dir, "w", encoding="utf-8") as console_file:
-                    console_file.writelines(
-                        [
-                            "=== SUPERADMIN CREDENTIALS CREATED ===\n",
-                            f"Superadmin Client ID: {super_id}\n",
-                            f"Superadmin Secret: {super_secret}\n",
-                            f"Superadmin Token: {super_id}|{super_secret}\n",
-                            "=== SAVE THESE CREDENTIALS ===\n",
-                        ]
-                    )
-                logger.warning("Superadmin credentials saved to %s", sanitize_for_log(console_path))
+                logger.info("Superadmin credentials - key_dir: %s", sanitize_for_log(key_dir))
+                creds_file = "superadmin_credentials.txt"
+                creds_path = os.path.join(key_dir, creds_file)
+                with safe_open(creds_path, key_dir, "w", encoding="utf-8") as f:
+                    f.write("Flouds AI Superadmin Credentials\n")
+                    f.write(f"Generated: {datetime.now().isoformat()}\n")
+                    f.write("\n")
+                    f.write(f"Client ID: {super_id}\n")
+                    f.write(f"Client Secret: {super_secret}\n")
+                    f.write("\n")
+                    f.write("Usage:\n")
+                    f.write(f"Authorization: Bearer {super_id}|{super_secret}\n")
+                    f.write("\n")
+                    f.write("Example:\n")
+                    f.write(f'curl -H "Authorization: Bearer {super_id}|{super_secret}" \\\n')
+                    f.write("  http://localhost:19690/api/v1/admin/clients\n")
+                logger.warning("Superadmin credentials saved to %s", sanitize_for_log(creds_path))
             except Exception as e:
-                logger.error("Failed to save superadmin console output: %s", str(e))
+                logger.error("Failed to save superadmin credentials to file: %s", str(e))
         else:
             logger.error("Failed to create superadmin user")
 

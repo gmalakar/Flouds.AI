@@ -7,13 +7,14 @@
 # This script builds and optionally pushes a Docker image for Flouds AI.
 #
 # Usage:
-#   ./build-flouds-ai.ps1 [-Tag <tag>] [-GPU] [-PushImage] [-Force]
+#   ./build-flouds-ai.ps1 [-Tag <tag>] [-GPU] [-PushImage] [-Force] [-NoCache]
 #
 # Parameters:
 #   -Tag           : Tag for the Docker image (default: "latest")
 #   -GPU           : Build with GPU support (uses gmalakar/flouds-ai-gpu instead of gmalakar/flouds-ai-cpu)
 #   -PushImage     : Push the image to a Docker registry after building
 #   -Force         : Force rebuild even if the image already exists
+#   -NoCache       : Build without using Docker cache (pulls fresh layers)
 # =============================================================================
 
 param (
@@ -21,6 +22,7 @@ param (
     [switch]$GPU = $false,
     [switch]$PushImage = $false,
     [switch]$Force = $false,
+    [switch]$NoCache = $false,
     [string]$TorchVersion = $null
 )
 
@@ -137,7 +139,7 @@ $buildArgs = @()
 $buildArgs += "buildx"
 $buildArgs += "build"
 
-if ($Force) {
+if ($Force -or $NoCache) {
     $buildArgs += "--no-cache"
 }
 

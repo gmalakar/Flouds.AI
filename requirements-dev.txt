@@ -1,6 +1,10 @@
 # Development dependencies
 # Install with: pip install -r requirements-dev.txt
 
+# Build system dependencies
+setuptools>=45
+wheel
+
 # Include production requirements
 -r app/requirements.txt
 

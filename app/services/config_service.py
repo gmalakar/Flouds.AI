@@ -435,8 +435,11 @@ def _read_kv_with_tenant(key: str, tenant_code: str) -> Optional[str]:
                 )
                 return None
         return val
+    except sqlite3.OperationalError as e:
+        logger.debug(f"Config DB not available for key {key} tenant {tenant_code}: {e}")
+        return None
     except Exception as e:
-        logger.exception(f"Failed to read key {key} tenant {tenant_code} from config DB: {e}")
+        logger.error(f"Failed to read key {key} tenant {tenant_code} from config DB: {e}")
         return None
     finally:
         try:
@@ -458,8 +461,10 @@ def _write_kv_with_tenant(key: str, value: str, tenant_code: str) -> None:
                 "INSERT INTO config_kv(key, tenant_code, value, encrypted_flag) VALUES(?, ?, ?, 0) ON CONFLICT(key, tenant_code) DO UPDATE SET value=excluded.value, encrypted_flag=excluded.encrypted_flag",
                 (key, tenant_code, value),
             )
+    except sqlite3.OperationalError as e:
+        logger.debug(f"Config DB not available for key {key} tenant {tenant_code}: {e}")
     except Exception as e:
-        logger.exception(f"Failed to write key {key} tenant {tenant_code} into config DB: {e}")
+        logger.error(f"Failed to write key {key} tenant {tenant_code} into config DB: {e}")
     finally:
         try:
             if conn is not None:

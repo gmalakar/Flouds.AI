@@ -33,14 +33,6 @@ class SingleEmbeddingResult(BaseModel):
     message: str
     success: bool = Field(default=True)
 
-    @property
-    def embedding_results(self) -> List[float]:
-        """Backward compatibility property."""
-        return self.vector
-
-    # Legacy property for existing tests
-    EmbeddingResults = embedding_results
-
 
 class ChunkEmbeddingResult(BaseModel):
     """Result model for chunked text embedding."""
@@ -50,11 +42,3 @@ class ChunkEmbeddingResult(BaseModel):
     success: bool = Field(default=True)
     used_parameters: dict = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
-
-    @property
-    def embedding_results(self) -> List[EmbededChunk]:
-        """Backward compatibility property."""
-        return self.embedding_chunks
-
-    # Legacy property for existing tests
-    EmbeddingResults = embedding_results
