@@ -33,6 +33,11 @@ class SingleEmbeddingResult(BaseModel):
     message: str
     success: bool = Field(default=True)
 
+    @property
+    def EmbeddingResults(self) -> List[float]:
+        """Return the flat embedding vector exposed as `EmbeddingResults`."""
+        return self.vector
+
 
 class ChunkEmbeddingResult(BaseModel):
     """Result model for chunked text embedding."""

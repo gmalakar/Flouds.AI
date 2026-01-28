@@ -25,12 +25,12 @@ Format: `NAME` — Default — Required? — Where used — Short description
 - `FLOUDS_TRUSTED_HOSTS` — none — Optional — `app/app_startup.py` — Comma-separated list of trusted hosts.
 - `FLOUDS_CONFIG_OVERRIDE` — `0` — Optional — `app/app_startup.py` — If `1`, allow config overrides at startup.
 - `HEALTHCHECK_URL` — none — Optional — `app/healthcheck.py` — Explicit healthcheck URL override.
-- `HEALTHCHECK_HOST` — falls back to `SERVER_HOST` or `localhost` — Optional — `app/healthcheck.py` — Healthcheck host.
-- `HEALTHCHECK_PORT` — falls back to `SERVER_PORT` or `19690` — Optional — `app/healthcheck.py` — Healthcheck port.
+- `HEALTHCHECK_HOST` — falls back to `localhost` — Optional — `app/healthcheck.py` — Healthcheck host.
+- `HEALTHCHECK_PORT` — falls back to `19690` — Optional — `app/healthcheck.py` — Healthcheck port.
 - `HEALTHCHECK_PATH` — `/api/v1/health` — Optional — `app/healthcheck.py` — Health endpoint path.
 - `HEALTHCHECK_TIMEOUT` — `8` — Optional — `app/healthcheck.py` — Healthcheck timeout in seconds.
-- `SERVER_HOST` — none — Optional — fallback used by healthcheck & config
-- `SERVER_PORT` — none — Optional — fallback used by healthcheck & config
+Note: Configuration uses the `FLOUDS_*` environment variable namespace (for example
+`FLOUDS_HOST`, `FLOUDS_PORT`) and no longer relies on `SERVER_*` variables.
 
 Notes and recommendations
 

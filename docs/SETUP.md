@@ -190,7 +190,7 @@ FLOUDS_CACHE_SIZE=1000                 # Cache size in MB
 
 # Security settings
 FLOUDS_ENCRYPTION_KEY=<base64-key>     # Optional: encryption key for config
-FLOUDS_MAX_REQUEST_SIZE=10485760       # Max request size in bytes (10MB)
+FLOUDS_MAX_REQUEST_SIZE=26214400       # Max request size in bytes (25MB)
 
 # Rate limiting
 FLOUDS_RATE_LIMIT_ENABLED=true
@@ -221,7 +221,7 @@ FLOUDS_MEMORY_CHECK_INTERVAL=5         # Check interval in seconds
 | `FLOUDS_ONNX_ROOT` | ./onnx | Path to ONNX models directory |
 | `FLOUDS_PORT` | 19690 | HTTP server port |
 | `FLOUDS_WORKERS` | 1 | Number of worker processes |
-| `FLOUDS_MAX_REQUEST_SIZE` | 10485760 | Maximum request body size in bytes |
+| `FLOUDS_MAX_REQUEST_SIZE` | 26214400 | Maximum request body size in bytes |
 | `FLOUDS_RATE_LIMIT_ENABLED` | true | Enable/disable rate limiting |
 | `FLOUDS_LOG_LEVEL` | INFO | Logging level |
 

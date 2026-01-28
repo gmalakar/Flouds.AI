@@ -15,7 +15,7 @@ class AppConfig(BaseModel):
     debug: bool = Field(default=False)
     is_production: bool = Field(default=True)
     cors_origins: List[str] = Field(default=["*"])
-    max_request_size: int = Field(default=10485760)  # 10MB
+    max_request_size: int = Field(default=26214400)  # 25MB
     request_timeout: int = Field(default=300)  # 5 minutes
 
 
@@ -26,6 +26,18 @@ class ServerConfig(BaseModel):
     session_provider: str = Field(default="CPUExecutionProvider")
     keepalive_timeout: int = Field(default=5)
     graceful_timeout: int = Field(default=30)
+    openapi_url: Optional[str] = Field(
+        default=None,
+        description="Public OpenAPI/Swagger JSON URL. If set, used by docs UI generation.",
+    )
+    docs_asset_base: Optional[str] = Field(
+        default=None,
+        description="Base URL to load documentation assets from (CDN or private host).",
+    )
+    docs_use_proxy: bool = Field(
+        default=False,
+        description="If true, application will proxy docs assets under /_docs_assets/ to keep them same-origin.",
+    )
 
 
 class OnnxSettings(BaseModel):
@@ -78,6 +90,37 @@ class SecurityConfig(BaseModel):
     trusted_hosts: list[str] = Field(
         default_factory=lambda: ["*"],
         description="List of trusted hostnames for TrustedHostMiddleware. Use '*' to allow all.",
+    )
+
+    # Content Security Policy configuration
+    # Default to None so values are populated from appsettings.json via ConfigLoader
+    csp_script_src: Optional[List[str]] = Field(
+        default=None,
+        description="CSP script-src directive values (populated from appsettings.json)",
+    )
+    csp_style_src: Optional[List[str]] = Field(
+        default=None,
+        description="CSP style-src directive values (populated from appsettings.json)",
+    )
+    csp_img_src: Optional[List[str]] = Field(
+        default=None,
+        description="CSP img-src directive values (populated from appsettings.json)",
+    )
+    csp_connect_src: Optional[List[str]] = Field(
+        default=None,
+        description="CSP connect-src directive values (populated from appsettings.json)",
+    )
+    csp_font_src: Optional[List[str]] = Field(
+        default=None,
+        description="CSP font-src directive values (populated from appsettings.json)",
+    )
+    csp_worker_src: Optional[List[str]] = Field(
+        default=None,
+        description="CSP worker-src directive values (populated from appsettings.json)",
+    )
+    enable_hsts: bool = Field(
+        default=True,
+        description="Enable HTTP Strict Transport Security in production",
     )
 
 

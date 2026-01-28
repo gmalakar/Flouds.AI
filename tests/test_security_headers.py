@@ -12,17 +12,24 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.config.appsettings import SecurityConfig
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
 
-def create_app_with_security(is_production: bool) -> TestClient:
+def create_app_with_security(
+    is_production: bool, security_config: SecurityConfig = None
+) -> TestClient:
     app = FastAPI()
 
     @app.get("/ping")
     async def ping():
         return {"ok": True}
 
-    app.add_middleware(SecurityHeadersMiddleware, is_production=is_production)
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        is_production=is_production,
+        security_config=security_config,
+    )
     return TestClient(app)
 
 

@@ -5,6 +5,7 @@
 # =============================================================================
 
 """Custom exceptions for Flouds AI application."""
+
 from typing import Optional
 
 

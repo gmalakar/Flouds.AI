@@ -21,8 +21,8 @@ def build_healthcheck_url() -> str:
         return explicit
 
     # Compose from host/port/path envs to avoid hardcoding
-    host = os.getenv("HEALTHCHECK_HOST", os.getenv("SERVER_HOST", "localhost"))
-    port = os.getenv("HEALTHCHECK_PORT", os.getenv("SERVER_PORT", "19690"))
+    host = os.getenv("HEALTHCHECK_HOST", os.getenv("FLOUDS_HOST", "localhost"))
+    port = os.getenv("HEALTHCHECK_PORT", os.getenv("FLOUDS_PORT", "19690"))
     path = os.getenv("HEALTHCHECK_PATH", "/api/v1/health")
 
     # Normalize path

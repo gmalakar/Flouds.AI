@@ -15,7 +15,6 @@ Move routing and middleware registration out of `main.py` so startup
 concerns are easier to test and maintain.
 """
 
-
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI
@@ -80,7 +79,11 @@ def setup_routing(app: FastAPI) -> None:
 
     # Add security middleware early in the chain
     # Security headers added to all responses
-    app.add_middleware(SecurityHeadersMiddleware, is_production=APP_SETTINGS.app.is_production)
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        is_production=APP_SETTINGS.app.is_production,
+        security_config=APP_SETTINGS.security,
+    )
 
     # Request size limit protection (early to reject large requests)
     # `max_request_size` is an application-level setting (AppConfig), not under `security`.

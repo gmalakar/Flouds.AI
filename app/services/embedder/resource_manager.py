@@ -14,6 +14,7 @@ from typing import Any, Tuple
 from app.exceptions import ModelLoadError, ModelNotFoundError, TokenizerError
 from app.logger import get_logger
 from app.services.base_nlp_service import BaseNLPService
+from app.services.embedder.models import DEFAULT_PROJECTED_DIMENSION
 from app.services.embedder.onnx_utils import (
     get_native_dimension_from_session,
     get_output_names_from_session,
@@ -170,10 +171,14 @@ def _configure_dimension(session: Any, model_config: Any) -> None:
     native_dim = get_native_dimension_from_session(session)
 
     if native_dim:
+        logger.info(f"Auto-detected native dimension from ONNX model: {native_dim}")
+        try:
+            model_config.native_dimension = int(native_dim)
+        except Exception:
+            pass
         if not hasattr(model_config, "dimension") or model_config.dimension is None:
             # No dimension in config - use native
             model_config.dimension = native_dim
-            logger.info(f"Auto-detected native dimension from ONNX model: {native_dim}")
         elif model_config.dimension > native_dim:
             # Config dimension is larger than native - use native instead
             original_dim = model_config.dimension
@@ -188,6 +193,23 @@ def _configure_dimension(session: Any, model_config: Any) -> None:
                     f"Config dimension ({original_dim}) was larger than model's native dimension ({native_dim}). "
                     f"Using native dimension {native_dim} to avoid information loss."
                 )
+                try:
+                    model_config.native_dimension = int(native_dim)
+                except Exception:
+                    pass
+
+    else:
+        # No native dimension could be detected from the ONNX session.
+        # Ensure we still have a usable embedding dimension by falling
+        # back to a sensible default when the config doesn't provide one.
+        try:
+            if not hasattr(model_config, "dimension") or model_config.dimension is None:
+                model_config.dimension = DEFAULT_PROJECTED_DIMENSION
+                logger.info(
+                    f"No native dimension detected; using default dimension {DEFAULT_PROJECTED_DIMENSION}"
+                )
+        except Exception:
+            pass
 
 
 def _configure_output_names(session: Any, model_config: Any) -> None:

@@ -4,10 +4,12 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
+import asyncio
 import time
+from json import dumps
 from typing import Awaitable, Callable
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.types import ASGIApp
@@ -54,23 +56,38 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
                 sanitize_for_log(content_length),
                 self.max_request_size,
             )
-            raise HTTPException(
-                status_code=413,
-                detail={
-                    "success": False,
-                    "error_code": "REQUEST_TOO_LARGE",
-                    "message": f"Request size exceeds maximum allowed size of {self.max_request_size} bytes",
-                    "max_size_bytes": self.max_request_size,
-                },
-            )
+            detail = {
+                "success": False,
+                "error_code": "REQUEST_TOO_LARGE",
+                "message": f"Request size exceeds maximum allowed size of {self.max_request_size} bytes",
+                "max_size_bytes": self.max_request_size,
+            }
+            # Return exact JSON payload as response body with 413 status
+            return Response(content=dumps(detail), status_code=413, media_type="application/json")
 
         # Add request start time for timeout tracking
         start_time = time.time()
         request.state.start_time = start_time
 
         try:
-            # Process request
-            response = await call_next(request)
+            # Process request with overall timeout enforcement
+            try:
+                response = await asyncio.wait_for(call_next(request), timeout=self.request_timeout)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Request timed out after %ds: %s %s",
+                    self.request_timeout,
+                    sanitize_for_log(request.method),
+                    sanitize_for_log(request.url.path),
+                )
+                detail = {
+                    "success": False,
+                    "error_code": "REQUEST_TIMEOUT",
+                    "message": f"Request processing exceeded timeout of {self.request_timeout} seconds",
+                }
+                return Response(
+                    content=dumps(detail), status_code=504, media_type="application/json"
+                )
 
             # Add processing time header
             processing_time = time.time() - start_time

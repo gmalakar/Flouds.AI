@@ -20,6 +20,8 @@ from app.app_routing import setup_routing
 from app.app_startup import lifespan
 from app.exceptions import FloudsBaseException
 from app.logger import get_logger
+from app.middleware.docs_sanitizer import DocsSanitizerMiddleware
+from app.utils.docs import register_docs_routes
 from app.utils.enhance_openapi import setup_enhanced_openapi
 from app.utils.error_handler import ErrorHandler
 from app.utils.log_sanitizer import sanitize_for_log
@@ -38,8 +40,18 @@ app = FastAPI(
     description=APP_SETTINGS.app.description,
     version=APP_SETTINGS.app.version,
     openapi_url="/api/v1/openapi.json",
-    docs_url="/api/v1/docs",
-    redoc_url="/api/v1/redoc",
+    # Allow disabling the interactive docs in production via env var.
+    # Set FLOUDS_DOCS_ENABLED=0 or false to hide `/api/v1/docs` and `/api/v1/redoc`.
+    docs_url=(
+        "/api/v1/docs"
+        if os.getenv("FLOUDS_DOCS_ENABLED", "1").lower() not in ("0", "false", "no")
+        else None
+    ),
+    redoc_url=(
+        "/api/v1/redoc"
+        if os.getenv("FLOUDS_DOCS_ENABLED", "1").lower() not in ("0", "false", "no")
+        else None
+    ),
     lifespan=lifespan,
     # Keep a non-blocking HTTPBearer at app-level so the OpenAPI "Authorize"
     # control is available, but don't add `common_headers` here because it
@@ -52,6 +64,12 @@ app = FastAPI(
 # Use centralized enhanced OpenAPI generator so docs/metadata match
 # the FloudsVector project. This replaces the ad-hoc `_custom_openapi`.
 setup_enhanced_openapi(app)
+
+# Register docs routes (Swagger/ReDoc + optional asset proxy)
+register_docs_routes(app, "/api/v1")
+
+
+# Docs routes are registered from `app.utils.docs.register_docs_routes`
 
 
 # Ensure a named HTTP Bearer security scheme is present in OpenAPI so Swagger
@@ -132,6 +150,8 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 # Configure middleware and routers (moved to app/app_routing.py)
 # Centralized routing + middleware setup
 setup_routing(app)
+# Add docs sanitizer early so we can remove injected telemetry snippets
+app.add_middleware(DocsSanitizerMiddleware)
 
 
 @app.get("/")
@@ -150,7 +170,7 @@ def api_v1_root() -> dict[str, str]:
     return {"message": "Flouds AI API v1", "version": "v1", "docs": "/api/v1/docs"}
 
 
-@app.get("/favicon.ico")
+@app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
     """Return empty response for favicon requests."""
     # 204 must not include a response body; return a bare Response to avoid

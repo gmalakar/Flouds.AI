@@ -30,7 +30,8 @@ class DecoderInputNames(BaseModel):
 
 
 class OnnxConfig(BaseModel):
-    dimension: int = 128
+    dimension: Optional[int] = Field(default=None)
+    native_dimension: Optional[int] = Field(default=None)
     inputnames: InputNames = Field(default_factory=InputNames)
     max_length: int = 256
     min_length: int = 0

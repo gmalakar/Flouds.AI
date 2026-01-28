@@ -9,7 +9,7 @@
 import threading
 import time
 from asyncio import TimeoutError as AsyncTimeoutError
-from asyncio import gather, get_event_loop
+from asyncio import gather
 from typing import Any, Optional
 
 from app.exceptions import (
@@ -379,7 +379,9 @@ class PromptProcessor(BaseNLPService):
             # Validate batch size
             BatchLimiter.validate_batch_size(request.inputs, max_size=DEFAULT_BATCH_SIZE)
 
-            loop = get_event_loop()
+            import asyncio
+
+            loop = asyncio.get_running_loop()
             tasks = [
                 loop.run_in_executor(
                     None,
@@ -393,7 +395,6 @@ class PromptProcessor(BaseNLPService):
                 )
                 for text in request.inputs
             ]
-            loop.close()
             results = await gather(*tasks, return_exceptions=True)
 
             for idx, result in enumerate(results):

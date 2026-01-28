@@ -74,6 +74,7 @@ ENV PYTHONUNBUFFERED=1 \
     # Networking - override at runtime if needed
     FLOUDS_HOST=0.0.0.0 \
     FLOUDS_PORT=19690 \
+    FLOUDS_OPENAPI_URL= \
     # ONNX model root and optional ONNX config file (set in prod if required)
     FLOUDS_ONNX_ROOT=/flouds-ai/onnx \
     FLOUDS_ONNX_CONFIG_FILE= \
@@ -99,8 +100,8 @@ ENV PYTHONUNBUFFERED=1 \
     FLOUDS_BG_CLEANUP_MAX_BACKOFF_SECONDS=600 \
     FLOUDS_MEMORY_CHECK_INTERVAL=5 \
     # Request limits and timeouts
-    FLOUDS_MAX_REQUEST_SIZE=10485760 \
-    FLOUDS_REQUEST_TIMEOUT=30 \
+    FLOUDS_MAX_REQUEST_SIZE=26214400 \
+    FLOUDS_REQUEST_TIMEOUT=300 \
     # Rate limiting (disabled by default)
     FLOUDS_RATE_LIMIT_ENABLED=0 \
     FLOUDS_RATE_LIMIT_PER_MINUTE=60 \
@@ -111,6 +112,10 @@ ENV PYTHONUNBUFFERED=1 \
     # CORS / hosts (comma-separated lists; empty = no-op)
     FLOUDS_TRUSTED_HOSTS= \
     FLOUDS_CORS_ORIGINS= \
+    # Content-Security-Policy handled in app/config/appsettings.json; keep Dockerfile minimal
+    # Docs assets configuration (leave empty to use CDN by default)
+    FLOUDS_DOCS_ASSET_BASE= \
+    FLOUDS_DOCS_USE_PROXY=0 \
     # Logging rotation defaults
     FLOUDS_LOG_MAX_FILE_SIZE=10485760 \
     FLOUDS_LOG_BACKUP_COUNT=5 \

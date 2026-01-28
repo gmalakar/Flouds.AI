@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 import os
+import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -125,6 +126,24 @@ def _get_or_create_logger(logger_name: str) -> logging.Logger:
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
+    # Log retention: remove old log files matching the flouds-ai prefix
+    try:
+        retention_days = int(os.getenv("FLOUDS_LOG_RETENTION_DAYS", "14"))
+        if retention_days > 0:
+            cutoff = time.time() - (retention_days * 86400)
+            for fname in os.listdir(log_dir):
+                if not fname.startswith("flouds-ai-") or not fname.endswith(".log"):
+                    continue
+                fpath = os.path.join(log_dir, fname)
+                try:
+                    if os.path.getmtime(fpath) < cutoff:
+                        os.remove(fpath)
+                        print(f"Info: removed old log file: {fpath}")
+                except Exception as e:
+                    print(f"Warning: failed to remove old log file {fpath}: {e}")
+    except Exception as e:
+        print(f"Warning: error during log retention cleanup: {e}")
+
     log_path = os.path.join(log_dir, log_file)
 
     logger.setLevel(level)
@@ -147,14 +166,55 @@ def _get_or_create_logger(logger_name: str) -> logging.Logger:
     ch.addFilter(ContextFilter())
     logger.addHandler(ch)
 
-    # Rotating file handler
+    # Rotating file handler: choose an available log path if the configured
+    # file cannot be opened (e.g., locked by another process). Use a safe
+    # subclass and delay file opening to reduce Windows file-lock and rollover
+    # errors. Failures are printed but won't propagate and crash the app.
+    def _find_available_log_path(initial_path: str, attempts: int = 5) -> str:
+        base_dir, base_name = os.path.split(initial_path)
+        name, ext = os.path.splitext(base_name)
+
+        # Try the initial path first
+        candidates = [initial_path]
+        for i in range(1, attempts):
+            candidates.append(os.path.join(base_dir, f"{name}.{i}{ext}"))
+
+        for candidate in candidates:
+            try:
+                # Try to open and close the file to verify writability
+                with open(candidate, "a", encoding="utf-8"):
+                    pass
+                return candidate
+            except OSError:
+                continue
+
+        # Fallback: timestamped filename
+        ts = datetime.now().strftime("%Y%m%d%H%M%S")
+        return os.path.join(base_dir, f"{name}.{ts}{ext}")
+
     try:
-        fh = RotatingFileHandler(
-            log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+
+        class SafeRotatingFileHandler(RotatingFileHandler):
+            def doRollover(self):
+                try:
+                    super().doRollover()
+                except Exception as _e:
+                    print(f"Warning: Log rollover failed: {_e}")
+
+        usable_log_path = _find_available_log_path(log_path)
+
+        fh = SafeRotatingFileHandler(
+            usable_log_path,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+            delay=True,
         )
         fh.setFormatter(formatter)
         fh.addFilter(ContextFilter())
         logger.addHandler(fh)
+        if usable_log_path != log_path:
+            print(f"Info: original log file in use; using alternate log file: {usable_log_path}")
     except OSError as e:
         print(f"Warning: Failed to create log file handler: {e}")
     except (ValueError, TypeError) as e:

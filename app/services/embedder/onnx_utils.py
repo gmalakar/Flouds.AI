@@ -253,6 +253,11 @@ def get_native_dimension_from_session(session: Any) -> Optional[int]:
         Native dimension from last axis of first output, or None if not detected
     """
     try:
+        # Cache detection on the session object to avoid duplicate work/logging
+        cached = getattr(session, "_native_dim_cached", None)
+        if cached is not None:
+            return int(cached)
+
         outputs = session.get_outputs()
         if outputs and len(outputs) > 0:
             output_shape = outputs[0].shape
@@ -262,6 +267,11 @@ def get_native_dimension_from_session(session: Any) -> Optional[int]:
                 # Handle symbolic dimensions (e.g., 'batch_size') vs numeric
                 last_dim = output_shape[-1]
                 if isinstance(last_dim, (int, np.integer)):
+                    # store on session to prevent repeat logging/calls
+                    try:
+                        session._native_dim_cached = int(last_dim)
+                    except Exception:
+                        pass
                     logger.debug(f"Detected native dimension from ONNX output: {last_dim}")
                     return int(last_dim)
     except Exception as e:
