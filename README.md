@@ -18,6 +18,13 @@
 - ✅ Prompt service refactored into 7 specialized modules
 - ✅ 195 comprehensive tests with 100% pass rate
 
+**Latest Changes (2026-01-29):**
+- Model Info API: `details` payload moved to `results` and now includes an in-process TTL cache (5m) to reduce repeated ONNX/session work. Cache hits are logged at DEBUG level. Use config reload or the cache-clear helper to invalidate.
+- Middleware: Tenant/CORS middleware now returns structured BaseResponse-like JSON on errors (consistent `success`, `message`, `warnings`) instead of raw `detail` strings to improve client parsing.
+- Auto-detection: Improved ONNX auto-detection uses the dedicated resource helper for `vocab_size` detection (fixes earlier attribute errors).
+- Observability: Additional debug logs added for model-info cache hits and expirations.
+
+
 ---
 
 ## Table of Contents

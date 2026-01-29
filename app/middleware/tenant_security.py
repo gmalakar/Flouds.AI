@@ -20,6 +20,28 @@ from app.services.config_service import config_service
 logger = get_logger("tenant_security")
 
 
+def _structured_error_response(
+    status_code: int, message: str, extra: Optional[dict] = None
+) -> JSONResponse:
+    """Return a structured JSON error matching `BaseResponse` shape."""
+    from typing import Dict
+
+    payload: Dict[str, Any] = {
+        "success": False,
+        "message": message,
+        "model": "none",
+        "time_taken": 0.0,
+        "warnings": [],
+    }
+    if extra:
+        # Represent extras as warnings to keep payload schema simple
+        warnings = payload.get("warnings")
+        if isinstance(warnings, list):
+            for k, v in extra.items():
+                warnings.append(f"{k}: {v}")
+    return JSONResponse(status_code=status_code, content=payload)
+
+
 def _extract_token(request: Request) -> Optional[str]:
     """Extract bearer token from Authorization header or `token` query param in dev."""
     auth_header = request.headers.get("Authorization")
@@ -155,12 +177,10 @@ class TenantTrustedHostMiddleware(BaseHTTPMiddleware):
                     hostname,
                     tenant,
                 )
-                return JSONResponse(
-                    status_code=403, content={"detail": "Untrusted host", "host": host}
-                )
+                return _structured_error_response(403, "Untrusted host", {"host": host})
         except Exception:
             logger.exception("Trusted host check failed")
-            return JSONResponse(status_code=500, content={"detail": "Trusted host check failed"})
+            return _structured_error_response(500, "Trusted host check failed")
 
         return await call_next(request)
 
@@ -300,19 +320,14 @@ class TenantCorsMiddleware(BaseHTTPMiddleware):
                             origin_header,
                             tenant,
                         )
-                        return JSONResponse(
-                            status_code=403,
-                            content={
-                                "detail": "CORS origin not allowed",
-                                "origin": origin_header,
-                                "origin_host": origin_host,
-                            },
+                        return _structured_error_response(
+                            403,
+                            "CORS origin not allowed",
+                            {"origin": origin_header, "origin_host": origin_host},
                         )
                     except Exception:
                         logger.exception("Error evaluating trusted hosts during CORS check")
-                        return JSONResponse(
-                            status_code=500, content={"detail": "CORS middleware error"}
-                        )
+                        return _structured_error_response(500, "CORS middleware error")
 
             # Determine value to echo in Access-Control-Allow-Origin
             allow_origin = (
@@ -329,4 +344,4 @@ class TenantCorsMiddleware(BaseHTTPMiddleware):
             return response
         except Exception:
             logger.exception("CORS middleware error")
-            return JSONResponse(status_code=500, content={"detail": "CORS middleware error"})
+            return _structured_error_response(500, "CORS middleware error")

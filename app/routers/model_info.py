@@ -5,6 +5,8 @@
 # =============================================================================
 
 import os
+import threading
+import time
 from typing import Any, Dict, List, Optional, Union, cast
 
 from fastapi import APIRouter, HTTPException, Query
@@ -18,6 +20,12 @@ from app.services.base_nlp_service import BaseNLPService
 logger = get_logger("model_info")
 
 router = APIRouter()
+
+# Simple in-memory TTL cache for model info to avoid repeated disk/session work.
+# Cache key: model_name -> (timestamp, response_dict)
+_MODEL_INFO_CACHE: Dict[str, tuple[float, Dict[str, Any]]] = {}
+_MODEL_INFO_CACHE_LOCK = threading.Lock()
+_MODEL_INFO_CACHE_TTL = 300  # seconds
 
 # Module-level Query defaults to avoid function-call defaults (flake8 B008)
 MODEL_QUERY = Query(..., description="Name of the model to check")
@@ -261,9 +269,9 @@ class ModelInfoService:
                     auto_detected["inputnames"] = input_names
 
                 # Detect vocab_size (for language models)
-                from app.services.prompt.processor import PromptProcessor
+                from app.services.prompt.resource_manager import get_vocab_size_from_session
 
-                vocab_size = cast(Any, PromptProcessor)._get_vocab_size_from_session(session)
+                vocab_size = cast(Any, get_vocab_size_from_session)(session)
                 if vocab_size:
                     auto_detected["vocab_size"] = vocab_size
 
@@ -280,6 +288,30 @@ class ModelInfoService:
         signatures. The router will return this dict as a `ModelInfoResponse`.
         """
 
+        # Try cache first
+        now = time.time()
+        with _MODEL_INFO_CACHE_LOCK:
+            entry = _MODEL_INFO_CACHE.get(model_name)
+            if entry:
+                ts, cached = entry
+                age = now - ts
+                if age < _MODEL_INFO_CACHE_TTL:
+                    logger.debug(
+                        "ModelInfo cache hit for %s (age=%.1fs, ttl=%ds)",
+                        model_name,
+                        age,
+                        _MODEL_INFO_CACHE_TTL,
+                    )
+                    return cached
+                # expired
+                logger.debug(
+                    "ModelInfo cache expired for %s (age=%.1fs > ttl=%ds)",
+                    model_name,
+                    age,
+                    _MODEL_INFO_CACHE_TTL,
+                )
+                del _MODEL_INFO_CACHE[model_name]
+
         # Build initial dict-backed response and details
         response: Dict[str, Any] = {
             "success": True,
@@ -287,7 +319,7 @@ class ModelInfoService:
             "model": model_name,
             "time_taken": 0.0,
             "warnings": [],
-            "details": {
+            "results": {
                 "model_name": model_name,
                 "model_available": False,
                 "onnx_file_available": False,
@@ -300,7 +332,7 @@ class ModelInfoService:
             },
         }
 
-        details: Dict[str, Any] = cast(Dict[str, Any], response["details"])
+        details: Dict[str, Any] = cast(Dict[str, Any], response["results"])
 
         # Check if model exists in config (call protected helper via Any cast to silence linter)
         config = cast(Any, BaseNLPService)._get_model_config(model_name)
@@ -314,7 +346,12 @@ class ModelInfoService:
 
         # Get model type
         model_type = ModelInfoService._get_model_type(config)
-        details["model_type"] = model_type
+        # The response model expects a string for `model_type` (e.g. 'embedding').
+        # Convert lists like ['embedding','prompt'] into a comma-separated string.
+        if isinstance(model_type, (list, tuple)):
+            details["model_type"] = ",".join([str(t) for t in model_type])
+        else:
+            details["model_type"] = str(model_type)
 
         # Resolve model path using BaseNLPService resolver which respects
         # `model_folder_name` and falls back to task-based folders.
@@ -372,6 +409,14 @@ class ModelInfoService:
             response["warnings"] = [f"ONNX model file '{files_info['encoder_file']}' not found"]
             response["message"] = "Model found in config but ONNX files are missing"
 
+        # Cache response
+        try:
+            with _MODEL_INFO_CACHE_LOCK:
+                _MODEL_INFO_CACHE[model_name] = (time.time(), response)
+            logger.debug("ModelInfo cached for %s (ttl=%ds)", model_name, _MODEL_INFO_CACHE_TTL)
+        except Exception:
+            logger.exception("Failed to write model info cache for %s", model_name)
+
         return response
 
 
@@ -401,8 +446,8 @@ async def get_model_info(
 
         # If caller requested a specific property, return only that property's value
         if property_name:
-            # `response` is a dict produced by the service; get `details` as a dict
-            details_dict: Dict[str, Any] = response.get("details", {}) or {}
+            # `response` is a dict produced by the service; get `results` as a dict
+            details_dict: Dict[str, Any] = response.get("results", {}) or {}
 
             # Support nested lookups using dot notation, e.g. 'auto_detected_params.dimension'
             parts = property_name.split(".") if property_name else []

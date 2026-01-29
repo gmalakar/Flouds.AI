@@ -4,7 +4,7 @@
 # Copyright (c) 2024 Goutam Malakar. All rights reserved.
 # =============================================================================
 
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -13,7 +13,7 @@ from app.models.base_response import BaseResponse
 
 class ModelDetails(BaseModel):
     """
-    Detailed model information nested under the 'details' field.
+    Detailed model information nested under the 'results' field.
     """
 
     model_name: Optional[str] = Field(
@@ -66,23 +66,10 @@ class ModelDetails(BaseModel):
 class ModelInfoResponse(BaseResponse):
     """
     Response model for model information and availability check.
-    All model details are nested under the 'details' field.
+    The detailed model information is provided under the `results` field.
     """
 
-    details: Optional[ModelDetails] = Field(
+    results: Optional[ModelDetails] = Field(
         default=None,
         description="Detailed information about the model.",
-    )
-
-    class ResultsModel(BaseModel):
-        property_name: str = Field(
-            cast(Any, ...), description="Requested property name (dot notation allowed)"
-        )
-        property_value: Optional[Any] = Field(
-            None, description="Value of the requested property (nullable)"
-        )
-
-    results: Optional[ResultsModel] = Field(
-        default=None,
-        description="If `property_name` query param was provided, contains the requested property's name and value.",
     )
