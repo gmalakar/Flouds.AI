@@ -13,7 +13,7 @@ from app.models.base_request import BaseRequest
 
 class PromptBaseRequest(BaseRequest):
     temperature: Optional[float] = Field(
-        default=0.7,
+        default=0.0,
         ge=0.0,
         le=2.0,
         description="The temperature to use for sampling. Must be between 0.0 and 2.0. Defaults to 0.7.",

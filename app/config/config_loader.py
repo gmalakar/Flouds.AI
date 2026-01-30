@@ -238,13 +238,6 @@ class ConfigLoader:
             logger.warning(f"Invalid rate limit per hour: {rph}")
 
         # Misc overrides
-        # Model cache size is managed via `cache.model_cache_max` in AppSettings
-        mcache = ConfigLoader._getenv_first("FLOUDS_MODEL_CACHE_SIZE")
-        parsed_mcache = ConfigLoader._parse_int(mcache)
-        if parsed_mcache is not None:
-            ConfigLoader.__appsettings.cache.model_cache_max = parsed_mcache
-        elif mcache is not None:
-            logger.warning(f"Invalid model cache size: {mcache}")
 
         # Cache size overrides for runtime caches (encoder/decoder/models/special tokens)
         enc_cache = ConfigLoader._getenv_first("FLOUDS_ENCODER_CACHE_MAX")

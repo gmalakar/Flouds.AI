@@ -10,21 +10,47 @@
 # =============================================================================
 
 import json  # noqa: F401
+import sys
+import types
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.middleware.request_size_limit import RequestSizeLimitMiddleware
-
 
 def create_app_with_size_limit(max_size: int) -> TestClient:
+    # Ensure a lightweight app.app_init shim exists and set the desired max_size
+    app_init = sys.modules.get("app.app_init")
+    if not app_init:
+        shim = types.ModuleType("app.app_init")
+        shim.APP_SETTINGS = types.SimpleNamespace(
+            app=types.SimpleNamespace(max_request_size=max_size)
+        )
+        sys.modules["app.app_init"] = shim
+        app_init = shim
+    else:
+        # Update existing shimmed APP_SETTINGS
+        try:
+            app_init.APP_SETTINGS.app.max_request_size = max_size
+        except Exception:
+            app_init.APP_SETTINGS = types.SimpleNamespace(
+                app=types.SimpleNamespace(max_request_size=max_size)
+            )
+
+    # Import and reload middleware so it picks up the current APP_SETTINGS
+    import importlib
+
+    import app.middleware.request_size_limit as _rsl
+
+    importlib.reload(_rsl)
+    RequestSizeLimitMiddleware = _rsl.RequestSizeLimitMiddleware
+
     app = FastAPI()
 
     @app.post("/echo")
     async def echo(payload: dict):
         return {"received": payload}
 
-    app.add_middleware(RequestSizeLimitMiddleware, max_size=max_size)
+    app.add_middleware(RequestSizeLimitMiddleware)
     return TestClient(app)
 
 

@@ -26,9 +26,9 @@ from starlette.requests import Request as StarletteRequest
 from app.app_init import APP_SETTINGS
 from app.dependencies.auth import AuthMiddleware, common_headers
 from app.dependencies.auth import router as auth_router
-from app.middleware.log_context import LogContextMiddleware
 from app.middleware.path_security import PathSecurityMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.request_logging import RequestLoggingMiddleware
 from app.middleware.request_size_limit import RequestSizeLimitMiddleware
 from app.middleware.request_validation import RequestValidationMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
@@ -74,8 +74,10 @@ def setup_routing(app: FastAPI) -> None:
             return await call_next(request)
 
     app.add_middleware(FaviconLoggerMiddleware)
-    # Add log context early so downstream logs include request context
-    app.add_middleware(LogContextMiddleware)
+    # Add request validation early so downstream logs include request context
+    app.add_middleware(RequestValidationMiddleware)
+    # Add request logging middleware (sanitized body logging + X-Request-ID)
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Add security middleware early in the chain
     # Security headers added to all responses
@@ -88,10 +90,7 @@ def setup_routing(app: FastAPI) -> None:
     # Request size limit protection (early to reject large requests)
     # `max_request_size` is an application-level setting (AppConfig), not under `security`.
     if APP_SETTINGS.app.max_request_size:
-        app.add_middleware(
-            RequestSizeLimitMiddleware,
-            max_size=APP_SETTINGS.app.max_request_size,
-        )
+        app.add_middleware(RequestSizeLimitMiddleware)
 
     # Add other security middleware
     if APP_SETTINGS.app.is_production:
@@ -106,9 +105,8 @@ def setup_routing(app: FastAPI) -> None:
     app.add_middleware(TenantCorsMiddleware)
     app.add_middleware(TenantTrustedHostMiddleware)
 
-    # Authentication + request validation
+    # Authentication
     app.add_middleware(AuthMiddleware)
-    app.add_middleware(RequestValidationMiddleware)
 
     # CORS
     app.add_middleware(

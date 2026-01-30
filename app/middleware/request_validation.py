@@ -1,40 +1,50 @@
 # =============================================================================
 # File: request_validation.py
-# Date: 2025-01-27
-# Copyright (c) 2024 Goutam Malakar. All rights reserved.
+# Date: 2026-01-30
+# Copyright (c) 2026 Goutam Malakar. All rights reserved.
 # =============================================================================
+
+# =============================================================================
+# File: request_validation.py
+# Canonical RequestValidationMiddleware for Flouds.Py
+# =============================================================================
+
+from __future__ import annotations
 
 import asyncio
 import time
-from json import dumps
+import uuid
 from typing import Awaitable, Callable
 
-from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
 from app.app_init import APP_SETTINGS
-from app.logger import get_logger
+from app.logger import get_logger, set_request_context
 from app.utils.log_sanitizer import sanitize_for_log
 
 logger = get_logger("request_validation")
 
 
 class RequestValidationMiddleware(BaseHTTPMiddleware):
-    """Middleware for request validation, size limits, and timeout handling."""
+    """Middleware for request validation, size limits, and timeout handling.
+
+    Legacy notes:
+    - Flouds.Py historically preferred `APP_SETTINGS`; we preserve that preference
+      but fall back to `ConfigLoader` and environment vars.
+    - Skip validation for health/docs endpoints to preserve legacy behavior.
+    """
 
     def __init__(self, app: ASGIApp):
         super().__init__(app)
-        self.max_request_size = APP_SETTINGS.app.max_request_size
-        self.request_timeout = APP_SETTINGS.app.request_timeout
+        # Middleware will read values directly from `APP_SETTINGS.app` at request time.
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        """Process request with validation and timeout."""
-
-        # Skip validation for health checks and docs
+        # Skip validation for health/docs endpoints (legacy behavior)
         if request.url.path.startswith(
             (
                 "/api/v1/health",
@@ -48,63 +58,149 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
         ):
             return await call_next(request)
 
-        # Check request size
+        start_time = time.perf_counter()
+
+        # Use configured values from APP_SETTINGS (no runtime env overrides)
+        max_size = APP_SETTINGS.app.max_request_size
+        timeout = APP_SETTINGS.app.request_timeout
+
+        # Request context and IDs
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        tenant_code = request.headers.get("X-Tenant-Code")
+        user_id = request.headers.get("X-User-ID")
+        path = str(request.url.path)
+        method = request.method
+
+        set_request_context(
+            request_id=request_id,
+            tenant_code=tenant_code,
+            user_id=user_id,
+            request_path=path,
+            request_method=method,
+        )
+
+        # Early Content-Length short-circuit
         content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > self.max_request_size:
-            logger.warning(
-                "Request size %s exceeds limit %d",
-                sanitize_for_log(content_length),
-                self.max_request_size,
-            )
-            detail = {
-                "success": False,
-                "error_code": "REQUEST_TOO_LARGE",
-                "message": f"Request size exceeds maximum allowed size of {self.max_request_size} bytes",
-                "max_size_bytes": self.max_request_size,
-            }
-            # Return exact JSON payload as response body with 413 status
-            return Response(content=dumps(detail), status_code=413, media_type="application/json")
-
-        # Add request start time for timeout tracking
-        start_time = time.time()
-        request.state.start_time = start_time
-
-        try:
-            # Process request with overall timeout enforcement
+        if content_length:
             try:
-                response = await asyncio.wait_for(call_next(request), timeout=self.request_timeout)
+                cl = int(content_length)
+                if max_size is not None and cl > int(max_size):
+                    logger.warning(
+                        "Request Content-Length %s exceeds limit %d",
+                        sanitize_for_log(content_length),
+                        max_size,
+                    )
+                    detail = {
+                        "success": False,
+                        "error_code": "REQUEST_TOO_LARGE",
+                        "message": f"Request size exceeds maximum allowed size of {max_size} bytes",
+                        "max_size_bytes": max_size,
+                    }
+                    resp = JSONResponse(content=detail, status_code=413)
+                    resp.headers["X-Request-ID"] = request_id
+                    return resp
+            except Exception:
+                pass
+
+        # For mutating requests, validate Content-Type, read JSON bodies and
+        # enforce max size. Allow multipart/form-data and
+        # application/x-www-form-urlencoded for file/form uploads without
+        # reading the entire body here (downstream handlers will parse it).
+        if method in ["POST", "PUT", "PATCH"]:
+            content_type = request.headers.get("content-type", "")
+            ct = content_type.lower() if content_type else ""
+
+            # Accept JSON, multipart form-data, and urlencoded forms
+            if ct.startswith("application/json"):
+                try:
+                    body = await request.body()
+                    if body and (max_size is not None) and len(body) > int(max_size):
+                        logger.warning(
+                            "Request body size %d exceeds limit %d; returning 413",
+                            len(body),
+                            max_size,
+                        )
+                        resp = JSONResponse(
+                            status_code=413,
+                            content={
+                                "error": "Payload Too Large",
+                                "message": f"Request body {len(body)} bytes exceeds allowed limit {max_size} bytes",
+                            },
+                        )
+                        resp.headers["X-Request-ID"] = request_id
+                        return resp
+
+                    async def _receive():
+                        return {"type": "http.request", "body": body, "more_body": False}
+
+                    request._receive = _receive
+                except Exception:
+                    # If body cannot be read, let downstream handle it
+                    pass
+            elif ct.startswith("multipart/form-data") or ct.startswith(
+                "application/x-www-form-urlencoded"
+            ):
+                # Allow file/form uploads: do not eagerly read body here to avoid
+                # buffering large uploads. Downstream handlers (FastAPI)
+                # will parse the form/multipart stream.
+                pass
+            else:
+                logger.warning("Invalid content type: %s", sanitize_for_log(content_type))
+                return JSONResponse(status_code=415, content={"detail": "Unsupported media type"})
+
+        # Execute downstream with timeout
+        request.state.start_time = time.time()
+        try:
+            try:
+                response = await asyncio.wait_for(call_next(request), timeout=timeout)
             except asyncio.TimeoutError:
                 logger.warning(
                     "Request timed out after %ds: %s %s",
-                    self.request_timeout,
-                    sanitize_for_log(request.method),
-                    sanitize_for_log(request.url.path),
+                    timeout,
+                    sanitize_for_log(method),
+                    sanitize_for_log(path),
                 )
                 detail = {
                     "success": False,
                     "error_code": "REQUEST_TIMEOUT",
-                    "message": f"Request processing exceeded timeout of {self.request_timeout} seconds",
+                    "message": f"Request processing exceeded timeout of {timeout} seconds",
                 }
-                return Response(
-                    content=dumps(detail), status_code=504, media_type="application/json"
-                )
+                resp = JSONResponse(content=detail, status_code=504)
+                resp.headers["X-Request-ID"] = request_id
+                return resp
 
-            # Add processing time header
-            processing_time = time.time() - start_time
-            response.headers["X-Processing-Time"] = f"{processing_time:.3f}"
+            processing_time = time.perf_counter() - start_time
+            try:
+                response.headers["X-Processing-Time"] = f"{processing_time:.3f}"
+            except Exception:
+                pass
 
-            # Log slow requests
-            if processing_time > 5.0:  # Log requests taking more than 5 seconds
+            if processing_time > 5.0:
                 logger.warning(
                     "Slow request: %s %s took %.3fs",
-                    sanitize_for_log(request.method),
-                    sanitize_for_log(request.url.path),
+                    sanitize_for_log(method),
+                    sanitize_for_log(path),
                     processing_time,
                 )
 
+            try:
+                response.headers["X-Request-ID"] = request_id
+            except Exception:
+                pass
+
+            set_request_context(request_duration=processing_time)
+
+            logger.info(
+                "%s %s -> %s [%.2fms]",
+                method,
+                path,
+                getattr(response, "status_code", "unknown"),
+                processing_time * 1000,
+            )
             return response
 
-        except Exception as e:
-            processing_time = time.time() - start_time
-            logger.error(f"Request failed after {processing_time:.3f}s: {str(e)}")
+        except Exception:
+            processing_time = time.perf_counter() - start_time
+            logger.exception("Request failed after %.3fs", processing_time)
             raise

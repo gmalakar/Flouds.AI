@@ -101,11 +101,11 @@ def test_json_formatter_without_request_context():
 
 def test_sanitize_json_payload():
     """Verify payload sanitization redacts sensitive keys."""
-    from app.middleware.log_context import _sanitize_body
+    from app.utils.log_sanitizer import sanitize_body as _sanitize_body
 
     # JSON with sensitive data
     payload = b'{"username": "alice", "password": "secret123", "token": "abc"}'
-    sanitized = _sanitize_body(payload, max_length=200)
+    sanitized = _sanitize_body(payload, max_bytes=200)
 
     assert "***REDACTED***" in sanitized
     assert "secret123" not in sanitized
@@ -115,10 +115,10 @@ def test_sanitize_json_payload():
 
 def test_sanitize_non_json_payload():
     """Verify non-JSON payloads are safely truncated."""
-    from app.middleware.log_context import _sanitize_body
+    from app.utils.log_sanitizer import sanitize_body as _sanitize_body
 
     payload = b"plain text body with some content"
-    sanitized = _sanitize_body(payload, max_length=20)
+    sanitized = _sanitize_body(payload, max_bytes=20)
 
     assert len(sanitized) <= 23  # 20 + "..."
     assert "plain text body" in sanitized
@@ -126,7 +126,7 @@ def test_sanitize_non_json_payload():
 
 def test_sanitize_empty_payload():
     """Verify empty payloads return empty string."""
-    from app.middleware.log_context import _sanitize_body
+    from app.utils.log_sanitizer import sanitize_body as _sanitize_body
 
     assert _sanitize_body(b"") == ""
-    assert _sanitize_body(b"", max_length=100) == ""
+    assert _sanitize_body(b"", max_bytes=100) == ""

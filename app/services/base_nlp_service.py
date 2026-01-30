@@ -65,7 +65,8 @@ class BaseNLPService:
     """
 
     # Ensure root path is a string to satisfy static type expectations
-    _root_path: str = str(getattr(APP_SETTINGS.onnx, "onnx_path", ""))
+    # Use empty string when ONNX path is missing or None to avoid 'None' literal.
+    _root_path: str = getattr(APP_SETTINGS.onnx, "onnx_path", "") or ""
     _CACHE_LIMIT_ENCODER = int(os.getenv("FLOUDS_ENCODER_CACHE_MAX", "3"))
     _encoder_sessions: ConcurrentDict = ConcurrentDict(
         "_encoder_sessions", max_size=_CACHE_LIMIT_ENCODER

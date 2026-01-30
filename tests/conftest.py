@@ -7,7 +7,52 @@
 import asyncio
 import atexit
 import logging
+import os
+import sys
+import types
 import warnings
+
+# Provide a lightweight `app.app_init` shim at import time to avoid running
+# ConfigLoader during test collection. Individual tests may patch this object
+# further via fixtures as needed.
+if "app.app_init" not in sys.modules:
+    shim = types.ModuleType("app.app_init")
+    shim.APP_SETTINGS = types.SimpleNamespace(
+        server=types.SimpleNamespace(
+            host="localhost",
+            port=8080,
+            keepalive_timeout=5,
+            graceful_timeout=5,
+            session_provider="CPUExecutionProvider",
+        ),
+        app=types.SimpleNamespace(
+            name="Flouds Test",
+            description="Test",
+            version="0.0.0",
+            is_production=False,
+            debug=True,
+            max_request_size=26214400,
+            request_timeout=30,
+            cors_origins=["*"],
+        ),
+        security=types.SimpleNamespace(
+            enabled=False, clients_db_path=None, trusted_hosts=["*"], enable_hsts=False
+        ),
+        onnx=types.SimpleNamespace(onnx_path=os.getcwd()),
+        vectordb=types.SimpleNamespace(
+            endpoint="localhost",
+            port=19530,
+            username="root",
+            password="password",
+            default_dimension=384,
+            admin_role_name="admin",
+        ),
+        logging=types.SimpleNamespace(folder="/tmp/logs"),
+        rate_limiting=types.SimpleNamespace(
+            enabled=False, requests_per_minute=0, requests_per_hour=0
+        ),
+    )
+    sys.modules["app.app_init"] = shim
 
 import pytest
 

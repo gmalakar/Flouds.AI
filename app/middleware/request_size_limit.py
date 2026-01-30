@@ -10,7 +10,7 @@ Prevents denial-of-service attacks from extremely large requests that could
 exhaust server memory or cause processing delays.
 """
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -26,18 +26,11 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     """Enforce maximum request size from configuration.
 
     Attributes:
-        max_size: Maximum request size in bytes (from APP_SETTINGS)
+        # Maximum request size in bytes (from APP_SETTINGS)
     """
 
-    def __init__(self, app: Any, max_size: Optional[int] = None):
+    def __init__(self, app: Any):
         super().__init__(app)
-        # Use provided max_size or fall back to app-level settings
-        if max_size is None:
-            resolved_max = APP_SETTINGS.app.max_request_size
-        else:
-            resolved_max = max_size
-        self.max_size: int = int(resolved_max)
-        logger.info(f"RequestSizeLimitMiddleware configured: max_size={self.max_size} bytes")
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Any:
         """Check request size before processing."""
@@ -47,9 +40,10 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
         if content_length:
             try:
                 content_length_int = int(content_length)
-                if content_length_int > self.max_size:
+                effective_max = APP_SETTINGS.app.max_request_size
+                if effective_max is not None and content_length_int > effective_max:
                     logger.warning(
-                        f"Request size {content_length_int} bytes exceeds limit {self.max_size} bytes "
+                        f"Request size {content_length_int} bytes exceeds limit {effective_max} bytes "
                         f"from {request.client.host if request.client else 'unknown'}"
                     )
                     return JSONResponse(
@@ -58,8 +52,8 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                             "success": False,
                             "message": "Request payload too large",
                             "error_code": "PAYLOAD_TOO_LARGE",
-                            "detail": f"Maximum request size is {self.max_size} bytes",
-                            "max_size": self.max_size,
+                            "detail": f"Maximum request size is {effective_max} bytes",
+                            "max_size": effective_max,
                         },
                     )
             except (ValueError, TypeError) as e:

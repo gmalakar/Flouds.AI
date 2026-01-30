@@ -216,7 +216,7 @@ class PromptProcessor(BaseNLPService):
             # Dispatch to appropriate generation strategy
             if use_seq2seqlm:
                 logger.info("Using seq2seq generation for %s", sanitize_for_log(model_to_use))
-                model = get_cached_model(model_path)
+                model = get_cached_model(model_path, model_config)
                 if not model:
                     return SummaryResults(
                         summary="",

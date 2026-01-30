@@ -29,6 +29,7 @@ CACHE_LIMIT_DECODER = int(os.getenv("FLOUDS_DECODER_CACHE_MAX", "3"))
 CACHE_LIMIT_ENCODER = int(os.getenv("FLOUDS_ENCODER_CACHE_MAX", "3"))
 CACHE_LIMIT_MODELS = int(os.getenv("FLOUDS_MODEL_CACHE_MAX", "2"))
 CACHE_LIMIT_SPECIAL = int(os.getenv("FLOUDS_SPECIAL_TOKENS_CACHE_MAX", "8"))
+CACHE_LIMIT_PKV = int(os.getenv("FLOUDS_PKV_CACHE_MAX", "32"))
 
 
 # ============================================================================
@@ -60,6 +61,8 @@ class CachedSessions:
     )
     models: ConcurrentDict = ConcurrentDict("_models", max_size=CACHE_LIMIT_MODELS)
     special_tokens: ConcurrentDict = ConcurrentDict("_special_tokens", max_size=CACHE_LIMIT_SPECIAL)
+    # Cache PKV detection results (decoder path -> bool)
+    pkv_detection: ConcurrentDict = ConcurrentDict("_pkv_detection", max_size=CACHE_LIMIT_PKV)
 
     @classmethod
     def clear_all(cls) -> None:
@@ -68,3 +71,4 @@ class CachedSessions:
         cls.encoder_sessions.clear()
         cls.models.clear()
         cls.special_tokens.clear()
+        cls.pkv_detection.clear()

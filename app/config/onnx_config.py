@@ -52,6 +52,11 @@ class OnnxConfig(BaseModel):
     pooling_strategy: str = Field(default="mean")
     encoder_onnx_model: str = Field(default="encoder_model.onnx")
     decoder_onnx_model: str = Field(default="decoder_model.onnx")
+    # Optional explicit decoder variant that contains past-key-values support
+    # When provided, resource loader will map this filename to
+    # `decoder_with_past_model` so optimum can load the correct artifact and
+    # enable cache usage.
+    decoder_onnx_model_with_past: Optional[str] = Field(default=None)
     # Note: Existence flags are stored in the runtime model metadata cache
     # (see `BaseNLPService._set_model_metadata`) rather than on the
     # configuration object itself.
@@ -81,3 +86,7 @@ class OnnxConfig(BaseModel):
     # Preferred limit on newly generated tokens (recommended over total `max_length`)
     max_new_tokens: Optional[int] = Field(default=512)
     merged_with_past: bool = Field(default=False)
+    # Optional override to enable/disable use_cache for seq2seq models.
+    # - None: autodetect from decoder_onnx_model_with_past artifact
+    # - True/False: respect explicit configuration
+    use_cache: Optional[bool] = Field(default=None)

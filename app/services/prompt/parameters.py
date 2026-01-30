@@ -61,7 +61,7 @@ def add_beam_params(generate_kwargs: Dict[str, Any], model_config: OnnxConfig) -
     num_beams = getattr(model_config, "num_beams", 1)
     if num_beams > 1:
         generate_kwargs["num_beams"] = num_beams
-    if getattr(model_config, "early_stopping", False):
+    if getattr(model_config, "early_stopping", True):
         generate_kwargs["early_stopping"] = True
 
 
@@ -108,4 +108,5 @@ def add_temperature_params(
 
     if temperature_val > 0.0:
         generate_kwargs["temperature"] = temperature_val
+    if temperature_val > 0.7:
         generate_kwargs["do_sample"] = True

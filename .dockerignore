@@ -252,3 +252,5 @@ lcov.info
 **/*.pkl
 **/*.pickle
 **/*.joblib
+/
+/None

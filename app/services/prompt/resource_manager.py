@@ -13,6 +13,7 @@ from typing import Any, Optional, Set
 import onnxruntime as ort
 
 from app.app_init import APP_SETTINGS
+from app.config.onnx_config import OnnxConfig
 from app.exceptions import ModelLoadError, ModelNotFoundError
 from app.logger import get_logger
 from app.services.prompt.models import MEMORY_LOW_THRESHOLD_MB, CachedSessions
@@ -24,6 +25,44 @@ except Exception:
     ORTModelForSeq2SeqLM = None
 
 logger = get_logger(__name__)
+
+
+def onnx_decoder_has_past_support(decoder_model_path: str) -> bool:
+    """Inspect an ONNX decoder file for past-key-values (PKV) support.
+
+    This performs a lightweight static check by creating a temporary ONNX
+    `InferenceSession` (CPU) and scanning input/output names for common
+    PKV indicators. It is conservative: any error returns False.
+    """
+    try:
+        if not decoder_model_path or not os.path.exists(decoder_model_path):
+            return False
+
+        # Prefer CPU provider for static inspection to keep it widely compatible
+        providers = ort.get_available_providers()
+        provider = "CPUExecutionProvider" if "CPUExecutionProvider" in providers else providers[0]
+
+        sess = ort.InferenceSession(decoder_model_path, providers=[provider])
+        in_names = [inp.name.lower() for inp in sess.get_inputs() or []]
+        out_names = [out.name.lower() for out in sess.get_outputs() or []]
+
+        markers = (
+            "past",
+            "present",
+            "past_key",
+            "key_value",
+            "past_key_values",
+            "present_key_values",
+            "past_key_value",
+        )
+
+        for m in markers:
+            if any(m in n for n in in_names) or any(m in n for n in out_names):
+                return True
+
+    except Exception:
+        return False
+    return False
 
 
 # ============================================================================
@@ -212,11 +251,12 @@ def get_special_tokens(special_tokens_path: str) -> Set[str]:
     )
 
 
-def get_cached_model(model_path: str) -> Optional[Any]:
+def get_cached_model(model_path: str, model_config: OnnxConfig) -> Optional[Any]:
     """Get cached ONNX model with error handling.
 
     Args:
         model_path: Path to model
+        model_config: ONNX model configuration
 
     Returns:
         Cached model instance, or None if loading failed
@@ -233,6 +273,11 @@ def get_cached_model(model_path: str) -> Optional[Any]:
         # First check if model is already cached
         cached_model = CachedSessions.models.get(model_path)
         if cached_model is not None:
+            logger.debug(
+                "Using cached model for %s (models cache size=%d)",
+                sanitize_for_log(model_path),
+                CachedSessions.models.size(),
+            )
             return cached_model
 
         # Model not in cache - check memory and clear if needed
@@ -242,9 +287,46 @@ def get_cached_model(model_path: str) -> Optional[Any]:
 
         logger.debug(f"Loading model from path: {model_path}")
 
+        # Avoid static analysis complaining ORTModelForSeq2SeqLM may be None by casting to Any
+        from typing import cast
+
+        model_cls = cast(Any, ORTModelForSeq2SeqLM)
+
+        # Determine whether to enable cache (past-key-values). We no longer pass
+        # custom `file_names` to `from_pretrained`; caller will ensure standard
+        # filenames are present in `model_path`.
+        use_cache_flag = False
+        try:
+            if isinstance(model_config, OnnxConfig):
+                dec_with_past = getattr(model_config, "decoder_onnx_model_with_past", None)
+
+                detected_use_cache = getattr(model_config, "use_cache", None)
+                if detected_use_cache is None and dec_with_past:
+                    try:
+                        dec_with_past_path = os.path.join(model_path, dec_with_past)
+                        detected_use_cache = CachedSessions.pkv_detection.get_or_add(
+                            dec_with_past_path,
+                            lambda: onnx_decoder_has_past_support(dec_with_past_path),
+                        )
+                        try:
+                            model_config.use_cache = detected_use_cache
+                        except Exception:
+                            # model_config may be frozen/immutable; ignore
+                            pass
+                    except Exception:
+                        detected_use_cache = False
+
+                use_cache_flag = bool(detected_use_cache)
+        except Exception:
+            use_cache_flag = False
+
+        # Load the model using only `use_cache` (caller is responsible for
+        # ensuring standard filenames are used inside `model_path`).
         model = CachedSessions.models.get_or_add(
             model_path,
-            lambda: ORTModelForSeq2SeqLM.from_pretrained(model_path, use_cache=False),
+            lambda: model_cls.from_pretrained(
+                model_path, use_cache=use_cache_flag, local_files_only=True
+            ),
         )
 
         # Compatibility patch for newer transformers versions

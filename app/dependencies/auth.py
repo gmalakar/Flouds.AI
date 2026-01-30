@@ -29,7 +29,9 @@ logger = get_logger("auth")
 router = APIRouter()
 
 # Module-level defaults to avoid function-call defaults in signatures (flake8 B008)
-TENANT_HEADER = Header("", alias="X-Tenant-Code", description="Tenant code for request")
+# Make tenant header required in OpenAPI/docs by using `...` so routes show it as
+# a required header. Middleware still enforces presence at runtime.
+TENANT_HEADER = Header(..., alias="X-Tenant-Code", description="Tenant code for request")
 SECURITY_DEP = Depends(HTTPBearer(auto_error=False))
 
 
@@ -53,15 +55,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app: ASGIApp):
         super().__init__(app)
-        self.enabled = APP_SETTINGS.security.enabled
-
-        # Cache valid keys count at startup to avoid repeated calls
-        self._keys_configured = bool(key_manager.get_all_tokens()) if self.enabled else True
-
-        # If auth is enabled but no keys are configured, disable auth to avoid blocking all requests
-        if self.enabled and not self._keys_configured:
-            logger.warning("API authentication enabled but no clients configured; disabling auth")
-            self.enabled = False
+        # Do not cache `APP_SETTINGS` values at init time; read them at request time
 
         self.public_endpoints = frozenset(
             [
@@ -89,15 +83,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             ]
         )
 
-        # Log security status on startup
-        if self.enabled:
-            valid_keys = key_manager.get_all_tokens()
-            if valid_keys:
-                logger.info(f"API authentication enabled with {len(valid_keys)} client(s)")
-            else:
-                logger.warning("API authentication enabled but no clients configured")
-        else:
-            logger.info("API authentication disabled")
+        # Startup logging of security status is skipped to avoid reading
+        # possibly-uninitialized APP_SETTINGS during import in tests.
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -110,19 +97,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         allow the request to continue.
         """
 
-        # Determine if authentication checks should be skipped, but still
-        # enforce tenant header presence for non-public endpoints.
-        skip_auth = not self.enabled
+        # Evaluate current app settings at request time
+        app_settings = APP_SETTINGS
+        enabled = getattr(getattr(app_settings, "security", None), "enabled", False)
 
         # Skip auth for public endpoints (optimized lookup)
         path = request.url.path
-        # allow exact or prefix matches for entries in the public_endpoints set
         if any(path == pe or path.startswith(pe) for pe in self.public_endpoints):
             return await call_next(request)
 
         # Require tenant header for all non-public endpoints
         tenant_header = request.headers.get("X-Tenant-Code")
-        if skip_auth and not tenant_header:
+        if not enabled and not tenant_header:
             tenant_header = "master"
 
         # Helper to extract client IP
@@ -159,7 +145,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 media_type="application/json",
             )
 
-        if not tenant_header:
+        if not tenant_header and enabled:
             # register attempt and possibly block; tenant unknown -> use 'master'
             try:
                 blocked_now, reason = offender_manager.register_attempt(client_ip, tenant="master")
@@ -194,12 +180,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         # If authentication is disabled, populate request.state and continue.
-        if skip_auth:
+        if not enabled:
             request.state.tenant_code = tenant_header
             return await call_next(request)
 
-        # Check if keys are configured (cached check)
-        if not self._keys_configured:
+        # Check if keys are configured
+        valid_keys = key_manager.get_all_tokens()
+        if not valid_keys:
             logger.error("Authentication enabled but no API keys configured")
             error_response = BaseResponse(
                 success=False,

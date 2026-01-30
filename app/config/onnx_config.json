@@ -28,7 +28,7 @@
         "pooling_strategy": "mean",
         "chunk_logic": "sentence",
         "force_pooling": true,
-        "encoder_onnx_model": "model.onnx"
+        "encoder_onnx_model": "model.dynamic-int8.onnx"
     },
 
     "bge-small-en-v1.5": {
@@ -90,27 +90,6 @@
         "force_pooling": true,
         "encoder_onnx_model": "model_optimized.onnx"
     },
-
-    "phi-2": {
-        "max_length": 2048,
-        "model_folder_name": "llm/phi-2",
-        "tasks": ["llm", "prompt"],
-        "chunk_logic": "sentence",
-        "chunk_overlap": 1,
-        "encoder_onnx_model": "model.onnx",
-        "decoder_onnx_model": "model.onnx",
-         "inputnames": {
-            "use_decoder_input": true,
-            "input": "input_ids",
-            "mask": "attention_mask",
-            "decoder_input_name": "decoder_input_ids"
-        },
-       "decoder_inputnames": {
-            "encoder_output": "encoder_hidden_states",
-            "input": "input_ids",
-            "mask": "encoder_attention_mask"
-        }
-    },
 	"sentence-t5-base": {
 	    "max_length": 512,
 	    "model_folder_name": "fe/sentence-t5-base",
@@ -122,16 +101,6 @@
 	    "force_pooling": true,
         "encoder_onnx_model": "model.onnx"
 	},
-
-
-    "gemma-2b-it": {
-        "max_length": 2048,
-        "model_folder_name": "llm/gemma-2b-it",
-        "tasks": ["llm", "prompt"],
-        "chunk_logic": "sentence",
-        "chunk_overlap": 1,
-        "encoder_onnx_model": "model.onnx"
-    },
 
     "deepseek-coder-1.3b-instruct": {
         "max_length": 2048,
@@ -174,7 +143,7 @@
         "tasks": ["summarization", "prompt"],
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
-        "encoder_onnx_model": "encoder_model_optimized.onnx",
+        "encoder_onnx_model": "encoder_model.onnx",
         "decoder_onnx_model": "decoder_model.onnx",
         "special_tokens_map_path": "special_tokens_map.json",
         "use_seq2seqlm": true,
@@ -191,14 +160,13 @@
         "tasks": ["summarization", "prompt"],
         "chunk_logic": "sentence",
         "chunk_overlap": 1,
-
         "decoder_inputnames": {
             "encoder_output": "encoder_hidden_states",
             "input": "input_ids",
             "mask": "encoder_attention_mask"
         },
 
-        "encoder_onnx_model": "encoder_model_optimized.onnx",
+        "encoder_onnx_model": "encoder_model.onnx",
         "decoder_onnx_model": "decoder_model.onnx",
         "special_tokens_map_path": "special_tokens_map.json",
         "generation_config_path": "generation_config.json",
